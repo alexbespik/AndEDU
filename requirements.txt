@@ -1,0 +1,16 @@
+# Web Framework & Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.12
+
+# AI / Gemini API
+google-genai>=1.0.0
+
+# Document & Multimodal Parsing
+pypdf>=5.0.0
+python-docx>=1.1.0
+nbformat>=5.10.0
+
+# Configuration & Data Validation
+pydantic>=2.8.0
+python-dotenv>=1.0.1
