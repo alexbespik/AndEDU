@@ -2,7 +2,8 @@
 from google import genai
 from google.genai import types
 import json
-client = genai.Client(api_key="AIzaSyYourActualKeyHere...")
+import os
+client = genai.Client(os.environ["api_KEY"])
 # 1. Define the tool structure for Gemini
 puzzle_tool = types.Tool(
     function_declarations=[

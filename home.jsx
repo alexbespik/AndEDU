@@ -1,68 +1,81 @@
-import React, { useState } from 'react';
-import { Terminal, Cpu, Play, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Terminal, Cpu, Play, CheckCircle2, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 
 const EduIDE = () => {
-  // Sample data received from your Python Gemini tool:
-  const [puzzleData, setPuzzleData] = useState({
-    question: "Hi! Endless loops in Python can crash your PC. Select a condition that lets it run safely without crashing:",
-    code_prefix: "i = 1\nwhile ",
-    code_suffix: ":\n    print(\"rush\")\n    i += 1",
-    variants: ["i < 5", "True", "i == 1", "i > 1000000"],
-    correct_answer: "i < 5",
-    explanation: "Setting 'i < 5' allows 4 iterations and then cleanly terminates."
-  });
-
+  const [puzzleData, setPuzzleData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [slottedAnswer, setSlottedAnswer] = useState(null);
-  const [evaluation, setEvaluation] = useState(null); // 'correct' | 'wrong' | null
+  const [evaluation, setEvaluation] = useState(null);
   const [terminalOutput, setTerminalOutput] = useState([
-    "[SYSTEM] Ready. Drop a condition into the code slot."
+    "[SYSTEM] Ready. Click 'Generate Puzzle with AI' to call Gemini via Python backend."
   ]);
 
-  // Handle Drag & Drop
+  // Fetch puzzle from Python FastAPI Backend
+  const fetchNewPuzzle = async () => {
+    setLoading(true);
+    setSlottedAnswer(null);
+    setEvaluation(null);
+    setTerminalOutput(["[MCP_DISPATCH] Sending notes to Gemini...", "[CALLING] create_code_puzzle tool..."]);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/generate-puzzle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          notes: "Loops in Python: while loops repeat as long as a condition is True. If condition never becomes False (like while True or when i never increments), it results in an infinite loop that crashes or locks CPU memory. Safe loops require clear boundary conditions."
+        })
+      });
+
+      const data = await response.json();
+      setPuzzleData(data);
+      setTerminalOutput([
+        "[MCP_RECEIVED] Puzzle generated successfully by Gemini.",
+        "[READY] Drop an answer into the condition slot."
+      ]);
+    } catch (err) {
+      setTerminalOutput([
+        `[ERROR] Could not connect to Python backend at http://localhost:8000`,
+        `Make sure server.py is running!`
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNewPuzzle();
+  }, []);
+
   const handleDragStart = (e, variant) => {
     e.dataTransfer.setData("text/plain", variant);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
-    const droppedToken = e.dataTransfer.getData("text/plain");
-    applySelection(droppedToken);
+    const token = e.dataTransfer.getData("text/plain");
+    applySelection(token);
   };
 
   const applySelection = (token) => {
+    if (!puzzleData) return;
     setSlottedAnswer(token);
-    
-    // Evaluate answer
+
     if (token === puzzleData.correct_answer) {
       setEvaluation('correct');
       setTerminalOutput([
-        `[SIMULATING]: while ${token}:`,
-        "rush", "rush", "rush", "rush",
-        "[SUCCESS]: Loop terminated safely at i=5. Memory stable."
-      ]);
-    } else if (token === "True" || token === "i == 1") {
-      setEvaluation('wrong');
-      setTerminalOutput([
-        `[SIMULATING]: while ${token}:`,
-        "rush", "rush", "rush", "rush", "rush", "rush...",
-        "[CRITICAL]: Endless loop detected! Browser safety kill triggered."
+        `[SIMULATION]: ${puzzleData.loop_statement} ${token}:`,
+        ...(puzzleData.safe_terminal_output || ["Loop executed safely."]),
+        "[SUCCESS] Test passed cleanly."
       ]);
     } else {
       setEvaluation('wrong');
       setTerminalOutput([
-        `[SIMULATING]: while ${token}:`,
-        "[WARNING]: Condition evaluated to False immediately. Loop never ran."
+        `[SIMULATION]: ${puzzleData.loop_statement} ${token}:`,
+        ...(puzzleData.unsafe_terminal_output || ["[CRITICAL] Memory limit exceeded. Safety break."])
       ]);
     }
   };
 
-  const resetSlot = () => {
-    setSlottedAnswer(null);
-    setEvaluation(null);
-    setTerminalOutput(["[SYSTEM] Reset. Choose an answer to place in the loop."]);
-  };
-
-  // VS Code Theme Styles
   const theme = {
     bgApp: '#181818',
     bgSidebar: '#252526',
@@ -77,25 +90,45 @@ const EduIDE = () => {
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: theme.bgApp, color: theme.textMain, fontFamily: theme.font }}>
       
-      {/* Left: AI Question & Drag Source */}
+      {/* Sidebar: AI Question & Drag Source */}
       <aside style={{ width: '320px', backgroundColor: theme.bgSidebar, borderRight: `1px solid ${theme.border}`, display: 'flex', flexDirection: 'column', padding: '20px' }}>
-        <div style={{ fontSize: '11px', fontWeight: 'bold', color: theme.textDim, marginBottom: '12px', textTransform: 'uppercase' }}>
-          AI Question
-        </div>
-        <p style={{ fontSize: '13px', lineHeight: '1.5', color: '#e2e8f0', marginBottom: '24px' }}>
-          {puzzleData.question}
-        </p>
+        <button 
+          onClick={fetchNewPuzzle}
+          disabled={loading}
+          style={{
+            backgroundColor: theme.accent,
+            color: 'white',
+            border: 'none',
+            padding: '10px 14px',
+            borderRadius: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            marginBottom: '20px'
+          }}
+        >
+          {loading ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+          {loading ? "Calling Gemini..." : "Generate New Puzzle"}
+        </button>
 
         <div style={{ fontSize: '11px', fontWeight: 'bold', color: theme.textDim, marginBottom: '8px', textTransform: 'uppercase' }}>
-          Draggable Variants
+          AI Inquiry
         </div>
-        <p style={{ fontSize: '11px', color: theme.textDim, margin: '0 0 12px 0' }}>
-          Drag a block or click to slot it in:
+        <p style={{ fontSize: '13px', lineHeight: '1.5', color: '#e2e8f0', marginBottom: '20px' }}>
+          {puzzleData ? puzzleData.question : "Loading puzzle from AI..."}
         </p>
 
-        {/* Drag-and-Drop Chips */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {puzzleData.variants.map((v) => (
+        <div style={{ fontSize: '11px', fontWeight: 'bold', color: theme.textDim, marginBottom: '10px', textTransform: 'uppercase' }}>
+          Variants (Gemini Generated)
+        </div>
+
+        {/* Draggable Chips */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {puzzleData && puzzleData.variants.map((v) => (
             <div
               key={v}
               draggable
@@ -110,18 +143,16 @@ const EduIDE = () => {
                 fontSize: '13px',
                 color: '#9cdcfe',
                 display: 'flex',
-                alignItems: 'center',
                 justifyContent: 'space-between',
-                transition: 'all 0.15s ease'
+                alignItems: 'center'
               }}
             >
               <span>{v}</span>
-              <span style={{ fontSize: '10px', color: theme.textDim }}>Drag ⠿</span>
+              <span style={{ fontSize: '10px', color: theme.textDim }}>⠿</span>
             </div>
           ))}
         </div>
 
-        {/* Feedback Area */}
         {evaluation && (
           <div style={{ 
             marginTop: 'auto', 
@@ -130,86 +161,77 @@ const EduIDE = () => {
             backgroundColor: evaluation === 'correct' ? '#064e3b' : '#7f1d1d',
             border: `1px solid ${evaluation === 'correct' ? '#10b981' : '#f87171'}` 
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '12px', color: 'white', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '12px', color: 'white', marginBottom: '4px' }}>
               {evaluation === 'correct' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-              {evaluation === 'correct' ? 'Safe Code Created!' : 'Unsafe / Incorrect Logic'}
+              {evaluation === 'correct' ? 'Correct Logic' : 'Crash / Unsafe Code'}
             </div>
-            <p style={{ fontSize: '11px', margin: 0, color: '#e2e8f0', lineHeight: '1.4' }}>
-              {puzzleData.explanation}
-            </p>
+            <p style={{ fontSize: '11px', margin: 0, color: '#e2e8f0' }}>{puzzleData.explanation}</p>
           </div>
         )}
       </aside>
 
-      {/* Center: Code Editor with Slot */}
+      {/* Editor Space */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        
-        {/* Editor Title Bar */}
-        <div style={{ height: '35px', backgroundColor: theme.bgSidebar, display: 'flex', alignItems: 'center', padding: '0 15px', justifyContent: 'space-between', borderBottom: `1px solid ${theme.border}` }}>
-          <span style={{ fontSize: '12px', color: '#9cdcfe' }}>loop_problem_space.py</span>
+        <div style={{ height: '35px', backgroundColor: theme.bgSidebar, display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between', borderBottom: `1px solid ${theme.border}` }}>
+          <span style={{ fontSize: '12px', color: '#9cdcfe' }}>problem_space.py</span>
           {slottedAnswer && (
-            <button onClick={resetSlot} style={{ background: 'transparent', border: 'none', color: theme.textDim, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
-              <RefreshCw size={12} /> Clear Slot
+            <button onClick={() => { setSlottedAnswer(null); setEvaluation(null); }} style={{ background: 'transparent', border: 'none', color: theme.textDim, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+              <RefreshCw size={12} /> Reset Slot
             </button>
           )}
         </div>
 
         {/* Code Canvas */}
         <div style={{ flex: 1, backgroundColor: theme.bgEditor, padding: '24px', fontSize: '15px', lineHeight: '1.8' }}>
-          <div><span style={{ color: '#858585', marginRight: '16px' }}>1</span><span style={{ color: '#569cd6' }}>i</span> = 1</div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', margin: '4px 0' }}>
-            <span style={{ color: '#858585', marginRight: '16px' }}>2</span>
-            <span style={{ color: '#c586c0', marginRight: '8px' }}>while</span>
-            
-            {/* THE DROP ZONE / SLOT */}
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              style={{
-                minWidth: '120px',
-                height: '32px',
-                border: slottedAnswer ? `1px solid ${evaluation === 'correct' ? '#10b981' : '#f87171'}` : '2px dashed #4f4f56',
-                borderRadius: '4px',
-                backgroundColor: slottedAnswer ? '#1e293b' : '#262626',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '0 12px',
-                marginRight: '6px',
-                color: slottedAnswer ? '#9cdcfe' : '#858585',
-                fontSize: '13px',
-                fontWeight: 'bold',
-                transition: 'all 0.2s'
-              }}
-            >
-              {slottedAnswer ? slottedAnswer : "DROP HERE"}
-            </div>
-            
-            <span style={{ color: '#d4d4d4' }}>:</span>
-          </div>
-
-          <div><span style={{ color: '#858585', marginRight: '16px' }}>3</span><span style={{ paddingLeft: '24px', color: '#dcdcaa' }}>print</span>(<span style={{ color: '#ce9178' }}>"rush"</span>)</div>
-          <div><span style={{ color: '#858585', marginRight: '16px' }}>4</span><span style={{ paddingLeft: '24px', color: '#569cd6' }}>i</span> += 1</div>
+          {puzzleData && (
+            <>
+              <div><span style={{ color: '#858585', marginRight: '16px' }}>1</span>{puzzleData.code_line_1}</div>
+              <div style={{ display: 'flex', alignItems: 'center', margin: '4px 0' }}>
+                <span style={{ color: '#858585', marginRight: '16px' }}>2</span>
+                <span style={{ color: '#c586c0', marginRight: '8px' }}>{puzzleData.loop_statement}</span>
+                
+                {/* Drop Zone */}
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                  style={{
+                    minWidth: '120px',
+                    height: '30px',
+                    border: slottedAnswer ? `1px solid ${evaluation === 'correct' ? '#10b981' : '#f87171'}` : '2px dashed #555',
+                    borderRadius: '4px',
+                    backgroundColor: slottedAnswer ? '#1e293b' : '#262626',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 12px',
+                    marginRight: '6px',
+                    color: slottedAnswer ? '#9cdcfe' : '#858585',
+                    fontSize: '13px'
+                  }}
+                >
+                  {slottedAnswer || "DROP HERE"}
+                </div>
+                <span>:</span>
+              </div>
+              <div><span style={{ color: '#858585', marginRight: '16px' }}>3</span><pre style={{ display: 'inline', margin: 0, fontFamily: 'inherit' }}>{puzzleData.code_body}</pre></div>
+            </>
+          )}
         </div>
 
-        {/* Bottom: Simulated Terminal */}
+        {/* Terminal */}
         <div style={{ height: '180px', backgroundColor: '#141414', borderTop: `1px solid ${theme.border}`, display: 'flex', flexDirection: 'column' }}>
           <div style={{ height: '28px', backgroundColor: theme.bgSidebar, display: 'flex', alignItems: 'center', padding: '0 16px', gap: '8px' }}>
             <Terminal size={12} color="#10b981" />
-            <span style={{ fontSize: '11px', color: theme.textDim, fontWeight: 'bold' }}>SAFE EXECUTION CONSOLE</span>
+            <span style={{ fontSize: '11px', color: theme.textDim, fontWeight: 'bold' }}>TERMINAL</span>
           </div>
           <div style={{ padding: '12px 16px', overflowY: 'auto', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {terminalOutput.map((line, i) => (
-              <span key={i} style={{ 
-                color: line.includes('[CRITICAL]') ? '#f87171' : line.includes('[SUCCESS]') ? '#4ade80' : '#cccccc' 
-              }}>
-                {line}
+            {terminalOutput.map((l, i) => (
+              <span key={i} style={{ color: l.includes('[CRITICAL]') || l.includes('[ERROR]') ? '#f87171' : l.includes('[SUCCESS]') ? '#4ade80' : '#cccccc' }}>
+                {l}
               </span>
             ))}
           </div>
         </div>
-
       </main>
     </div>
   );
