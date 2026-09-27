@@ -1013,16 +1013,27 @@ const EduIDE = () => {
     setBriefLoading(true);
 
     try {
-      const res = await fetch("http://localhost:8000/api/tutor-brief", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          problem,
-          chapter: currentChapter,
-          mode: appMode,
-          level: currentLevel
-        })
+      let res;
+      const briefBody = JSON.stringify({
+        problem,
+        chapter: currentChapter,
+        mode: appMode,
+        level: currentLevel
       });
+
+      try {
+        res = await fetch("http://127.0.0.1:8000/api/tutor-brief", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: briefBody
+        });
+      } catch (e1) {
+        res = await fetch("http://localhost:8000/api/tutor-brief", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: briefBody
+        });
+      }
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1047,7 +1058,7 @@ const EduIDE = () => {
       // Local fallback briefing: ultra-short, concise, leading
       const isMath = appMode === 'math' || problem.mode === 'math';
       const fallbackBrief = isMath 
-        ? `🎯 **Task**: Solve for ${problem.guiding_question}.\n\n💡 **Lead**: What differentiation or integration rule applies directly to this term?\n\n❓ **Check**: Does your chosen candidate preserve signs and exponent boundaries?`
+        ? `🎯 **Task**: Solve for ${problem.guiding_question || problem.title}.\n\n💡 **Lead**: What differentiation or integration rule applies directly to this term?\n\n❓ **Check**: Does your chosen candidate preserve signs and exponent boundaries?`
         : `🎯 **Task**: Identify the loop invariant condition.\n\n💡 **Lead**: Look at the variable mutation on each iteration step.\n\n❓ **Check**: Which boundary test guarantees the loop terminates without crashing?`;
 
       setChatHistory(prev => [
@@ -1639,58 +1650,7 @@ const EduIDE = () => {
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const newProblem = await res.json();
-
-      const updatedChapters = (curriculum.chapters || []).map(ch => {
-        if (ch.id === targetChapter.id) {
-          return {
-            ...ch,
-            problems: [...(ch.problems || []), newProblem]
-          };
-        }
-        return ch;
-      });
-
-      let gIdx = 0;
-      const updatedFlatProblems = [];
-      const updatedProblemStates = { ...problemStates };
-      let newProbGlobalIdx = 0;
-
-      updatedChapters.forEach(ch => {
-        ch.problems = (ch.problems || []).map(p => {
-          const np = { ...p, chapter_id: ch.id, global_index: gIdx };
-          if (ch.id === targetChapter.id && p.title === newProblem.title) {
-            newProbGlobalIdx = gIdx;
-          }
-          updatedFlatProblems.push(np);
-          if (!updatedProblemStates[gIdx]) {
-            updatedProblemStates[gIdx] = {
-              slotChoice: null,
-              assembledBlocks: [],
-              availableBank: np.blocks_pool ? [...np.blocks_pool] : [],
-              writtenCode: np.starter_code !== undefined ? np.starter_code : (np.type === 'code_blank' ? "" : "# Write code here\n"),
-              evaluation: null,
-              quizChoice: null
-            };
-          }
-          gIdx++;
-          return np;
-        });
-      });
-
-      setCurriculum({
-        ...curriculum,
-        chapters: updatedChapters,
-        problems: updatedFlatProblems
-      });
-      setProblemStates(updatedProblemStates);
-      setActiveChapterId(targetChapter.id);
-      setActiveProblemIndex(newProbGlobalIdx);
-      setActiveTab("editor");
-
-      setTerminalOutput(prev => [
-        ...prev,
-        `[SUCCESS] 🧩 Added practice exercise: "${newProblem.title}" to ${targetChapter.title}.`
-      ]);
+      injectProblemIntoCurriculum(newProblem, targetChapter.id);
     } catch (err) {
       console.warn("Failed to generate problem:", err);
       setTerminalOutput(prev => [
@@ -1700,6 +1660,72 @@ const EduIDE = () => {
     } finally {
       setIsGeneratingProblem(false);
     }
+  };
+
+  const injectProblemIntoCurriculum = (newProblem, customChapterId = null) => {
+    if (!newProblem) return;
+    const targetChapter = (curriculum.chapters || []).find(c => c.id === (customChapterId || currentChapter?.id)) || (curriculum.chapters || [])[0];
+    if (!targetChapter) return;
+
+    // Check if problem already exists by title
+    const existingIdx = (curriculum.problems || []).findIndex(p => p.title === newProblem.title);
+    if (existingIdx !== -1) {
+      setActiveProblemIndex(existingIdx);
+      setActiveTab("editor");
+      return;
+    }
+
+    const updatedChapters = (curriculum.chapters || []).map(ch => {
+      if (ch.id === targetChapter.id) {
+        return {
+          ...ch,
+          problems: [...(ch.problems || []), newProblem]
+        };
+      }
+      return ch;
+    });
+
+    let gIdx = 0;
+    const updatedFlatProblems = [];
+    const updatedProblemStates = { ...problemStates };
+    let newProbGlobalIdx = 0;
+
+    updatedChapters.forEach(ch => {
+      ch.problems = (ch.problems || []).map(p => {
+        const np = { ...p, chapter_id: ch.id, global_index: gIdx };
+        if (ch.id === targetChapter.id && (p.title === newProblem.title || p.id === newProblem.id)) {
+          newProbGlobalIdx = gIdx;
+        }
+        updatedFlatProblems.push(np);
+        if (!updatedProblemStates[gIdx]) {
+          updatedProblemStates[gIdx] = {
+            slotChoice: null,
+            assembledBlocks: [],
+            availableBank: np.blocks_pool ? [...np.blocks_pool] : [],
+            writtenCode: np.starter_code !== undefined ? np.starter_code : (np.type === 'code_blank' ? "" : "# Write code here\n"),
+            evaluation: null,
+            quizChoice: null
+          };
+        }
+        gIdx++;
+        return np;
+      });
+    });
+
+    setCurriculum({
+      ...curriculum,
+      chapters: updatedChapters,
+      problems: updatedFlatProblems
+    });
+    setProblemStates(updatedProblemStates);
+    setActiveChapterId(targetChapter.id);
+    setActiveProblemIndex(newProbGlobalIdx);
+    setActiveTab("editor");
+
+    setTerminalOutput(prev => [
+      ...prev,
+      `[TUTOR] 🎯 Tailored exercise ready: "${newProblem.title}" in ${targetChapter.title}.`
+    ]);
   };
 
   // ---------------------------------------------------------------------------
@@ -2041,14 +2067,18 @@ sys.stderr = _sys_err
 
     setChatLoading(true);
 
-    const newHistory = [...chatHistory, { role: 'user', content: msg }];
+    const cleanMsg = msg.trim();
+    const newHistory = [...chatHistory, { role: 'user', content: cleanMsg }];
     setChatHistory(newHistory);
 
     try {
       let res;
       const chatBody = JSON.stringify({
-        message: msg,
-        history: newHistory,
+        message: cleanMsg,
+        history: newHistory.map(m => ({
+          role: m.role || 'user',
+          content: m.content || ''
+        })),
         puzzle_context: {
           problem: currentProblem,
           chapter: currentChapter,
@@ -2072,15 +2102,27 @@ sys.stderr = _sys_err
         });
       }
 
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errDetail = errorData.detail 
+          ? (typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail))
+          : `HTTP ${res.status}`;
+        throw new Error(errDetail);
+      }
+
       const data = await res.json();
       setChatHistory(prev => [
         ...prev,
         { role: 'model', content: data.reply || "I am analyzing your reasoning..." }
       ]);
+
+      if (data.mutated_puzzle) {
+        injectProblemIntoCurriculum(data.mutated_puzzle);
+      }
     } catch (err) {
       setChatHistory(prev => [
         ...prev,
-        { role: 'model', content: `Mentor connection error: ${err.message}` }
+        { role: 'model', content: `Mentor note: ${err.message}` }
       ]);
     } finally {
       setChatLoading(false);

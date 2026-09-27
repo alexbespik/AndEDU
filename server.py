@@ -33,9 +33,12 @@ app.add_middleware(
 # Models in order of quota resilience & latency
 CANDIDATE_MODELS = [
     "gemini-3.1-flash-lite", 
-    "gemini-3.8-flash", 
+    "gemini-3.5-flash-lite", 
+    "gemini-flash-lite-latest",
     "gemini-3.5-flash", 
-    "gemini-3.5-flash-lite"
+    "gemini-3.6-flash", 
+    "gemini-3.7-flash", 
+    "gemini-3.8-flash"
 ]
 
 def call_gemini(contents, **kwargs):
@@ -50,13 +53,18 @@ def call_gemini(contents, **kwargs):
             )
         except ClientError as e:
             last_err = e
-            if e.code in [429, 404, 503]:
-                print(f"[MODEL FALLBACK] Model {model_id} returned {e.code}, attempting fallback...")
+            err_str = str(e).lower()
+            if getattr(e, "code", None) in [429, 404, 500, 503] or "quota" in err_str or "resource_exhausted" in err_str:
+                print(f"[MODEL FALLBACK] Model {model_id} returned code {getattr(e, 'code', 'unknown')}, attempting fallback...")
                 continue
             raise e
         except Exception as e:
             last_err = e
-            print(f"[MODEL FALLBACK] Model {model_id} error: {e}, attempting fallback...")
+            err_str = str(e).lower()
+            if "quota" in err_str or "429" in err_str or "resource_exhausted" in err_str:
+                print(f"[MODEL FALLBACK] Model {model_id} error {e}, attempting fallback...")
+                continue
+            print(f"[MODEL FALLBACK] Model {model_id} unexpected error: {e}, attempting fallback...")
             continue
     if last_err:
         raise last_err
@@ -443,9 +451,9 @@ class ExecuteCodePayload(BaseModel):
     test_code: Optional[str] = ""
 
 class ChatPayload(BaseModel):
-    puzzle_context: Dict[str, Any]
-    history: List[Dict[str, str]]
-    message: str
+    puzzle_context: Optional[Dict[str, Any]] = {}
+    history: Optional[List[Dict[str, Any]]] = []
+    message: Optional[str] = ""
 
 class BriefPayload(BaseModel):
     problem: Dict[str, Any]
@@ -1652,13 +1660,33 @@ async def upload_multimodal(
 
 @app.post("/api/tutor-chat")
 async def tutor_chat(payload: ChatPayload):
-    system_text = f"{SOCRATIC_PROMPT}\nCURRENT LESSON CONTEXT:\n{json.dumps(payload.puzzle_context)}"
+    p_ctx = payload.puzzle_context or {}
+    prob = p_ctx.get("problem") or {}
+    ch = p_ctx.get("chapter") or {}
+    mode = (p_ctx.get("mode") or prob.get("mode") or "code").lower()
+    cid = ch.get("id") or prob.get("chapter_id") or 1
+    ctitle = ch.get("title") or prob.get("chapter_title") or "Chapter"
+
+    system_text = f"{SOCRATIC_PROMPT}\nCURRENT LESSON CONTEXT:\n{json.dumps(p_ctx)}"
     
-    contents = [
-        types.Content(role=m["role"], parts=[types.Part.from_text(text=m["content"])]) 
-        for m in payload.history
-    ]
-    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=payload.message)]))
+    contents = []
+    for m in (payload.history or []):
+        text = str(m.get("content") or "").strip()
+        if not text:
+            continue
+        role = "model" if m.get("role") in ["model", "assistant"] else "user"
+        # Avoid duplicating consecutive identical turns
+        if contents and contents[-1].role == role and contents[-1].parts and contents[-1].parts[0].text == text:
+            continue
+        contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+
+    user_msg = (payload.message or "").strip()
+    if user_msg:
+        if not (contents and contents[-1].role == "user" and contents[-1].parts and contents[-1].parts[0].text == user_msg):
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_msg)]))
+
+    if not contents:
+        contents = [types.Content(role="user", parts=[types.Part.from_text(text="I am ready to learn.")])]
 
     try:
         response = call_gemini(
@@ -1670,71 +1698,101 @@ async def tutor_chat(payload: ChatPayload):
             )
         )
 
-        if response.function_calls:
-            for call in response.function_calls:
-                # 1. Slot Puzzle tool call
-                if call.name == "emit_slot_puzzle":
-                    p = dict(call.args)
-                    p["type"] = "slot_plugin"
-                    p["difficulty"] = "Easy"
-                    return {
-                        "reply": "💡 Here is a quick one-time plug-in exercise to build intuition!",
-                        "mutated_puzzle": p
-                    }
-                # 2. Block Builder tool call
-                elif call.name == "build_block_puzzle":
-                    p = dict(call.args)
-                    p["type"] = "block_builder"
-                    p["difficulty"] = "Moderate"
-                    return {
-                        "reply": "🧩 Here is a code block assembly puzzle for you to practice!",
-                        "mutated_puzzle": p
-                    }
-                # 3. Coding Challenge tool call
-                elif call.name == "build_coding_challenge":
-                    p = dict(call.args)
-                    p["type"] = "code_write"
-                    p["difficulty"] = "Hard"
-                    return {
-                        "reply": "🔥 Here is a rigorous coding challenge to test your mastery!",
-                        "mutated_puzzle": p
-                    }
-                # 4. Change Assignment tool call
-                elif call.name == "change_assignment":
-                    args = dict(call.args)
-                    target = args.get("target_type", "slot_plugin")
-                    prompt = f"Create a single {target} puzzle for topic: {args['new_topic']}. Reason: {args['reason']}"
-                    
-                    wrapper = curriculum_tools_wrapper
-                    if target == "slot_plugin":
-                        wrapper = types.Tool(function_declarations=[slot_puzzle_tool])
-                    elif target == "code_write":
-                        wrapper = types.Tool(function_declarations=[coding_challenge_tool])
-                    else:
-                        wrapper = types.Tool(function_declarations=[block_puzzle_tool])
+        for call in (response.function_calls or []):
+            # 1. Slot Puzzle tool call
+            if call.name == "emit_slot_puzzle":
+                p = dict(call.args)
+                p["type"] = "slot_plugin"
+                p["difficulty"] = "Easy"
+                norm = normalize_single_problem(p, cid, ctitle, 999, mode)
+                return {
+                    "reply": f"💡 **Intuition Exercise**: {p.get('guiding_question', 'Try this plug-in exercise to build intuition!')}",
+                    "mutated_puzzle": norm
+                }
+            # 2. Block Builder tool call
+            elif call.name == "build_block_puzzle":
+                p = dict(call.args)
+                p["type"] = "block_builder"
+                p["difficulty"] = "Moderate"
+                norm = normalize_single_problem(p, cid, ctitle, 999, mode)
+                return {
+                    "reply": f"🧩 **Block Assembly Challenge**: {p.get('guiding_question', 'Assemble the blocks in the correct logical sequence!')}",
+                    "mutated_puzzle": norm
+                }
+            # 3. Coding Challenge tool call
+            elif call.name == "build_coding_challenge":
+                p = dict(call.args)
+                p["type"] = "code_write"
+                p["difficulty"] = "Hard"
+                norm = normalize_single_problem(p, cid, ctitle, 999, mode)
+                return {
+                    "reply": f"🔥 **Rigorous Challenge**: {p.get('guiding_question', 'Implement the solution from scratch to prove your mastery!')}",
+                    "mutated_puzzle": norm
+                }
+            # 4. Change Assignment tool call
+            elif call.name == "change_assignment":
+                args = dict(call.args)
+                target = args.get("target_type", "slot_plugin")
+                reason = args.get("reason", "Customizing your learning pace")
+                topic = args.get("new_topic", "core concepts")
+                prompt = f"Create a single {target} puzzle for topic: {topic}. Pedagogical rationale: {reason}."
+                
+                if target == "code_write":
+                    wrapper = types.Tool(function_declarations=[coding_challenge_tool])
+                elif target == "block_builder":
+                    wrapper = types.Tool(function_declarations=[block_puzzle_tool])
+                else:
+                    wrapper = types.Tool(function_declarations=[slot_puzzle_tool])
 
-                    mut_resp = call_gemini(
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            tools=[wrapper],
-                            tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY"))
-                        )
+                mut_resp = call_gemini(
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        tools=[wrapper],
+                        tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY"))
                     )
-                    new_puzzle = None
-                    for pcall in mut_resp.function_calls:
-                        new_puzzle = dict(pcall.args)
-                        new_puzzle["type"] = target
-                        break
+                )
+                new_puzzle = None
+                for pcall in (mut_resp.function_calls or []):
+                    new_puzzle = dict(pcall.args)
+                    new_puzzle["type"] = target
+                    break
 
-                    return {
-                        "reply": f"🔄 **Assignment Adjusted**: {args['reason']}. I've tailored a new exercise for you!",
-                        "mutated_puzzle": new_puzzle
-                    }
+                norm = None
+                if new_puzzle:
+                    norm = normalize_single_problem(new_puzzle, cid, ctitle, 999, mode)
 
-        return {"reply": response.text}
+                return {
+                    "reply": f"🔄 **Assignment Adjusted**: {reason}. I've tailored a new exercise on **{topic}** for you!",
+                    "mutated_puzzle": norm
+                }
+
+        reply_text = ""
+        try:
+            reply_text = response.text
+        except Exception:
+            pass
+
+        if not reply_text:
+            try:
+                parts = response.candidates[0].content.parts
+                reply_text = "".join([p.text for p in parts if hasattr(p, "text") and p.text])
+            except Exception:
+                pass
+
+        if not reply_text:
+            reply_text = "I am reviewing your reasoning. Reflect on the structural invariant: what boundary condition must be preserved?"
+
+        return {"reply": reply_text.strip()}
     except Exception as e:
         print("[ERROR tutor_chat]:", e)
-        return {"reply": f"I had trouble connecting to the tutor engine: {str(e)}"}
+        # Socratic rule-based fallback when offline or API encounters error
+        hint = prob.get("concept_hint") or "Check the invariant condition and edge cases."
+        gq = prob.get("guiding_question") or "What property must hold true?"
+        return {
+            "reply": f"💡 **Mentor Reflection**: Consider the invariant for *{prob.get('title', 'this exercise')}*.\n\n"
+                     f"❓ **Diagnostic**: {gq}\n\n"
+                     f"🔍 **Lead**: {hint} How does your approach preserve this condition?"
+        }
 
 @app.post("/api/tutor-brief")
 async def tutor_brief(payload: BriefPayload):
@@ -1774,7 +1832,10 @@ async def tutor_brief(payload: BriefPayload):
 
     try:
         response = call_gemini(contents=prompt)
-        return {"briefing": response.text.strip()}
+        text = (response.text or "").strip()
+        if not text:
+            raise ValueError("Empty briefing from model")
+        return {"briefing": text}
     except Exception as e:
         print("[ERROR tutor_brief]:", e)
         # Fallback local briefing (under 35 words)
