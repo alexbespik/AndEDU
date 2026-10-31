@@ -1,0 +1,49 @@
+{
+  "id": "lagrangian-mechanics",
+  "title": "Lagrangian Mechanics & Euler-Lagrange",
+  "category": "Theoretical Physics",
+  "difficulty": "Advanced Mechanics",
+  "icon": "Cpu",
+  "summary": "Principle of least action, generalized coordinates, Euler-Lagrange equations, and Noether's theorem on conservation laws.",
+  "simulationType": null,
+  "cheatSheet": [
+    { "label": "Lagrangian (L)", "formula": "L(q, \\dot{q}, t) = T - V" },
+    { "label": "Action Integral (S)", "formula": "S[q] = \\int_{t_1}^{t_2} L(q, \\dot{q}, t)\\,dt" },
+    { "label": "Hamilton's Principle", "formula": "\\delta S = 0" },
+    { "label": "Euler-Lagrange Equation", "formula": "\\frac{d}{dt} \\left( \\frac{\\partial L}{\\partial \\dot{q}_i} \\right) - \\frac{\\partial L}{\\partial q_i} = 0" },
+    { "label": "Generalized Momentum (p_i)", "formula": "p_i = \\frac{\\partial L}{\\partial \\dot{q}_i}" },
+    { "label": "Cyclic Coordinate Conservation", "formula": "\\frac{\\partial L}{\\partial q_i} = 0 \\implies p_i = \\text{const}" }
+  ],
+  "mermaid": "graph TD\n    A[\"Hamilton's Principle of Stationary Action<br/>&delta;S = 0\"] --> B[\"Calculus of Variations\"]\n    B --> C[\"Euler-Lagrange Equation<br/>d/dt(&part;L/&part;q&#775;) - &part;L/&part;q = 0\"]\n    C --> D{\"Cyclic Coordinate?<br/>&part;L/&part;q = 0\"}\n    D -->|\"Yes\"| E[\"Noether's Theorem<br/>Conserved Momentum p_i = const\"]\n    D -->|\"No\"| F[\"Full Dynamical Equation of Motion\"]\n    E --> G[\"Symmetry in Space &rarr; Momentum Conserved<br/>Symmetry in Time &rarr; Energy Conserved\"]",
+  "markdownContent": "# Analytical Mechanics: The Lagrangian Formulation\n\nNewtonian mechanics relies on vector forces $\\vec{F} = m\\vec{a}$ in Cartesian coordinates, which often requires calculating cumbersome constraint forces (tension, normal forces). **Lagrangian mechanics** reformulates classical physics using scalar energies ($T$ and $V$) and generalized coordinates ($q_i$), making complex constrained systems remarkably straightforward.\n\n---\n\n## 1. The Lagrangian Function\n\nFor a conservative physical system, the **Lagrangian** $L$ is defined as kinetic energy $T$ minus potential energy $V$:\n\n$$L(q, \\dot{q}, t) = T(q, \\dot{q}) - V(q)$$\n\nWhere:\n* $q = (q_1, q_2, \\dots, q_n)$ are the **generalized coordinates** (e.g. angles $\\theta$, radial distances $r$).\n* $\\dot{q} = \\frac{dq}{dt}$ are the **generalized velocities**.\n\n---\n\n## 2. Hamilton's Principle of Stationary Action\n\nThe fundamental postulate of analytical mechanics is **Hamilton's Principle**: the actual physical path $q(t)$ taken by a system between times $t_1$ and $t_2$ makes the action integral $S$ stationary ($\\\\delta S = 0$):\n\n$$S[q] = \\int_{t_1}^{t_2} L(q(t), \\dot{q}(t), t)\\,dt$$\n\nApplying the calculus of variations with fixed endpoints $\\delta q(t_1) = \\delta q(t_2) = 0$ leads directly to the **Euler-Lagrange Equations**:\n\n$$\\mathbf{\\frac{d}{dt} \\left( \\frac{\\partial L}{\\partial \\dot{q}_i} \\right) - \\frac{\\partial L}{\\partial q_i} = 0}$$\n\n---\n\n## 3. Example: The Simple Pendulum\n\nFor a pendulum of mass $m$ and length $\\ell$ suspended at angle $\\theta$:\n\n* **Kinetic Energy:** $T = \\frac{1}{2} m (\\ell \\dot{\\theta})^2 = \\frac{1}{2} m \\ell^2 \\dot{\\theta}^2$\n* **Potential Energy (zero at pivot):** $V = -m g \\ell \\cos\\theta$\n\n$$L = T - V = \\frac{1}{2} m \\ell^2 \\dot{\\theta}^2 + m g \\ell \\cos\\theta$$\n\nCompute derivatives:\n$$\\frac{\\partial L}{\\partial \\dot{\\theta}} = m \\ell^2 \\dot{\\theta} \\implies \\frac{d}{dt}\\left(\\frac{\\partial L}{\\partial \\dot{\\theta}}\\right) = m \\ell^2 \\ddot{\\theta}$$\n$$\\frac{\\partial L}{\\partial \\theta} = -m g \\ell \\sin\\theta$$\n\nPlugging into the Euler-Lagrange equation:\n$$m \\ell^2 \\ddot{\\theta} - (-m g \\ell \\sin\\theta) = 0 \\implies \\mathbf{\\ddot{\\theta} + \\frac{g}{\\ell} \\sin\\theta = 0}$$\n\nNotice that the tension in the rod never had to be computed!",
+  "quiz": [
+    {
+      "id": "q1",
+      "difficulty": "Foundations",
+      "question": "How is the classical Lagrangian $L$ defined for a conservative mechanical system?",
+      "options": [
+        "$L = T + V$ (Total mechanical energy)",
+        "$L = T - V$ (Kinetic minus potential energy)",
+        "$L = V - T$",
+        "$L = \\vec{F} \\cdot d\\vec{r}$"
+      ],
+      "correctAnswer": 1,
+      "hint": "Remember that the Hamiltonian is $T + V$, whereas the Lagrangian is the difference.",
+      "explanation": "By definition, the Lagrangian of a conservative mechanical system is the difference between its kinetic energy and potential energy: $L = T - V$."
+    },
+    {
+      "id": "q2",
+      "difficulty": "Symmetries & Conservation",
+      "question": "If a coordinate $q_k$ does not explicitly appear in the Lagrangian (meaning $\\frac{\\partial L}{\\partial q_k} = 0$), what physical consequence follows?",
+      "options": [
+        "The coordinate is prohibited by constraints.",
+        "The system has zero kinetic energy.",
+        "The corresponding generalized momentum $p_k = \\frac{\\partial L}{\\partial \\dot{q}_k}$ is a conserved quantity.",
+        "The velocity $\\dot{q}_k$ must be identically zero."
+      ],
+      "correctAnswer": 2,
+      "hint": "Look at the Euler-Lagrange equation $\\frac{d}{dt} \\left(\\frac{\\partial L}{\\partial \\dot{q}_k}\\right) - \\frac{\\partial L}{\\partial q_k} = 0$.",
+      "explanation": "If $\\frac{\\partial L}{\\partial q_k} = 0$, then $\\frac{d}{dt} \\left(\\frac{\\partial L}{\\partial \\dot{q}_k}\\right) = 0$, which implies that the generalized momentum $p_k = \\frac{\\partial L}{\\partial \\dot{q}_k}$ is constant in time (conserved). This coordinate $q_k$ is termed 'ignorable' or 'cyclic'."
+    }
+  ]
+}
