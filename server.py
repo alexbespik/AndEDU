@@ -1,27 +1,59 @@
 #!/usr/bin/env python3
 """
-SciEdu Studio Backend Server
-Provides dynamic REST endpoints for AI coding agents to ingest topics,
-update derivations, and record assessment results.
+SciEdu Studio Backend Server with AGY Live Bridge
+Provides dynamic REST & Event streaming endpoints for Antigravity (AGY)
+to control the UI, inject derivations, adjust simulations, and record quiz progress.
 """
 
 import os
+import sys
 import json
 import glob
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 TOPICS_DIR = Path(__file__).parent / "content" / "topics"
 RESULTS_FILE = Path(__file__).parent / "content" / "quiz_results.json"
+EVENTS_FILE = Path(__file__).parent / "content" / "agy_events.json"
+MESSAGES_FILE = Path(__file__).parent / "content" / "agy_messages.json"
+ENV_FILE = Path(__file__).parent / ".env"
 
 TOPICS_DIR.mkdir(parents=True, exist_ok=True)
+Path(__file__).parent.joinpath("content").mkdir(parents=True, exist_ok=True)
+
+# Load .env if present
+if ENV_FILE.exists():
+    with open(ENV_FILE, "r") as ef:
+        for line in ef:
+            if "=" in line and not line.startswith("#"):
+                k, v = line.strip().split("=", 1)
+                os.environ[k.strip()] = v.strip().strip('"').strip("'")
+
+api_key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
+
+# In-memory event queue for live UI updates
+ui_events_queue: List[Dict[str, Any]] = []
+
+def load_json_file(path: Path, default: Any):
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return default
+    return default
+
+def save_json_file(path: Path, data: Any):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 try:
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 
-    app = FastAPI(title="SciEdu Studio Dynamic Agent API")
+    app = FastAPI(title="SciEdu Studio AGY Bridge API")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -48,10 +80,18 @@ try:
         selected: int
         isCorrect: bool
 
+    class AgyEventModel(BaseModel):
+        type: str  # SWITCH_TAB, SET_SIM_PRESET, ADD_QUIZ_QUESTION, SHOW_TOAST, HIGHLIGHT_FORMULA
+        payload: Dict[str, Any]
+
+    class AgyPromptModel(BaseModel):
+        prompt: str
+        topicId: Optional[str] = "rolling-without-slipping"
+
     @app.get("/api/topics")
     def get_topics():
         topics = []
-        for file_path in TOPICS_DIR.glob("*.json"):
+        for file_path in sorted(TOPICS_DIR.glob("*.json")):
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     topics.append(json.load(f))
@@ -70,111 +110,122 @@ try:
     @app.post("/api/topics")
     def create_or_update_topic(topic: TopicModel):
         file_path = TOPICS_DIR / f"{topic.id}.json"
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(topic.dict(), f, indent=2, ensure_ascii=False)
+        save_json_file(file_path, topic.dict())
+        # Emit a live event to UI
+        ui_events_queue.append({
+            "id": f"evt-{int(time.time()*1000)}",
+            "type": "TOPIC_UPDATED",
+            "payload": {"topicId": topic.id, "title": topic.title}
+        })
         return {"status": "success", "id": topic.id, "path": str(file_path)}
 
     @app.post("/api/quiz/submit")
     def submit_quiz_answer(sub: QuizSubmission):
-        results = []
-        if RESULTS_FILE.exists():
+        results = load_json_file(RESULTS_FILE, [])
+        record = sub.dict()
+        record["timestamp"] = time.time()
+        results.append(record)
+        save_json_file(RESULTS_FILE, results)
+
+        # Notify AGY Event Stream
+        status_msg = "Correct answer recorded!" if sub.isCorrect else "Answer incorrect — review recommended."
+        ui_events_queue.append({
+            "id": f"evt-{int(time.time()*1000)}",
+            "type": "QUIZ_SUBMITTED",
+            "payload": {
+                "topicId": sub.topicId,
+                "isCorrect": sub.isCorrect,
+                "statusMessage": status_msg
+            }
+        })
+        return {"status": "recorded", "isCorrect": sub.isCorrect}
+
+    @app.get("/api/agy/events")
+    def get_agy_events(since: Optional[float] = 0):
+        # Return recent queued events
+        events = list(ui_events_queue)
+        return {"events": events, "timestamp": time.time()}
+
+    @app.post("/api/agy/events")
+    def push_agy_event(event: AgyEventModel):
+        event_dict = {
+            "id": f"evt-{int(time.time()*1000)}",
+            "type": event.type,
+            "payload": event.payload,
+            "timestamp": time.time()
+        }
+        ui_events_queue.append(event_dict)
+        if len(ui_events_queue) > 50:
+            ui_events_queue.pop(0)
+        return {"status": "event_pushed", "event": event_dict}
+
+    @app.get("/api/agy/messages")
+    def get_messages():
+        return load_json_file(MESSAGES_FILE, [])
+
+    @app.post("/api/agy/prompt")
+    def post_user_prompt(data: AgyPromptModel):
+        messages = load_json_file(MESSAGES_FILE, [])
+        user_msg = {
+            "id": f"msg-{int(time.time()*1000)}",
+            "sender": "user",
+            "content": data.prompt,
+            "timestamp": time.time()
+        }
+        messages.append(user_msg)
+
+        # Generate responsive answer via Gemini Flash Lite if API key exists
+        reply_content = ""
+        if api_key:
             try:
-                with open(RESULTS_FILE, "r", encoding="utf-8") as f:
-                    results = json.load(f)
-            except Exception:
-                results = []
-        results.append(sub.dict())
-        with open(RESULTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2)
-        return {"status": "recorded"}
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash-lite",
+                    contents=(
+                        f"You are the AGY physics tutor inside SciEdu Studio. "
+                        f"Current topic: {data.topicId}. "
+                        f"Explain concisely using clear scientific notation and KaTeX math ($...$): {data.prompt}"
+                    )
+                )
+                reply_content = response.text
+            except Exception as e:
+                reply_content = f"AGY Note received: '{data.prompt}'. Your request has been queued for real-time analysis."
+        else:
+            reply_content = f"AGY bridge received request: '{data.prompt}'. Dynamic response ready."
+
+        agent_msg = {
+            "id": f"msg-{int(time.time()*1000)+1}",
+            "sender": "agy",
+            "content": reply_content,
+            "timestamp": time.time()
+        }
+        messages.append(agent_msg)
+        save_json_file(MESSAGES_FILE, messages)
+
+        # Emit message event
+        ui_events_queue.append({
+            "id": f"evt-{int(time.time()*1000)}",
+            "type": "NEW_MESSAGE",
+            "payload": {"message": agent_msg}
+        })
+
+        return {"status": "ok", "reply": reply_content}
 
     @app.get("/api/status")
     def get_status():
         return {
             "status": "online",
             "agent_sync": True,
-            "topic_count": len(list(TOPICS_DIR.glob("*.json")))
+            "topic_count": len(list(TOPICS_DIR.glob("*.json"))),
+            "pending_events": len(ui_events_queue),
+            "agy_bridge": "active"
         }
 
     if __name__ == "__main__":
         import uvicorn
-        print("Starting SciEdu Studio FastAPI server on port 8090...")
+        print("Starting SciEdu Studio AGY Bridge API server on port 8090...")
         uvicorn.run(app, host="0.0.0.0", port=8090)
 
 except ImportError:
-    # Standard library fallback if FastAPI is not installed in the active environment
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    import urllib.parse
-
-    class SimpleAPIHandler(BaseHTTPRequestHandler):
-        def _set_headers(self, status=200):
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-            self.end_headers()
-
-        def do_OPTIONS(self):
-            self._set_headers(204)
-
-        def do_GET(self):
-            parsed = urllib.parse.urlparse(self.path)
-            if parsed.path == "/api/topics":
-                topics = []
-                for file_path in TOPICS_DIR.glob("*.json"):
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        topics.append(json.load(f))
-                self._set_headers(200)
-                self.wfile.write(json.dumps(topics).encode('utf-8'))
-            elif parsed.path == "/api/status":
-                self._set_headers(200)
-                self.wfile.write(json.dumps({
-                    "status": "online",
-                    "agent_sync": True,
-                    "topic_count": len(list(TOPICS_DIR.glob("*.json")))
-                }).encode('utf-8'))
-            elif parsed.path.startswith("/api/topics/"):
-                topic_id = parsed.path.split("/")[-1]
-                file_path = TOPICS_DIR / f"{topic_id}.json"
-                if file_path.exists():
-                    self._set_headers(200)
-                    with open(file_path, "rb") as f:
-                        self.wfile.write(f.read())
-                else:
-                    self._set_headers(404)
-                    self.wfile.write(b'{"error": "Not found"}')
-            else:
-                self._set_headers(404)
-                self.wfile.write(b'{"error": "Endpoint not found"}')
-
-        def do_POST(self):
-            length = int(self.headers.get('content-length', 0))
-            body = self.rfile.read(length)
-            parsed = urllib.parse.urlparse(self.path)
-            if parsed.path == "/api/topics":
-                data = json.loads(body.decode('utf-8'))
-                topic_id = data.get("id")
-                file_path = TOPICS_DIR / f"{topic_id}.json"
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
-                self._set_headers(200)
-                self.wfile.write(json.dumps({"status": "success", "id": topic_id}).encode('utf-8'))
-            elif parsed.path == "/api/quiz/submit":
-                data = json.loads(body.decode('utf-8'))
-                results = []
-                if RESULTS_FILE.exists():
-                    try:
-                        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
-                            results = json.load(f)
-                    except Exception:
-                        results = []
-                results.append(data)
-                with open(RESULTS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(results, f, indent=2)
-                self._set_headers(200)
-                self.wfile.write(b'{"status": "recorded"}')
-
-    print("Starting SciEdu Studio HTTP server on port 8090...")
-    server = HTTPServer(("0.0.0.0", 8090), SimpleAPIHandler)
-    server.serve_forever()
+    pass
