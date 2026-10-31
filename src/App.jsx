@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import TopicViewer from './components/TopicViewer';
+import AgyBridgeDrawer from './components/AgyBridgeDrawer';
 import rollingTopic from '../content/topics/rolling-without-slipping.json';
 import lagrangianTopic from '../content/topics/lagrangian-mechanics.json';
 import { theme } from './theme';
@@ -11,7 +12,7 @@ export default function App() {
   const [topics, setTopics] = useState(initialTopics);
   const [selectedTopicId, setSelectedTopicId] = useState('rolling-without-slipping');
   const [activeTab, setActiveTab] = useState('theory');
-  const [agentSyncStatus, setAgentSyncStatus] = useState('Connected');
+  const [agentSyncStatus, setAgentSyncStatus] = useState('Live Connected');
 
   // Fetch topics from backend API if available, with continuous polling for agent hot-updates
   useEffect(() => {
@@ -44,7 +45,8 @@ export default function App() {
       width: '100vw',
       background: theme.bgApp,
       color: theme.textMain,
-      overflow: 'hidden'
+      overflow: 'hidden',
+      position: 'relative'
     }}>
       <Navbar 
         activeTopic={activeTopic}
@@ -73,6 +75,12 @@ export default function App() {
           />
         </main>
       </div>
+
+      {/* Floating AGY Live Companion Bridge */}
+      <AgyBridgeDrawer 
+        activeTopicId={selectedTopicId}
+        onSwitchTab={setActiveTab}
+      />
     </div>
   );
 }
