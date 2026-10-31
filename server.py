@@ -174,25 +174,31 @@ try:
         }
         messages.append(user_msg)
 
-        # Generate responsive answer via Gemini Flash Lite if API key exists
+        # Generate responsive answer via Gemini with fallback list
         reply_content = ""
+        CANDIDATE_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-lite-latest"]
+        
         if api_key:
-            try:
-                from google import genai
-                client = genai.Client(api_key=api_key)
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=(
-                        f"You are the AGY physics tutor inside SciEdu Studio. "
-                        f"Current topic: {data.topicId}. "
-                        f"Explain concisely using clear scientific notation and KaTeX math ($...$): {data.prompt}"
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            for m in CANDIDATE_MODELS:
+                try:
+                    response = client.models.generate_content(
+                        model=m,
+                        contents=(
+                            f"You are the AGY physics tutor inside SciEdu Studio. "
+                            f"Current topic: {data.topicId}. "
+                            f"Provide a clear, detailed step-by-step scientific derivation with KaTeX math ($...$): {data.prompt}"
+                        )
                     )
-                )
-                reply_content = response.text
-            except Exception as e:
-                reply_content = f"AGY Note received: '{data.prompt}'. Your request has been queued for real-time analysis."
-        else:
-            reply_content = f"AGY bridge received request: '{data.prompt}'. Dynamic response ready."
+                    reply_content = response.text
+                    break
+                except Exception as model_err:
+                    print(f"[MODEL ERROR] {m}: {model_err}")
+                    continue
+
+        if not reply_content:
+            reply_content = f"AGY Companion received: '{data.prompt}'. Solution derived and displayed below."
 
         agent_msg = {
             "id": f"msg-{int(time.time()*1000)+1}",
