@@ -21,7 +21,9 @@ export default function Navbar({
   setActiveTab, 
   hasSimulation,
   quizCount = 0,
-  agentStatus = "Listening"
+  agentStatus = "Listening",
+  studioMode = "physics",
+  onSwitchStudioMode
 }) {
   const tabs = [
     { id: 'theory', label: 'Theory & Derivations', icon: BookOpen },
@@ -42,7 +44,7 @@ export default function Navbar({
       zIndex: 100,
       flexShrink: 0
     }}>
-      {/* Brand & Emblem */}
+      {/* Brand & Studio Mode Switcher */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <TuxMini size={22} color={theme.accentGreen} />
@@ -60,7 +62,80 @@ export default function Navbar({
           </span>
         </div>
 
-        {activeTopic && (
+        {/* Global Studio Mode Selector */}
+        {onSwitchStudioMode && (
+          <div style={{
+            display: 'flex',
+            background: theme.bgInput,
+            border: `1px solid ${theme.border}`,
+            borderRadius: 4,
+            padding: 2,
+            gap: 2
+          }}>
+            <button
+              onClick={() => onSwitchStudioMode('physics')}
+              style={{
+                background: studioMode === 'physics' ? theme.accentGreen : 'transparent',
+                color: studioMode === 'physics' ? '#ffffff' : theme.textDim,
+                border: 'none',
+                padding: '4px 9px',
+                borderRadius: 3,
+                fontSize: '11px',
+                fontFamily: theme.fontMono,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="Physics & Mechanics Simulation Mode"
+            >
+              🌌 Physics
+            </button>
+            <button
+              onClick={() => onSwitchStudioMode('code')}
+              style={{
+                background: studioMode === 'code' ? theme.accentGreen : 'transparent',
+                color: studioMode === 'code' ? '#ffffff' : theme.textDim,
+                border: 'none',
+                padding: '4px 9px',
+                borderRadius: 3,
+                fontSize: '11px',
+                fontFamily: theme.fontMono,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="&EDU Code & Algorithm IDE with Pyodide / Sandbox Execution"
+            >
+              ⚡ Code IDE
+            </button>
+            <button
+              onClick={() => onSwitchStudioMode('math')}
+              style={{
+                background: studioMode === 'math' ? theme.accentGreen : 'transparent',
+                color: studioMode === 'math' ? '#ffffff' : theme.textDim,
+                border: 'none',
+                padding: '4px 9px',
+                borderRadius: 3,
+                fontSize: '11px',
+                fontFamily: theme.fontMono,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="&EDU Mathematical Derivations & Proofs Mode"
+            >
+              ∑ Math
+            </button>
+          </div>
+        )}
+
+        {activeTopic && studioMode === 'physics' && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
