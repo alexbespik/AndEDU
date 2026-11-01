@@ -2390,6 +2390,20 @@ agy_switch_page_tool = types.FunctionDeclaration(
     )
 )
 
+agy_set_sim_config_tool = types.FunctionDeclaration(
+    name="set_simulation_config",
+    description="Dynamically sets or alters the parameters of the active simulation on the user's screen in real time (e.g. coefficient of restitution e, impact parameter/angle cos(theta), cue strike height, velocity).",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "restitution": types.Schema(type="NUMBER", description="Coefficient of restitution e between 0.0 and 1.0"),
+            "impact_offset": types.Schema(type="NUMBER", description="Impact offset b/R (-1.7 to +1.7) to change cos(theta)"),
+            "strike_height": types.Schema(type="NUMBER", description="Cue strike height h/R (-0.8 to +0.8)"),
+            "strike_speed": types.Schema(type="NUMBER", description="Strike speed in px/s (100 to 450)")
+        }
+    )
+)
+
 agy_execute_code_tool = types.FunctionDeclaration(
     name="execute_python_code",
     description="Executes Python code in the sandbox to verify physics derivations, compute numeric kinematics, or run assertions.",
@@ -2407,6 +2421,7 @@ agy_agent_tools = types.Tool(
     function_declarations=[
         agy_create_lesson_tool,
         agy_switch_page_tool,
+        agy_set_sim_config_tool,
         agy_execute_code_tool
     ]
 )
@@ -2426,11 +2441,11 @@ async def post_user_prompt(data: AgyPromptModel):
     system_inst = (
         "You are the AGY Autonomous Physics & STEM Coding Assistant embedded inside SciEdu Studio. "
         "You have full autonomous power to create, update, and manipulate the workspace directly using your tools. "
-        "When the user asks you to create a new lesson, generate assignments, build a simulation, or explore a physics topic: "
-        "- ALWAYS use `create_or_update_lesson` to generate a complete, rigorous topic with full KaTeX derivations ($...$ and $$...$$), formula cards, Mermaid diagram, and assessment quiz! "
-        "- ALWAYS use `switch_page` to navigate the user's workspace directly to the new topic and simulation/quiz tab! "
-        "- Use `execute_python_code` if numerical calculations or code assertions are requested. "
-        "DO NOT simply give a passive text answer when asked to create or change lessons—call the tools so the app dynamically updates in real time!"
+        "When the user asks you to change or control the simulation (e.g. 'give ability to change cos of collision', 'change restitution', 'set e=0.5'): "
+        "- Use `set_simulation_config` to dynamically alter the simulation parameters (restitution e, impact_offset cos theta, etc.) on screen! "
+        "- Use `create_or_update_lesson` to generate or enhance lessons with KaTeX equations, cheat-sheets, and quizzes. "
+        "- Use `switch_page` to navigate the workspace to the simulation or quiz tab. "
+        "ALWAYS invoke the tool so the application physically updates on the user's screen in real time!"
     )
 
     try:
@@ -2444,7 +2459,29 @@ async def post_user_prompt(data: AgyPromptModel):
         )
 
         for call in (resp.function_calls or []):
-            if call.name == "create_or_update_lesson":
+            if call.name == "set_simulation_config":
+                args = dict(call.args)
+                ui_events_queue.append({
+                    "id": f"evt-{int(time.time()*1000)}",
+                    "type": "SET_SIM_CONFIG",
+                    "payload": args
+                })
+                ui_events_queue.append({
+                    "id": f"evt-{int(time.time()*1000)+1}",
+                    "type": "SWITCH_TAB",
+                    "payload": {"tab": "simulation"}
+                })
+                reply_content = (
+                    f"🎛️ **Live Simulation Parameters Updated!**\n\n"
+                    f"I have modified the simulation state on your screen:\n"
+                    + (f"- **Coefficient of Restitution (e)**: `{args.get('restitution')}`\n" if 'restitution' in args else "")
+                    + (f"- **Impact Offset (cos θ parameter)**: `{args.get('impact_offset')}`\n" if 'impact_offset' in args else "")
+                    + (f"- **Cue Height (h/R)**: `{args.get('strike_height')}`\n" if 'strike_height' in args else "")
+                    + "\nThe controls and live canvas have been updated in real time on your screen."
+                )
+                break
+
+            elif call.name == "create_or_update_lesson":
                 args = dict(call.args)
                 tid = args.get("id", f"topic-{int(time.time())}")
                 tfile = TOPICS_DIR / f"{tid}.json"

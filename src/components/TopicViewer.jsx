@@ -14,7 +14,7 @@ import BilliardSim from '../simulations/BilliardSim';
 import QuizEngine from './QuizEngine';
 import MermaidViewer from './MermaidViewer';
 
-export default function TopicViewer({ topic, activeTab, setActiveTab }) {
+export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig }) {
   const [copiedFormula, setCopiedFormula] = useState(null);
 
   if (!topic) {
@@ -255,7 +255,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab }) {
             {topic.simulationType === 'rolling_without_slipping' ? (
               <RollingWithoutSlippingSim />
             ) : topic.simulationType === 'billiard_collisions' ? (
-              <BilliardSim />
+              <BilliardSim config={liveSimConfig} />
             ) : (
               <div style={{
                 background: theme.bgPanel,
