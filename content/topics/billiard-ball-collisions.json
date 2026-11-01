@@ -1,55 +1,50 @@
 {
   "id": "billiard-ball-collisions",
-  "title": "Billiard Ball Collisions & Strike Angles",
+  "title": "Billiard Ball Collisions & Restitution",
   "category": "Rigid Body Dynamics",
   "difficulty": "Undergraduate",
   "simulationType": "billiard_collisions",
-  "summary": "Explore how cue strike angles and impact parameters determine 2D trajectory deflection in billiard ball collisions.",
+  "summary": "Explore 2D billiard ball collisions with adjustable coefficient of restitution (e), masses, and velocities.",
   "cheatSheet": [
     {
-      "desc": "Relates impact parameter b, radius R, and strike angle phi",
-      "name": "Impact Parameter",
-      "formula": "b = R \\sin\\phi"
+      "formula": "v_{1,f} - v_{2,f} = -e (v_{1,i} - v_{2,i})",
+      "desc": "Relates post-collision velocity to pre-collision velocity along the normal vector.",
+      "name": "Coefficient of Restitution"
     },
     {
-      "formula": "v_{1n} = v_1 \\cos\\phi, \\quad v_{1t} = -v_1 \\sin\\phi",
-      "desc": "Velocity components along line of centers and tangent",
-      "name": "Strike Angle Decomposition"
-    },
-    {
-      "desc": "Post-collision velocity vector from strike angle phi",
-      "name": "Oblique Collision Dynamics",
-      "formula": "v'_{1n} = -e v_{1n}, \\quad v'_{1t} = v_{1t}"
+      "formula": "m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'",
+      "desc": "Conservation of total linear momentum in an isolated system of colliding bodies.",
+      "name": "Momentum Conservation"
     }
   ],
-  "mermaid": "graph TD\n    A[Cue Strike Angle phi] --> B[Impact Parameter b = 2R sin phi]\n    B --> C[Normal & Tangential Velocity Decomposition]\n    C --> D[Restitution & Momentum Transfer]\n    D --> E[Post-Collision Trajectories]\n",
-  "markdownContent": "# Oblique Billiard Ball Collisions & Strike Angles\n\nWhen cueing a billiard ball off-center, the cue stick exerts a force through a specific **strike angle ($\\phi$)** or **impact parameter ($b$)**. This creates both translational momentum and rotational spin (English/side spin).\n\n## 1. Geometry of the Strike Angle\n\nLet the cue ball of radius $R$ approach a target ball along the $x$-axis. If the cue ball strikes the target ball off-center, the line connecting their centers at the moment of impact makes an angle $\\phi$ with the initial trajectory.\n\nThe **impact parameter** $b$ is related to the strike angle $\\phi$ and radius $R$ (for equal spheres of radius $R$):\n$$b = 2R \\sin\\phi$$\n\n## 2. Velocity Decomposition\n\nResolving the incident velocity $v_1$ of the cue ball into components normal ($n$) and tangential ($t$) to the collision contact plane:\n$$v_{1n} = v_1 \\cos\\phi$$\n$$v_{1t} = -v_1 \\sin\\phi$$\n\nApplying the coefficient of restitution $e$ along the normal direction while conserving tangential momentum (assuming smooth spheres, $\\mu = 0$):\n$$v'_{1n} = -e v_{1n}, \\quad v'_{1t} = v_{1t}$$\n$$v'_{2n} = (1+e)v_{1n}, \\quad v'_{2t} = 0$$\n\n",
+  "mermaid": "graph TD\n    A[Initial Velocities v1, v2] --> B[Resolve Normal & Tangential Components]\n    B --> C[Apply Coefficient of Restitution e]\n    C --> D[Compute Final Velocities]\n    D --> E[Update Positions & Trajectories]",
+  "markdownContent": "# Billiard Ball Collisions & Coefficient of Restitution\n\nIn rigid body dynamics, collisions between bodies are governed by two fundamental principles:\n1. **Conservation of Linear Momentum** ($\\sum \\mathbf{p}_i = \\sum \\mathbf{p}_f$)\n2. **Newton's Experimental Law of Normal Restitution**, characterized by the coefficient of restitution $e$.\n\n## 1. Coefficient of Restitution ($e$)\nThe coefficient of restitution $e$ is defined as the ratio of the relative speed of separation to the relative speed of approach along the line of impact:\n\n$$e = -\\frac{v_{1,f} - v_{2,f}}{v_{1,i} - v_{2,i}}$$\n\nWhere:\n- $e = 1$: Perfectly elastic collision (kinetic energy is conserved).\n- $0 < e < 1$: Inelastic collision (some kinetic energy is dissipated as heat/deformation).\n- $e = 0$: Perfectly inelastic collision (bodies stick together, maximum energy loss).\n\n## 2. 2D Elastic & Inelastic Collisions\nWhen two balls of masses $m_1$ and $m_2$ collide at an arbitrary angle, we resolve velocities into components **normal ($\\hat{n}$)** and **tangential ($\\hat{t}$)** to the collision plane:\n\n$$v_{1n}' = \\frac{m_1 - e m_2}{m_1 + m_2} v_{1n} + \\frac{(1+e)m_2}{m_1 + m_2} v_{2n}$$\n\n$$v_{2n}' = \\frac{(1+e)m_1}{m_1 + m_2} v_{1n} + \\frac{m_2 - e m_1}{m_1 + m_2} v_{2n}$$\n\nThe tangential velocity components remain unchanged in the absence of friction:\n$$v_{1t}' = v_{1t}, \\quad v_{2t}' = v_{2t}$$",
   "quiz": [
     {
-      "correct": 1,
-      "question": "What is the relation between impact parameter b, ball radius R, and strike angle phi for equal spheres?",
-      "hint": "Think about the geometry of touching spheres.",
-      "explanation": "The impact parameter b determines how far off-center the collision is, directly related to b = 2R sin(phi) for two equal spheres.",
+      "explanation": "For a perfectly elastic collision, no kinetic energy is lost, which corresponds to e = 1.",
       "options": [
-        "b = R cos(phi)",
-        "b = 2R sin(phi)",
-        "b = R tan(phi)",
-        "b = 2R/sin(phi)"
+        "e = 0",
+        "e = 1",
+        "e = -1",
+        "e = 0.5"
       ],
-      "id": 1
+      "correct": 1,
+      "id": 1,
+      "hint": "Think about the bounds of e for energy conservation.",
+      "question": "What is the coefficient of restitution (e) for a perfectly elastic collision?"
     },
     {
+      "explanation": "In a perfectly inelastic collision, the bodies stick together and move with a common velocity, meaning the relative separation velocity is zero, so e = 0.",
+      "hint": "What happens to the relative speed after they stick?",
       "correct": 0,
-      "explanation": "The component along the line of centers (normal direction) obeys the coefficient of restitution e, while the tangential component remains unchanged for smooth spheres.",
-      "hint": "Consider normal vs tangential velocity components.",
-      "id": 2,
-      "question": "How does the normal velocity component change after an impact with restitution e?",
       "options": [
-        "v'_n = -e v_n",
-        "v'_n = e v_n",
-        "v'_n = v_n / e",
-        "v'_n = 0"
-      ]
+        "e = 0",
+        "e = 1",
+        "e = 0.5",
+        "e = 2"
+      ],
+      "question": "What is the value of e for a perfectly inelastic collision?",
+      "id": 2
     }
   ]
 }

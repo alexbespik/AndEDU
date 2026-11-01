@@ -8,6 +8,7 @@ import rollingTopic from '../content/topics/rolling-without-slipping.json';
 import lagrangianTopic from '../content/topics/lagrangian-mechanics.json';
 import billiardTopic from '../content/topics/billiard-ball-collisions.json';
 import { theme } from './theme';
+import { Sparkles } from 'lucide-react';
 
 export default function App() {
   const initialTopics = [rollingTopic, billiardTopic, lagrangianTopic];
@@ -16,7 +17,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('simulation');
   const [studioMode, setStudioMode] = useState('physics'); // 'physics' | 'code' | 'math'
   const [agentSyncStatus, setAgentSyncStatus] = useState('Live Connected');
-  const lastEventIdRef = useRef(null);
+  const [liveSimConfig, setLiveSimConfig] = useState(null);
+  const [toastMsg, setToastMsg] = useState(null);
+  
+  const processedEventIdsRef = useRef(new Set());
 
   // 1. Fetch topics with hot-reload polling
   const fetchTopics = async () => {
@@ -37,7 +41,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 2. Poll for AGY Real-time Control Events (Page Switching, Tab Switching, Topic Navigation)
+  // 2. Poll for AGY Real-time Control Events (Processes EVERY queued event, never misses any)
   useEffect(() => {
     const pollControlEvents = async () => {
       try {
@@ -45,36 +49,55 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           const events = data.events || [];
-          if (events.length > 0) {
-            const latest = events[events.length - 1];
-            if (latest.id !== lastEventIdRef.current) {
-              lastEventIdRef.current = latest.id;
-              
-              // Handle AGY page/topic switching events
-              if (latest.type === 'SWITCH_TOPIC') {
-                if (latest.payload?.topicId) {
-                  setSelectedTopicId(latest.payload.topicId);
-                  setStudioMode('physics');
-                }
-                if (latest.payload?.tab) {
-                  setActiveTab(latest.payload.tab);
-                }
-                if (latest.payload?.mode) {
-                  setStudioMode(latest.payload.mode);
-                }
-              } else if (latest.type === 'SWITCH_TAB') {
-                if (latest.payload?.tab) {
-                  setActiveTab(latest.payload.tab);
-                }
-              } else if (latest.type === 'SWITCH_STUDIO_MODE') {
-                if (latest.payload?.mode) {
-                  setStudioMode(latest.payload.mode);
-                }
-              } else if (latest.type === 'TOPIC_UPDATED' || latest.type === 'TOPIC_CREATED') {
-                fetchTopics();
-                if (latest.payload?.topicId && latest.payload?.autoSelect !== false) {
-                  setSelectedTopicId(latest.payload.topicId);
-                }
+          
+          for (const evt of events) {
+            if (!evt || !evt.id || processedEventIdsRef.current.has(evt.id)) {
+              continue;
+            }
+            processedEventIdsRef.current.add(evt.id);
+            if (processedEventIdsRef.current.size > 200) {
+              const firstId = processedEventIdsRef.current.values().next().value;
+              processedEventIdsRef.current.delete(firstId);
+            }
+
+            // Execute Real-Time Event Actions
+            if (evt.type === 'SWITCH_TOPIC') {
+              if (evt.payload?.topicId) {
+                setSelectedTopicId(evt.payload.topicId);
+                setStudioMode('physics');
+              }
+              if (evt.payload?.tab) {
+                setActiveTab(evt.payload.tab);
+              }
+              if (evt.payload?.mode) {
+                setStudioMode(evt.payload.mode);
+              }
+              setToastMsg(`⚡ Navigated to ${evt.payload?.topicId || 'lesson'} (${evt.payload?.tab || 'active tab'})`);
+              setTimeout(() => setToastMsg(null), 3500);
+            } else if (evt.type === 'SWITCH_TAB') {
+              if (evt.payload?.tab) {
+                setActiveTab(evt.payload.tab);
+              }
+              setToastMsg(`⚡ Switched to tab: ${evt.payload.tab}`);
+              setTimeout(() => setToastMsg(null), 3000);
+            } else if (evt.type === 'SET_SIM_CONFIG') {
+              if (evt.payload) {
+                setLiveSimConfig(evt.payload);
+                setActiveTab('simulation');
+                setStudioMode('physics');
+                setToastMsg(`🎛️ Simulation Parameters Updated: e=${evt.payload.restitution ?? 'dynamic'}, offset=${evt.payload.impact_offset ?? 'dynamic'}`);
+                setTimeout(() => setToastMsg(null), 4000);
+              }
+            } else if (evt.type === 'SWITCH_STUDIO_MODE') {
+              if (evt.payload?.mode) {
+                setStudioMode(evt.payload.mode);
+              }
+            } else if (evt.type === 'TOPIC_UPDATED' || evt.type === 'TOPIC_CREATED') {
+              fetchTopics();
+              if (evt.payload?.topicId && evt.payload?.autoSelect !== false) {
+                setSelectedTopicId(evt.payload.topicId);
+                setToastMsg(`📖 Lesson Loaded: ${evt.payload.title || evt.payload.topicId}`);
+                setTimeout(() => setToastMsg(null), 3500);
               }
             }
           }
@@ -82,7 +105,7 @@ export default function App() {
       } catch (err) {}
     };
 
-    const evtInterval = setInterval(pollControlEvents, 1200);
+    const evtInterval = setInterval(pollControlEvents, 800);
     return () => clearInterval(evtInterval);
   }, []);
 
@@ -99,6 +122,33 @@ export default function App() {
       overflow: 'hidden',
       position: 'relative'
     }}>
+      {/* Real-time Agent Action Toast Banner */}
+      {toastMsg && (
+        <div style={{
+          position: 'fixed',
+          top: 66,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(20, 20, 20, 0.94)',
+          border: `1px solid ${theme.borderActive}`,
+          borderRadius: 8,
+          padding: '8px 18px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.8), 0 0 15px rgba(229, 184, 92, 0.2)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontFamily: theme.fontMono,
+          fontSize: '0.82rem',
+          color: theme.accentGold,
+          backdropFilter: 'blur(8px)',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <Sparkles size={15} color={theme.accentGold} />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
       {studioMode === 'physics' ? (
         <>
           <Navbar 
@@ -127,6 +177,7 @@ export default function App() {
                 topic={activeTopic}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
+                liveSimConfig={liveSimConfig}
               />
             </main>
           </div>
