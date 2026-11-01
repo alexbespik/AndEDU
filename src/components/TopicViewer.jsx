@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { theme } from '../theme';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
+import BilliardSim from '../simulations/BilliardSim';
 import QuizEngine from './QuizEngine';
 import MermaidViewer from './MermaidViewer';
 
@@ -253,6 +254,8 @@ export default function TopicViewer({ topic, activeTab, setActiveTab }) {
           <div>
             {topic.simulationType === 'rolling_without_slipping' ? (
               <RollingWithoutSlippingSim />
+            ) : topic.simulationType === 'billiard_collisions' ? (
+              <BilliardSim />
             ) : (
               <div style={{
                 background: theme.bgPanel,

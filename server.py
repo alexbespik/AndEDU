@@ -2327,8 +2327,92 @@ def push_agy_event(event: AgyEventModel):
 def get_messages():
     return load_json_file(MESSAGES_FILE, [])
 
+# ---------------------------------------------------------------------------
+# AGY AUTONOMOUS AGENT TOOLS (LESSON GENERATION, PAGE SWITCHING & SANDBOX)
+# ---------------------------------------------------------------------------
+agy_create_lesson_tool = types.FunctionDeclaration(
+    name="create_or_update_lesson",
+    description="Creates a new interactive educational topic or updates an existing topic with rich derivations, LaTeX notations, interactive simulations, and assessment quizzes.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "id": types.Schema(type="STRING", description="Unique kebab-case ID, e.g. 'billiard-ball-collisions'"),
+            "title": types.Schema(type="STRING", description="Clean topic title"),
+            "category": types.Schema(type="STRING", description="e.g. 'Rigid Body Dynamics', 'Classical Mechanics'"),
+            "summary": types.Schema(type="STRING", description="1-2 sentence overview"),
+            "simulationType": types.Schema(type="STRING", description="e.g. 'billiard_collisions', 'rolling_without_slipping' or null"),
+            "markdownContent": types.Schema(type="STRING", description="Full textbook derivations with KaTeX equations ($...$ and $$...$$)"),
+            "cheatSheet": types.Schema(
+                type="ARRAY",
+                items=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "name": types.Schema(type="STRING"),
+                        "formula": types.Schema(type="STRING"),
+                        "desc": types.Schema(type="STRING")
+                    },
+                    required=["name", "formula", "desc"]
+                ),
+                description="List of key formulas and constraints"
+            ),
+            "mermaid": types.Schema(type="STRING", description="Mermaid flowchart definition"),
+            "quiz": types.Schema(
+                type="ARRAY",
+                items=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "id": types.Schema(type="INTEGER"),
+                        "question": types.Schema(type="STRING"),
+                        "options": types.Schema(type="ARRAY", items=types.Schema(type="STRING")),
+                        "correct": types.Schema(type="INTEGER"),
+                        "hint": types.Schema(type="STRING"),
+                        "explanation": types.Schema(type="STRING")
+                    },
+                    required=["id", "question", "options", "correct", "hint", "explanation"]
+                ),
+                description="Multiple-choice assessment questions with derivations"
+            )
+        },
+        required=["id", "title", "category", "markdownContent"]
+    )
+)
+
+agy_switch_page_tool = types.FunctionDeclaration(
+    name="switch_page",
+    description="Changes the active view in SciEdu Studio, navigating to a specific topic, opening a simulation tab, switching to the quiz, or switching between Physics Studio, Code IDE, and Math Mode.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "topic_id": types.Schema(type="STRING", description="Target topic ID to navigate to, e.g. 'billiard-ball-collisions'"),
+            "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', or 'agent'"),
+            "mode": types.Schema(type="STRING", description="'physics', 'code', or 'math'")
+        }
+    )
+)
+
+agy_execute_code_tool = types.FunctionDeclaration(
+    name="execute_python_code",
+    description="Executes Python code in the sandbox to verify physics derivations, compute numeric kinematics, or run assertions.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "code": types.Schema(type="STRING", description="Python code to run"),
+            "test_code": types.Schema(type="STRING", description="Optional assert statements")
+        },
+        required=["code"]
+    )
+)
+
+agy_agent_tools = types.Tool(
+    function_declarations=[
+        agy_create_lesson_tool,
+        agy_switch_page_tool,
+        agy_execute_code_tool
+    ]
+)
+
 @app.post("/api/agy/prompt")
-def post_user_prompt(data: AgyPromptModel):
+async def post_user_prompt(data: AgyPromptModel):
     messages = load_json_file(MESSAGES_FILE, [])
     user_msg = {
         "id": f"msg-{int(time.time()*1000)}",
@@ -2339,17 +2423,103 @@ def post_user_prompt(data: AgyPromptModel):
     messages.append(user_msg)
 
     reply_content = ""
+    system_inst = (
+        "You are the AGY Autonomous Physics & STEM Coding Assistant embedded inside SciEdu Studio. "
+        "You have full autonomous power to create, update, and manipulate the workspace directly using your tools. "
+        "When the user asks you to create a new lesson, generate assignments, build a simulation, or explore a physics topic: "
+        "- ALWAYS use `create_or_update_lesson` to generate a complete, rigorous topic with full KaTeX derivations ($...$ and $$...$$), formula cards, Mermaid diagram, and assessment quiz! "
+        "- ALWAYS use `switch_page` to navigate the user's workspace directly to the new topic and simulation/quiz tab! "
+        "- Use `execute_python_code` if numerical calculations or code assertions are requested. "
+        "DO NOT simply give a passive text answer when asked to create or change lessons—call the tools so the app dynamically updates in real time!"
+    )
+
     try:
         resp = call_gemini(
-            contents=(
-                f"You are the AGY physics tutor inside SciEdu Studio. "
-                f"Current topic: {data.topicId}. "
-                f"Provide a clear, detailed step-by-step scientific derivation with KaTeX math ($...$): {data.prompt}"
+            contents=data.prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_inst,
+                temperature=0.3,
+                tools=[agy_agent_tools]
             )
         )
-        reply_content = resp.text.strip()
+
+        for call in (resp.function_calls or []):
+            if call.name == "create_or_update_lesson":
+                args = dict(call.args)
+                tid = args.get("id", f"topic-{int(time.time())}")
+                tfile = TOPICS_DIR / f"{tid}.json"
+                
+                topic_data = {
+                    "id": tid,
+                    "title": args.get("title", "New Lesson"),
+                    "category": args.get("category", "Theoretical Physics"),
+                    "difficulty": args.get("difficulty", "Undergraduate"),
+                    "simulationType": args.get("simulationType"),
+                    "summary": args.get("summary", ""),
+                    "cheatSheet": args.get("cheatSheet", []),
+                    "mermaid": args.get("mermaid", ""),
+                    "markdownContent": args.get("markdownContent", ""),
+                    "quiz": args.get("quiz", [])
+                }
+                save_json_file(tfile, topic_data)
+
+                ui_events_queue.append({
+                    "id": f"evt-{int(time.time()*1000)}",
+                    "type": "TOPIC_CREATED",
+                    "payload": {"topicId": tid, "title": topic_data["title"]}
+                })
+                
+                target_tab = "simulation" if topic_data.get("simulationType") else "theory"
+                ui_events_queue.append({
+                    "id": f"evt-{int(time.time()*1000)+1}",
+                    "type": "SWITCH_TOPIC",
+                    "payload": {"topicId": tid, "tab": target_tab, "mode": "physics"}
+                })
+
+                q_count = len(topic_data.get("quiz", []))
+                reply_content = (
+                    f"🎉 **New Lesson Generated & Workspace Updated!**\n\n"
+                    f"I have created **{topic_data['title']}** with:\n"
+                    f"- Full KaTeX scientific derivations\n"
+                    f"- Key formulas cheat sheet\n"
+                    f"- Interactive simulation: `{topic_data.get('simulationType', 'theory')}`\n"
+                    f"- Assessment quiz ({q_count} questions)\n\n"
+                    f"🚀 *I have switched your workspace directly to this lesson.*"
+                )
+                break
+
+            elif call.name == "switch_page":
+                args = dict(call.args)
+                tid = args.get("topic_id")
+                tab = args.get("tab", "theory")
+                mode = args.get("mode", "physics")
+
+                ui_events_queue.append({
+                    "id": f"evt-{int(time.time()*1000)}",
+                    "type": "SWITCH_TOPIC",
+                    "payload": {"topicId": tid, "tab": tab, "mode": mode}
+                })
+                reply_content = f"🔄 Switched workspace view to **{tid or mode}** ({tab} tab)."
+                break
+
+            elif call.name == "execute_python_code":
+                args = dict(call.args)
+                code_payload = ExecuteCodePayload(code=args.get("code", ""), test_code=args.get("test_code", ""))
+                exec_res = await execute_code(code_payload)
+                reply_content = (
+                    f"⚡ **Execution Result:**\n```\n{exec_res.get('stdout', '')}\n{exec_res.get('stderr', '')}\n```\n"
+                    f"Status: {'Passed' if exec_res.get('tests_passed') else 'Error'}"
+                )
+                break
+
+        if not reply_content:
+            try:
+                reply_content = resp.text.strip()
+            except Exception:
+                pass
+
     except Exception as e:
-        print("[ERROR agy prompt Gemini call]:", e)
+        print("[ERROR agy prompt Gemini call with tools]:", e)
 
     if not reply_content:
         reply_content = f"AGY Companion received: '{data.prompt}'. Solution derived and displayed below."
