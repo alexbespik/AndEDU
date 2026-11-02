@@ -2438,125 +2438,161 @@ async def post_user_prompt(data: AgyPromptModel):
     messages.append(user_msg)
 
     reply_content = ""
-    system_inst = (
-        "You are the AGY Autonomous Physics & STEM Coding Assistant embedded inside SciEdu Studio. "
-        "You have full autonomous power to create, update, and manipulate the workspace directly using your tools. "
-        "When the user asks you to change or control the simulation (e.g. 'give ability to change cos of collision', 'change restitution', 'set e=0.5'): "
-        "- Use `set_simulation_config` to dynamically alter the simulation parameters (restitution e, impact_offset cos theta, etc.) on screen! "
-        "- Use `create_or_update_lesson` to generate or enhance lessons with KaTeX equations, cheat-sheets, and quizzes. "
-        "- Use `switch_page` to navigate the workspace to the simulation or quiz tab. "
-        "ALWAYS invoke the tool so the application physically updates on the user's screen in real time!"
-    )
+    agy_bin = "/opt/homebrew/bin/agy"
+    project_dir = Path(__file__).parent
 
-    try:
-        resp = call_gemini(
-            contents=data.prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_inst,
-                temperature=0.3,
-                tools=[agy_agent_tools]
+    # 1. ATTEMPT FULL AUTONOMOUS EXECUTION VIA GOOGLE ANTIGRAVITY (AGY) CLI
+    if Path(agy_bin).exists():
+        try:
+            print(f"[AGY RUNNER] Spawning Google Antigravity CLI for prompt: '{data.prompt[:80]}'...")
+            agy_proc = subprocess.run(
+                [agy_bin, "--dangerously-skip-permissions", f"-p={data.prompt}"],
+                cwd=str(project_dir),
+                capture_output=True,
+                text=True,
+                timeout=80
             )
-        )
-
-        for call in (resp.function_calls or []):
-            if call.name == "set_simulation_config":
-                args = dict(call.args)
+            if agy_proc.returncode == 0 and agy_proc.stdout.strip():
+                reply_content = agy_proc.stdout.strip()
+                print(f"[AGY RUNNER] Antigravity successfully completed task!")
+                
+                # Hot-reload topic and view in frontend
                 ui_events_queue.append({
                     "id": f"evt-{int(time.time()*1000)}",
-                    "type": "SET_SIM_CONFIG",
-                    "payload": args
+                    "type": "TOPIC_UPDATED",
+                    "payload": {"topicId": data.topicId, "autoSelect": True}
                 })
                 ui_events_queue.append({
                     "id": f"evt-{int(time.time()*1000)+1}",
                     "type": "SWITCH_TAB",
                     "payload": {"tab": "simulation"}
                 })
-                reply_content = (
-                    f"🎛️ **Live Simulation Parameters Updated!**\n\n"
-                    f"I have modified the simulation state on your screen:\n"
-                    + (f"- **Coefficient of Restitution (e)**: `{args.get('restitution')}`\n" if 'restitution' in args else "")
-                    + (f"- **Impact Offset (cos θ parameter)**: `{args.get('impact_offset')}`\n" if 'impact_offset' in args else "")
-                    + (f"- **Cue Height (h/R)**: `{args.get('strike_height')}`\n" if 'strike_height' in args else "")
-                    + "\nThe controls and live canvas have been updated in real time on your screen."
+        except subprocess.TimeoutExpired:
+            print("[AGY RUNNER] Antigravity process timed out after 80s, falling back to direct model...")
+        except Exception as agy_err:
+            print(f"[AGY RUNNER EXCEPTION]: {agy_err}, falling back to direct model...")
+
+    # 2. FALLBACK TO DIRECT GEMINI WITH FUNCTION CALLING TOOLS IF AGY CLI WAS NOT AVAILABLE
+    if not reply_content:
+        system_inst = (
+            "You are the AGY Autonomous Physics & STEM Coding Assistant embedded inside SciEdu Studio. "
+            "You have full autonomous power to create, update, and manipulate the workspace directly using your tools. "
+            "When the user asks you to change or control the simulation (e.g. 'give ability to change cos of collision', 'change restitution', 'set e=0.5'): "
+            "- Use `set_simulation_config` to dynamically alter the simulation parameters (restitution e, impact_offset cos theta, etc.) on screen! "
+            "- Use `create_or_update_lesson` to generate or enhance lessons with KaTeX equations, cheat-sheets, and quizzes. "
+            "- Use `switch_page` to navigate the workspace to the simulation or quiz tab. "
+            "ALWAYS invoke the tool so the application physically updates on the user's screen in real time!"
+        )
+
+        try:
+            resp = call_gemini(
+                contents=data.prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_inst,
+                    temperature=0.3,
+                    tools=[agy_agent_tools]
                 )
-                break
+            )
 
-            elif call.name == "create_or_update_lesson":
-                args = dict(call.args)
-                tid = args.get("id", f"topic-{int(time.time())}")
-                tfile = TOPICS_DIR / f"{tid}.json"
-                
-                topic_data = {
-                    "id": tid,
-                    "title": args.get("title", "New Lesson"),
-                    "category": args.get("category", "Theoretical Physics"),
-                    "difficulty": args.get("difficulty", "Undergraduate"),
-                    "simulationType": args.get("simulationType"),
-                    "summary": args.get("summary", ""),
-                    "cheatSheet": args.get("cheatSheet", []),
-                    "mermaid": args.get("mermaid", ""),
-                    "markdownContent": args.get("markdownContent", ""),
-                    "quiz": args.get("quiz", [])
-                }
-                save_json_file(tfile, topic_data)
+            for call in (resp.function_calls or []):
+                if call.name == "set_simulation_config":
+                    args = dict(call.args)
+                    ui_events_queue.append({
+                        "id": f"evt-{int(time.time()*1000)}",
+                        "type": "SET_SIM_CONFIG",
+                        "payload": args
+                    })
+                    ui_events_queue.append({
+                        "id": f"evt-{int(time.time()*1000)+1}",
+                        "type": "SWITCH_TAB",
+                        "payload": {"tab": "simulation"}
+                    })
+                    reply_content = (
+                        f"🎛️ **Live Simulation Parameters Updated!**\n\n"
+                        f"I have modified the simulation state on your screen:\n"
+                        + (f"- **Coefficient of Restitution (e)**: `{args.get('restitution')}`\n" if 'restitution' in args else "")
+                        + (f"- **Impact Offset (cos θ parameter)**: `{args.get('impact_offset')}`\n" if 'impact_offset' in args else "")
+                        + (f"- **Cue Height (h/R)**: `{args.get('strike_height')}`\n" if 'strike_height' in args else "")
+                        + "\nThe controls and live canvas have been updated in real time on your screen."
+                    )
+                    break
 
-                ui_events_queue.append({
-                    "id": f"evt-{int(time.time()*1000)}",
-                    "type": "TOPIC_CREATED",
-                    "payload": {"topicId": tid, "title": topic_data["title"]}
-                })
-                
-                target_tab = "simulation" if topic_data.get("simulationType") else "theory"
-                ui_events_queue.append({
-                    "id": f"evt-{int(time.time()*1000)+1}",
-                    "type": "SWITCH_TOPIC",
-                    "payload": {"topicId": tid, "tab": target_tab, "mode": "physics"}
-                })
+                elif call.name == "create_or_update_lesson":
+                    args = dict(call.args)
+                    tid = args.get("id", f"topic-{int(time.time())}")
+                    tfile = TOPICS_DIR / f"{tid}.json"
+                    
+                    topic_data = {
+                        "id": tid,
+                        "title": args.get("title", "New Lesson"),
+                        "category": args.get("category", "Theoretical Physics"),
+                        "difficulty": args.get("difficulty", "Undergraduate"),
+                        "simulationType": args.get("simulationType"),
+                        "summary": args.get("summary", ""),
+                        "cheatSheet": args.get("cheatSheet", []),
+                        "mermaid": args.get("mermaid", ""),
+                        "markdownContent": args.get("markdownContent", ""),
+                        "quiz": args.get("quiz", [])
+                    }
+                    save_json_file(tfile, topic_data)
 
-                q_count = len(topic_data.get("quiz", []))
-                reply_content = (
-                    f"🎉 **New Lesson Generated & Workspace Updated!**\n\n"
-                    f"I have created **{topic_data['title']}** with:\n"
-                    f"- Full KaTeX scientific derivations\n"
-                    f"- Key formulas cheat sheet\n"
-                    f"- Interactive simulation: `{topic_data.get('simulationType', 'theory')}`\n"
-                    f"- Assessment quiz ({q_count} questions)\n\n"
-                    f"🚀 *I have switched your workspace directly to this lesson.*"
-                )
-                break
+                    ui_events_queue.append({
+                        "id": f"evt-{int(time.time()*1000)}",
+                        "type": "TOPIC_CREATED",
+                        "payload": {"topicId": tid, "title": topic_data["title"]}
+                    })
+                    
+                    target_tab = "simulation" if topic_data.get("simulationType") else "theory"
+                    ui_events_queue.append({
+                        "id": f"evt-{int(time.time()*1000)+1}",
+                        "type": "SWITCH_TOPIC",
+                        "payload": {"topicId": tid, "tab": target_tab, "mode": "physics"}
+                    })
 
-            elif call.name == "switch_page":
-                args = dict(call.args)
-                tid = args.get("topic_id")
-                tab = args.get("tab", "theory")
-                mode = args.get("mode", "physics")
+                    q_count = len(topic_data.get("quiz", []))
+                    reply_content = (
+                        f"🎉 **New Lesson Generated & Workspace Updated!**\n\n"
+                        f"I have created **{topic_data['title']}** with:\n"
+                        f"- Full KaTeX scientific derivations\n"
+                        f"- Key formulas cheat sheet\n"
+                        f"- Interactive simulation: `{topic_data.get('simulationType', 'theory')}`\n"
+                        f"- Assessment quiz ({q_count} questions)\n\n"
+                        f"🚀 *I have switched your workspace directly to this lesson.*"
+                    )
+                    break
 
-                ui_events_queue.append({
-                    "id": f"evt-{int(time.time()*1000)}",
-                    "type": "SWITCH_TOPIC",
-                    "payload": {"topicId": tid, "tab": tab, "mode": mode}
-                })
-                reply_content = f"🔄 Switched workspace view to **{tid or mode}** ({tab} tab)."
-                break
+                elif call.name == "switch_page":
+                    args = dict(call.args)
+                    tid = args.get("topic_id")
+                    tab = args.get("tab", "theory")
+                    mode = args.get("mode", "physics")
 
-            elif call.name == "execute_python_code":
-                args = dict(call.args)
-                code_payload = ExecuteCodePayload(code=args.get("code", ""), test_code=args.get("test_code", ""))
-                exec_res = await execute_code(code_payload)
-                reply_content = (
-                    f"⚡ **Execution Result:**\n```\n{exec_res.get('stdout', '')}\n{exec_res.get('stderr', '')}\n```\n"
-                    f"Status: {'Passed' if exec_res.get('tests_passed') else 'Error'}"
-                )
-                break
+                    ui_events_queue.append({
+                        "id": f"evt-{int(time.time()*1000)}",
+                        "type": "SWITCH_TOPIC",
+                        "payload": {"topicId": tid, "tab": tab, "mode": mode}
+                    })
+                    reply_content = f"🔄 Switched workspace view to **{tid or mode}** ({tab} tab)."
+                    break
 
-        if not reply_content:
-            try:
-                reply_content = resp.text.strip()
-            except Exception:
-                pass
+                elif call.name == "execute_python_code":
+                    args = dict(call.args)
+                    code_payload = ExecuteCodePayload(code=args.get("code", ""), test_code=args.get("test_code", ""))
+                    exec_res = await execute_code(code_payload)
+                    reply_content = (
+                        f"⚡ **Execution Result:**\n```\n{exec_res.get('stdout', '')}\n{exec_res.get('stderr', '')}\n```\n"
+                        f"Status: {'Passed' if exec_res.get('tests_passed') else 'Error'}"
+                    )
+                    break
 
-    except Exception as e:
-        print("[ERROR agy prompt Gemini call with tools]:", e)
+            if not reply_content:
+                try:
+                    reply_content = resp.text.strip()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print("[ERROR agy prompt Gemini call with tools]:", e)
 
     if not reply_content:
         reply_content = f"AGY Companion received: '{data.prompt}'. Solution derived and displayed below."

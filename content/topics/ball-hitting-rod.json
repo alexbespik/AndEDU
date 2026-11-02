@@ -1,0 +1,55 @@
+{
+  "id": "ball-hitting-rod",
+  "title": "Ball Hitting a Rod",
+  "category": "Rigid Body Dynamics",
+  "difficulty": "Undergraduate",
+  "simulationType": "ball_hitting_rod",
+  "summary": "Explore the impulsive collision between a moving ball and a rigid rod, analyzing momentum transfer, impulse, and angular rotation.",
+  "cheatSheet": [
+    {
+      "name": "Linear Impulse",
+      "desc": "Relates linear impulse $J$ to change in linear momentum",
+      "formula": "J = m(v_f - v_i)"
+    },
+    {
+      "formula": "\\int \\tau dt = I(\\omega_f - \\omega_i)",
+      "desc": "Relates angular impulse $\\tau dt$ to change in angular momentum",
+      "name": "Angular Impulse"
+    },
+    {
+      "name": "Coefficient of Restitution",
+      "formula": "v_{\\text{contact}} = v_{\\text{rod}} + \\omega \\times r = -e (v_{\\text{ball,in}} - v_{\\text{contact,in}})",
+      "desc": "Relates velocity of a point on the rod to ball velocity after impact"
+    }
+  ],
+  "mermaid": "",
+  "markdownContent": "# Ball Hitting a Rod: Dynamics of Impulse and Rigid Body Rotation\n\nWhen a moving ball strikes a stationary or moving rod, the collision happens over an extremely short duration $\\Delta t$. During this impact, large impulsive forces act between the ball and the contact point on the rod. By applying the principles of **impulse and momentum**, we can solve for the resulting linear and angular velocities of both bodies.\n\n---\n\n## 1. Principles of Impulse and Momentum\n\n### Linear Impulse for the Ball\nLet a ball of mass $m$ with initial velocity $\\vec{v}_0$ strike a rod at distance $r$ from the rod's center of mass. During the impact, an impulse $J$ acts normal to the rod's surface:\n$$J = m v_{\\text{ball,f}} - m v_{\\text{ball,i}}$$\n\n### Angular Impulse for the Rod\nThe impulse $J$ exerts a torque about the center of mass of the rod:\n$$\\tau = J \\cdot r$$\nThe resulting change in angular velocity $\\omega$ of the rod is given by:\n$$J \\cdot r = I \\omega$$\nwhere $I = \\frac{1}{12} M L^2$ is the moment of inertia of a uniform rod of mass $M$ and length $L$ about its center of mass.\n\n---\n\n## 2. Coefficient of Restitution ($e$)\n\nThe elasticity of the collision is governed by the coefficient of restitution $e$:\n$$e = -\\frac{v_{\\text{ball,f}} - v_{\\text{contact,f}}}{v_{\\text{ball,i}} - v_{\\text{contact,i}}}$$\n\nWhere $v_{\\text{contact,f}}$ is the velocity of the impact point on the rod after collision:\n$$v_{\\text{contact,f}} = v_{\\text{rod,cm}} + \\omega \\cdot r$$\n\n---\n\n## 3. Conservation of Angular Momentum\n\nIf we consider the system (Ball + Rod) about the fixed pivot (if hinged) or about the instantaneous center of percussion, external impulsive reaction forces at the hinge are eliminated if we take moments about the hinge! For a free rod, linear momentum and angular momentum about the center of mass are conserved:\n$$L_{\\text{initial}} = m v_0 r = L_{\\text{final}} = m v_{\\text{ball,f}} r + I \\omega$$\n",
+  "quiz": [
+    {
+      "id": 1,
+      "options": [
+        "Zero torque because the rod is uniform",
+        "Torque equals $J \\cdot r$ where $r$ is the distance from CM",
+        "Torque equals $J \\cdot L$",
+        "Torque depends only on the ball's mass"
+      ],
+      "question": "What torque is imparted to the rod during the impulsive collision?",
+      "explanation": "The impulse acts perpendicularly to the rod surface at the contact point, creating a torque $J \\cdot r$ about the center of mass.",
+      "correct": 1,
+      "hint": "Consider torque as force multiplied by the perpendicular distance from the center of mass."
+    },
+    {
+      "id": 2,
+      "correct": 2,
+      "question": "How is the coefficient of restitution $e$ defined for a ball-rod collision at the contact point?",
+      "explanation": "The coefficient of restitution relates the relative separation velocity to the relative approach velocity along the line of impact: $e = \\frac{v_{\\text{sep}}}{v_{\\text{app}}}$.",
+      "hint": "Look at the ratio of relative velocities before and after impact.",
+      "options": [
+        "$e = \\frac{v_{\\text{ball,f}}}{v_{\\text{ball,i}}}$",
+        "$e = \\frac{\\omega_{\\text{f}}}{\\omega_{\\text{i}}}$",
+        "$e = -\\frac{v_{\\text{ball,f}} - v_{\\text{contact,f}}}{v_{\\text{ball,i}} - v_{\\text{contact,i}}}$",
+        "$e = 1 - \\frac{M}{m}$"
+      ]
+    }
+  ]
+}
