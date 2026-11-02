@@ -9,6 +9,8 @@ export default function BilliardSim({ config }) {
   const [strikeSpeed, setStrikeSpeed] = useState(240); // px/s
   const [restitution, setRestitution] = useState(1.0); // e: 0.0 (inelastic) to 1.0 (elastic)
   const [impactOffset, setImpactOffset] = useState(0.0); // b / R: -1.7 to +1.7 (changes cos theta)
+  const [mu_k, setMu_k] = useState(0.28); // Kinetic friction coefficient with cloth
+  const [enableFriction, setEnableFriction] = useState(true); // Toggle friction ON/OFF
   const [aimAngleDeg, setAimAngleDeg] = useState(0); // degrees
   const [showVectors, setShowVectors] = useState(true);
   const [showFriction, setShowFriction] = useState(true);
@@ -34,6 +36,13 @@ export default function BilliardSim({ config }) {
       }
       if (typeof config.strike_speed === 'number') {
         setStrikeSpeed(Math.max(100, Math.min(450, config.strike_speed)));
+      }
+      if (typeof config.friction === 'number') {
+        setMu_k(Math.max(0, Math.min(1.0, config.friction)));
+        setEnableFriction(config.friction > 0);
+      }
+      if (typeof config.enableFriction === 'boolean') {
+        setEnableFriction(config.enableFriction);
       }
       handleResetRack();
     }
@@ -61,7 +70,7 @@ export default function BilliardSim({ config }) {
     k_before_impact: 0
   });
 
-  const mu_k = 0.28; // Kinetic friction coefficient with cloth
+  const effectiveMuK = enableFriction ? mu_k : 0.0;
   const g = 600; // Scaled gravity for responsive physics
   const I_factor = 0.4; // 2/5 for solid sphere
 
@@ -165,11 +174,11 @@ export default function BilliardSim({ config }) {
 
           if (Math.abs(v_contact) > 1.5) {
             const fk_dir = v_contact > 0 ? -1 : 1;
-            const dv = fk_dir * (mu_k * g) * dt;
+            const dv = fk_dir * (effectiveMuK * g) * dt;
             const newV = Math.max(0, v + dv);
             ball.vx = newV * dirX;
             ball.vy = newV * dirY;
-            const d_omega = -fk_dir * (2.5 * mu_k * g / R) * dt;
+            const d_omega = -fk_dir * (2.5 * effectiveMuK * g / R) * dt;
             ball.omega += d_omega;
           } else {
             const rollDecel = 28 * dt;
@@ -583,6 +592,7 @@ export default function BilliardSim({ config }) {
             <span>COLLISION DYNAMICS TELEMETRY:</span>
           </div>
           <div>Restitution (e): <span style={{ color: theme.accentGreen, fontWeight: 700 }}>{restitution.toFixed(2)}</span> ({restitution === 1 ? 'Elastic' : restitution === 0 ? 'Totally Inelastic' : 'Inelastic'})</div>
+          <div>Felt Friction (μk): <span style={{ color: enableFriction ? theme.accentPink : theme.accentGreen, fontWeight: 700 }}>{enableFriction ? `${mu_k.toFixed(2)} (Active)` : '0.00 (Frictionless Table)'}</span></div>
           <div>Collision Angle (θ): <span style={{ color: theme.accentCyan, fontWeight: 700 }}>{hudData.theta_deg}°</span> (cos θ = <strong style={{ color: theme.accentGold }}>{hudData.cos_theta}</strong>)</div>
           <div>Cue Ball Speed (v1): <span style={{ color: theme.accentCyan, fontWeight: 700 }}>{hudData.b1_v} px/s</span></div>
           <div>Object Ball Speed (v2): <span style={{ color: theme.accentGold, fontWeight: 700 }}>{hudData.b2_v} px/s</span></div>
@@ -676,6 +686,86 @@ export default function BilliardSim({ config }) {
           </button>
         </div>
 
+        {/* Table Felt Friction (μk) Controls */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          background: theme.bgCard,
+          padding: '8px 12px',
+          borderRadius: 6,
+          border: `1px solid ${theme.border}`,
+          flexWrap: 'wrap'
+        }}>
+          <span style={{ fontSize: '0.76rem', fontFamily: theme.fontMono, color: theme.accentPink, fontWeight: 700 }}>
+            FELT FRICTION (μk):
+          </span>
+          <button
+            onClick={() => setEnableFriction(!enableFriction)}
+            style={{
+              background: enableFriction ? theme.accentGreen : '#e06c75',
+              color: '#000000',
+              border: 'none',
+              padding: '3px 10px',
+              borderRadius: 4,
+              fontSize: '0.74rem',
+              fontFamily: theme.fontMono,
+              fontWeight: 800,
+              cursor: 'pointer'
+            }}
+          >
+            {enableFriction ? '✓ Friction: ACTIVE' : '✗ Friction: REMOVED (0.00)'}
+          </button>
+          <button
+            onClick={() => { setEnableFriction(true); setMu_k(0.28); }}
+            style={{
+              background: enableFriction && mu_k === 0.28 ? theme.accentGold : theme.bgPanel,
+              color: enableFriction && mu_k === 0.28 ? '#000000' : theme.textMain,
+              border: `1px solid ${theme.border}`,
+              padding: '3px 8px',
+              borderRadius: 4,
+              fontSize: '0.74rem',
+              fontFamily: theme.fontMono,
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            Standard Felt (μk = 0.28)
+          </button>
+          <button
+            onClick={() => { setEnableFriction(true); setMu_k(0.12); }}
+            style={{
+              background: enableFriction && mu_k === 0.12 ? theme.accentCyan : theme.bgPanel,
+              color: enableFriction && mu_k === 0.12 ? '#000000' : theme.textMain,
+              border: `1px solid ${theme.border}`,
+              padding: '3px 8px',
+              borderRadius: 4,
+              fontSize: '0.74rem',
+              fontFamily: theme.fontMono,
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            Slick Speed Felt (μk = 0.12)
+          </button>
+          <button
+            onClick={() => { setEnableFriction(false); setMu_k(0.0); }}
+            style={{
+              background: !enableFriction ? '#e06c75' : theme.bgPanel,
+              color: !enableFriction ? '#ffffff' : theme.textMain,
+              border: `1px solid ${theme.border}`,
+              padding: '3px 8px',
+              borderRadius: 4,
+              fontSize: '0.74rem',
+              fontFamily: theme.fontMono,
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            Zero Friction Air Table (μk = 0.0)
+          </button>
+        </div>
+
         {/* Collision Angle / Impact Offset Presets */}
         <div style={{
           display: 'flex',
@@ -760,10 +850,38 @@ export default function BilliardSim({ config }) {
       {/* Dynamic Sliders Grid */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
         gap: 12
       }}>
-        {/* Slider 1: Coefficient of Restitution e */}
+        {/* Slider 1: Table Felt Friction μk */}
+        <div style={{ background: theme.bgCard, padding: 12, borderRadius: 6, border: `1px solid ${theme.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontMono, marginBottom: 6 }}>
+            <span>Felt Friction (μk):</span>
+            <span style={{ color: enableFriction ? theme.accentPink : '#e06c75', fontWeight: 700 }}>
+              {enableFriction ? mu_k.toFixed(2) : '0.00 (Frictionless)'}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0.0"
+            max="0.5"
+            step="0.02"
+            value={enableFriction ? mu_k : 0}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setMu_k(val);
+              setEnableFriction(val > 0);
+            }}
+            style={{ width: '100%', accentColor: theme.accentPink }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: theme.textMuted, marginTop: 4 }}>
+            <span>0.0 (Air Table)</span>
+            <span>0.28 (Standard)</span>
+            <span>0.50</span>
+          </div>
+        </div>
+
+        {/* Slider 2: Coefficient of Restitution e */}
         <div style={{ background: theme.bgCard, padding: 12, borderRadius: 6, border: `1px solid ${theme.border}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontMono, marginBottom: 6 }}>
             <span>Restitution Coefficient (e):</span>
