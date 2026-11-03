@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Upload, X, Loader2, BookOpen, Target, ListPlus } from 'lucide-react';
+import { Upload, X, Loader2, BookOpen, Target, ListPlus, Code2, Plus } from 'lucide-react';
 import { api, uploadFiles, useAgyEvents } from '../lib/api';
 
 export const STATUS = {
@@ -14,12 +14,13 @@ const INTENTS = [
   { id: 'learn', icon: BookOpen, title: 'Learn it', text: 'A diagnostic, then a sequence of classes built around your gaps.' },
   { id: 'test_prep', icon: Target, title: 'Prepare for a test', text: 'Exam-focused review classes, exam-style quizzes and a final mock exam.' },
   { id: 'continue', icon: ListPlus, title: 'Continue a course', text: 'New materials become the next classes of a course you already have.' },
+  { id: 'code', icon: Code2, title: 'Coding practice', text: 'Hands-on exercises in the IDE: fill-in slots, block ordering and code you run.' },
 ];
 
 /**
  * The one place materials go in: drop files or paste notes, say what you want, pick learn / test prep / continue.
  */
-export function StudyHub({ userId, courses = [], preset, onOpened, lockIntent = false }) {
+export function StudyHub({ userId, courses = [], preset, onOpened, onCodePractice, onCancel, lockIntent = false }) {
   const [intent, setIntent] = useState(preset?.intent || 'learn');
   const [target, setTarget] = useState(preset?.courseId || '');
   const [goal, setGoal] = useState('');
@@ -62,6 +63,11 @@ export function StudyHub({ userId, courses = [], preset, onOpened, lockIntent = 
       }
       const base = { goal: goal.trim(), materials_text: materials, filenames: files.map((f) => f.name),
                      class_count: classes ? Number(classes) : null };
+      if (intent === 'code') {
+        onCodePractice({ topic: goal.trim(), text: materials, chapters: classes ? Number(classes) : null,
+                         files: files.map((f) => f.name), at: Date.now() });
+        return;
+      }
       if (intent === 'continue') {
         setStep('Planning the next classes');
         await api(`/api/courses/${target}/extend`, { method: 'POST', body: base });
@@ -82,16 +88,20 @@ export function StudyHub({ userId, courses = [], preset, onOpened, lockIntent = 
 
   const enough = goal.trim().length + text.trim().length >= 20 || files.length > 0;
   const ready = enough && (intent !== 'continue' || target);
-  const goalLabel = { learn: 'What do you want to learn?', test_prep: 'Which test, and what does it cover?', continue: 'What should the next classes cover?' }[intent];
+  const goalLabel = { learn: 'What do you want to learn?', test_prep: 'Which test, and what does it cover?',
+                      continue: 'What should the next classes cover?', code: 'What do you want to practise coding?' }[intent];
   const goalHint = { learn: 'e.g. Rotational dynamics for Physics 101', test_prep: 'e.g. Chem 121 final: stoichiometry, gases, thermochemistry',
-                     continue: 'e.g. Next week: angular momentum and gyroscopes' }[intent];
+                     continue: 'e.g. Next week: angular momentum and gyroscopes', code: 'e.g. Python loops and the accumulator pattern' }[intent];
 
   return (
     <form ref={rootRef} className="panel stack hub" onSubmit={submit} aria-labelledby="hub-h">
-      <div>
-        <h2 id="hub-h">{lockIntent ? 'Continue this course' : 'Add materials'}</h2>
+      <div className="page-head" style={{ alignItems: 'flex-start' }}>
+       <div>
+        <h2 id="hub-h">{lockIntent ? 'Continue this course' : 'New course'}</h2>
         <p className="hint">{lockIntent ? 'New materials become the next classes, built on what you already did.'
           : 'Drop slides, notes or a problem set, then choose what to do with them.'}</p>
+       </div>
+        {onCancel && <button type="button" className="btn btn-quiet btn-sm" onClick={onCancel}>Cancel</button>}
       </div>
 
       <div className="dropzone dropzone-lg" data-over={over}
@@ -162,14 +172,14 @@ export function StudyHub({ userId, courses = [], preset, onOpened, lockIntent = 
               placeholder="Syllabus, lecture notes, a problem set…" />
           </div>
           <div className="btn-row" style={{ gap: 'var(--space-4)' }}>
-            {intent !== 'continue' && (
+            {(intent === 'learn' || intent === 'test_prep') && (
               <div className="field" style={{ width: 170 }}>
                 <label htmlFor="hub-q">Diagnostic questions</label>
                 <input id="hub-q" className="input num" type="number" min={4} max={15} value={questions} onChange={(e) => setQuestions(e.target.value)} />
               </div>
             )}
             <div className="field" style={{ width: 170 }}>
-              <label htmlFor="hub-c">{intent === 'continue' ? 'New classes' : 'Classes'}</label>
+              <label htmlFor="hub-c">{{ continue: 'New classes', code: 'Chapters' }[intent] || 'Classes'}</label>
               <input id="hub-c" className="input num" type="number" min={1} max={12} value={classes} placeholder="Auto"
                 onChange={(e) => setClasses(e.target.value)} />
             </div>
@@ -177,11 +187,14 @@ export function StudyHub({ userId, courses = [], preset, onOpened, lockIntent = 
         </div>
       </details>
 
+      {intent !== 'code' && (
+        <p className="hint">Every class comes with a lesson, simulation, quiz, practice, a Socratic tutor and a spoken lecture (in its More menu).</p>
+      )}
       {error && <p className="notice notice-bad" role="alert">{error}</p>}
       <div className="btn-row">
         <button type="submit" className="btn btn-gold" disabled={!ready || Boolean(step)}>
           {step ? <><Loader2 size={16} className="spin" aria-hidden="true" /> {step}</>
-            : { learn: 'Build my course', test_prep: 'Build my test prep', continue: 'Add the next classes' }[intent]}
+            : { learn: 'Build my course', test_prep: 'Build my test prep', continue: 'Add the next classes', code: 'Open in the IDE' }[intent]}
         </button>
         {!enough && <span className="hint">Add a file, or write at least a sentence about what you want.</span>}
       </div>
@@ -189,9 +202,10 @@ export function StudyHub({ userId, courses = [], preset, onOpened, lockIntent = 
   );
 }
 
-export default function CoursesHome({ user, onOpenCourse }) {
+export default function CoursesHome({ user, onOpenCourse, onCodePractice, initialPreset }) {
   const [courses, setCourses] = useState(null);
-  const [preset, setPreset] = useState(null);
+  const [preset, setPreset] = useState(initialPreset || null);
+  const [creating, setCreating] = useState(Boolean(initialPreset));
   const [error, setError] = useState(null);
 
   const load = useCallback(() => {
@@ -210,9 +224,17 @@ export default function CoursesHome({ user, onOpenCourse }) {
           <h1>My courses</h1>
           <p>Everything you study starts here. Each course remembers your diagnostic, your quiz scores and every class written for you.</p>
         </div>
+        {!creating && (
+          <button type="button" className="btn btn-gold" onClick={() => { setPreset(null); setCreating(true); }}>
+            <Plus size={16} aria-hidden="true" /> New course
+          </button>
+        )}
       </div>
 
-      <StudyHub userId={user.id} courses={courses || []} preset={preset} onOpened={onOpenCourse} />
+      {(creating || (courses && courses.length === 0)) && (
+        <StudyHub userId={user.id} courses={courses || []} preset={preset} onOpened={onOpenCourse} onCodePractice={onCodePractice}
+          onCancel={courses && courses.length ? () => setCreating(false) : undefined} />
+      )}
       {error && <p className="notice notice-bad" role="alert">{error}</p>}
       {courses === null && !error && <p className="hint">Loading your courses…</p>}
 
@@ -243,7 +265,7 @@ export default function CoursesHome({ user, onOpenCourse }) {
                   <div className="btn-row" style={{ marginTop: 'auto' }}>
                     <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpenCourse(c.id)}>Open</button>
                     {canExtend && (
-                      <button type="button" className="btn btn-quiet btn-sm" onClick={() => setPreset({ intent: 'continue', courseId: c.id, at: Date.now() })}>
+                      <button type="button" className="btn btn-quiet btn-sm" onClick={() => { setCreating(true); setPreset({ intent: 'continue', courseId: c.id, at: Date.now() }); }}>
                         <ListPlus size={14} aria-hidden="true" /> Add materials
                       </button>
                     )}

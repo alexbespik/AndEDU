@@ -48,6 +48,64 @@ export function freeVariables(src) {
   return [...names];
 }
 
+// ---- numeric analysis on a compiled f(x) ----
+const dfdx = (f, x) => { const h = 1e-5 * Math.max(1, Math.abs(x)); return (f(x + h) - f(x - h)) / (2 * h); };
+
+function bisect(g, a, b) {
+  let ga = g(a);
+  for (let k = 0; k < 60; k++) {
+    const m = (a + b) / 2, gm = g(m);
+    if (!Number.isFinite(gm)) return null;
+    if (gm === 0) return m;
+    if ((ga < 0) === (gm < 0)) { a = m; ga = gm; } else b = m;
+  }
+  return (a + b) / 2;
+}
+
+/** Sign changes of g on [x0, x1]; poles (where |f| blows up) are not reported as roots. */
+function signChanges(g, x0, x1, check, n = 600) {
+  const out = [];
+  let px = x0, pv = g(x0);
+  for (let i = 1; i <= n; i++) {
+    const x = x0 + ((x1 - x0) * i) / n, v = g(x);
+    if (Number.isFinite(pv) && Number.isFinite(v)) {
+      if (v === 0) out.push(x);
+      else if ((pv < 0) !== (v < 0) && pv !== 0) {
+        const r = bisect(g, px, x);
+        if (r !== null && check(r)) out.push(r);
+      }
+    }
+    px = x; pv = v;
+  }
+  return out.filter((r, i) => i === 0 || Math.abs(r - out[i - 1]) > (x1 - x0) / n);
+}
+
+export function analyze(f, x0, x1) {
+  const span = x1 - x0;
+  const roots = signChanges(f, x0, x1, (r) => Math.abs(f(r)) < 1e-6 * (1 + span));
+  const d = (x) => dfdx(f, x);
+  const extrema = signChanges(d, x0, x1, (r) => Number.isFinite(f(r)) && Math.abs(d(r)) < 1e-3 * (1 + Math.abs(f(r))))
+    .map((x) => ({ x, y: f(x), kind: dfdx(d, x) > 0 ? 'min' : 'max' }));
+  return { roots, extrema, y0: f(0) };
+}
+
+export function integrate(f, a, b, n = 2000) {
+  if (a === b) return 0;
+  const h = (b - a) / n;
+  let sum = f(a) + f(b);
+  for (let i = 1; i < n; i++) sum += f(a + i * h) * (i % 2 ? 4 : 2);
+  return (sum * h) / 3;
+}
+
+const EXAMPLES = [
+  ['Parabola', ['a*(x - h)^2 + k']],
+  ['Waves', ['A*sin(w*x)', 'A*cos(w*x)']],
+  ['Growth & decay', ['exp(r*x)', 'exp(-r*x)']],
+  ['Asymptotes', ['1/(x - a)', '(x^2 - 1)/(x^2 - 4)']],
+  ['Normal curve', ['exp(-(x - m)^2 / (2*s^2)) / (s*sqrt(2*pi))']],
+  ['Polynomial', ['x^3 - 3x + c']],
+];
+
 function niceStep(span) {
   const raw = span / 14;
   const p = 10 ** Math.floor(Math.log10(raw));
@@ -59,10 +117,14 @@ function GraphTab({ userId }) {
   const [rows, setRows] = useState(() => store.get(key, { list: ['sin(x)', 'a*x^2 + b'], params: {} }));
   const [view, setView] = useState({ cx: 0, cy: 0, scale: 50 }); // px per unit
   const [hover, setHover] = useState(null);
+  const [size, setSize] = useState({ W: 800, H: 600 });
+  const [tools, setTools] = useState(() => store.get(`${key}_tools`, { sel: 0, deriv: false, tangent: true, area: false, a: 0, b: 1 }));
+  const [calc, setCalc] = useState('');
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
 
   useEffect(() => { store.set(key, rows); }, [key, rows]);
+  useEffect(() => { store.set(`${key}_tools`, tools); }, [key, tools]);
 
   const curves = useMemo(() => rows.list.map((text) => {
     const src = normalizeFormula(text);
@@ -76,6 +138,12 @@ function GraphTab({ userId }) {
     for (const n of vars) s[n] = (rows.params[n] || { value: 1 }).value;
     return s;
   }, [vars, rows.params]);
+
+  const sel = curves[tools.sel] && !curves[tools.sel].err && curves[tools.sel].src ? tools.sel : curves.findIndex((c) => !c.err && c.src);
+  const selFn = useMemo(() => (sel >= 0 ? (x) => curves[sel].fn({ ...scopeBase, x }) : null), [sel, curves, scopeBase]);
+  const xRange = [view.cx - size.W / 2 / view.scale, view.cx + size.W / 2 / view.scale];
+  const facts = useMemo(() => (selFn ? analyze(selFn, xRange[0], xRange[1]) : null), [selFn, xRange[0], xRange[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+  const area = useMemo(() => (selFn && tools.area ? integrate(selFn, Number(tools.a), Number(tools.b)) : null), [selFn, tools.area, tools.a, tools.b]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -124,6 +192,53 @@ function GraphTab({ userId }) {
       ctx.stroke();
     });
 
+    if (selFn) {
+      const color = pal[CURVE_TOKENS[sel % CURVE_TOKENS.length]];
+      // shaded area from a to b
+      if (tools.area) {
+        const a = Number(tools.a), b = Number(tools.b);
+        ctx.fillStyle = pal.gold; ctx.globalAlpha = 0.25;
+        ctx.beginPath(); ctx.moveTo(toX(a), toY(0));
+        for (let i = 0; i <= 300; i++) { const x = a + ((b - a) * i) / 300, y = selFn(x); if (Number.isFinite(y)) ctx.lineTo(toX(x), toY(y)); }
+        ctx.lineTo(toX(b), toY(0)); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+      }
+      // derivative, dashed in the curve's color
+      if (tools.deriv) {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.setLineDash([6, 5]); ctx.beginPath();
+        let pen = false;
+        for (let px = 0; px <= W; px += 2) {
+          const y = dfdx(selFn, fromX(px));
+          if (!Number.isFinite(y) || Math.abs(y) > 1e6) { pen = false; continue; }
+          if (pen) ctx.lineTo(px, toY(y)); else { ctx.moveTo(px, toY(y)); pen = true; }
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      // roots and turning points
+      if (facts) {
+        ctx.font = '11px "IBM Plex Mono", monospace'; ctx.textAlign = 'left';
+        for (const r of facts.roots) {
+          ctx.fillStyle = pal.gold; ctx.beginPath(); ctx.arc(toX(r), toY(0), 5, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = pal['gold-text']; ctx.fillText(fmt(Number(r.toFixed(4))), toX(r) + 6, toY(0) - 7);
+        }
+        for (const p of facts.extrema) {
+          ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.fillStyle = pal.surface;
+          ctx.beginPath(); ctx.arc(toX(p.x), toY(p.y), 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = pal.ink; ctx.fillText(`${p.kind} (${fmt(Number(p.x.toFixed(3)))}, ${fmt(Number(p.y.toFixed(3)))})`, toX(p.x) + 7, toY(p.y) + (p.kind === 'max' ? -8 : 16));
+        }
+      }
+      // tangent line at the cursor
+      if (tools.tangent && hover) {
+        const y = selFn(hover.x), m = dfdx(selFn, hover.x);
+        if (Number.isFinite(y) && Number.isFinite(m)) {
+          const L = (W / scale) * 0.18;
+          ctx.strokeStyle = pal.ink; ctx.lineWidth = 1.5; ctx.beginPath();
+          ctx.moveTo(toX(hover.x - L), toY(y - m * L)); ctx.lineTo(toX(hover.x + L), toY(y + m * L)); ctx.stroke();
+          ctx.fillStyle = pal.ink; ctx.font = '11px "IBM Plex Mono", monospace'; ctx.textAlign = 'left';
+          ctx.fillText(`slope ${fmt(Number(m.toPrecision(4)))}`, toX(hover.x) + 8, toY(y) + 18);
+        }
+      }
+    }
+
     if (hover) {
       ctx.strokeStyle = pal.gold; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(hover.px, 0); ctx.lineTo(hover.px, H); ctx.stroke(); ctx.setLineDash([]);
@@ -135,11 +250,15 @@ function GraphTab({ userId }) {
         ctx.beginPath(); ctx.arc(hover.px, toY(y), 4, 0, Math.PI * 2); ctx.fill();
       });
     }
-  }, [view, curves, scopeBase, hover]);
+  }, [view, curves, scopeBase, hover, selFn, sel, tools, facts]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
-    const ro = new ResizeObserver(() => draw());
+    const ro = new ResizeObserver(() => {
+      const c = canvasRef.current;
+      if (c) setSize((sz) => (sz.W === c.clientWidth && sz.H === c.clientHeight ? sz : { W: c.clientWidth, H: c.clientHeight }));
+      draw();
+    });
     if (canvasRef.current) ro.observe(canvasRef.current);
     return () => ro.disconnect();
   }, [draw]);
@@ -173,12 +292,27 @@ function GraphTab({ userId }) {
     setHover({ px, x: view.cx + (px - r.width / 2) / view.scale });
   };
 
+  const calcResult = useMemo(() => {
+    const src = normalizeFormula(calc);
+    if (!src) return null;
+    const [fn, err] = tryCompile(src, NaN);
+    if (err) return { err: err.replace(/ in ".*"$/, '') };
+    const v = fn({ ...scopeBase, x: hover ? hover.x : 0 });
+    return Number.isFinite(v) ? { v: Number(v.toPrecision(10)) } : { err: 'Not a finite number' };
+  }, [calc, scopeBase, hover]);
   const setList = (list) => setRows((r) => ({ ...r, list }));
+  const setTool = (patch) => setTools((t) => ({ ...t, ...patch }));
+  const fmtN = (v) => Number(Number(v).toPrecision(5));
   const setParam = (n, patch) => setRows((r) => ({ ...r, params: { ...r.params, [n]: { ...param(n), ...patch } } }));
 
   return (
     <div className="math-graph">
       <div className="stack-sm math-side">
+        <div className="btn-row" style={{ gap: 'var(--space-1)' }} aria-label="Examples">
+          {EXAMPLES.map(([label, list]) => (
+            <button key={label} type="button" className="btn btn-quiet btn-sm" onClick={() => { setList(list); setTool({ sel: 0 }); }}>{label}</button>
+          ))}
+        </div>
         {curves.map((c, i) => (
           <div key={i} className="formula-row">
             <span className="swatch" style={{ background: `var(--${CURVE_TOKENS[i % CURVE_TOKENS.length]})` }} aria-hidden="true" />
@@ -220,9 +354,43 @@ function GraphTab({ userId }) {
           <Crosshair size={14} aria-hidden="true" /> Reset view
         </button>
       </div>
+      <div className="stack-sm" style={{ minWidth: 0 }}>
       <canvas ref={canvasRef} className="math-canvas" aria-label="Graph of the functions"
         onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dragRef.current = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy }; }}
         onPointerUp={() => { dragRef.current = null; }} onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)} />
+
+      <div className="math-tools panel">
+        <div className="btn-row" style={{ alignItems: 'center' }}>
+          <label className="label" htmlFor="m-sel">Analyse</label>
+          <select id="m-sel" className="input" style={{ width: 'auto', minWidth: 160 }} value={sel} onChange={(e) => setTool({ sel: Number(e.target.value) })}>
+            {curves.map((c, i) => (!c.err && c.src ? <option key={i} value={i}>f{i + 1}(x) = {c.text}</option> : null))}
+          </select>
+          <label className="check-row"><input type="checkbox" checked={tools.deriv} onChange={(e) => setTool({ deriv: e.target.checked })} /> Derivative f′</label>
+          <label className="check-row"><input type="checkbox" checked={tools.tangent} onChange={(e) => setTool({ tangent: e.target.checked })} /> Tangent at cursor</label>
+          <label className="check-row"><input type="checkbox" checked={tools.area} onChange={(e) => setTool({ area: e.target.checked })} /> Area from</label>
+          <input className="input num" style={{ width: 72 }} type="number" aria-label="Area lower limit" value={tools.a} onChange={(e) => setTool({ a: e.target.value, area: true })} />
+          <span className="hint">to</span>
+          <input className="input num" style={{ width: 72 }} type="number" aria-label="Area upper limit" value={tools.b} onChange={(e) => setTool({ b: e.target.value, area: true })} />
+        </div>
+        {facts && (
+          <dl className="facts">
+            <div><dt>Zeros in view</dt><dd className="mono">{facts.roots.length ? facts.roots.map((r) => `x = ${fmtN(r)}`).join(',  ') : 'none'}</dd></div>
+            <div><dt>Turning points</dt><dd className="mono">{facts.extrema.length ? facts.extrema.map((p) => `${p.kind} (${fmtN(p.x)}, ${fmtN(p.y)})`).join(',  ') : 'none'}</dd></div>
+            <div><dt>y-intercept</dt><dd className="mono">{Number.isFinite(facts.y0) ? fmtN(facts.y0) : 'undefined'}</dd></div>
+            {hover && <div><dt>At cursor</dt><dd className="mono">f({fmtN(hover.x)}) = {fmtN(selFn(hover.x))},  f′ = {fmtN(dfdx(selFn, hover.x))}</dd></div>}
+            {area !== null && <div><dt>∫ from {tools.a} to {tools.b}</dt><dd className="mono">{Number.isFinite(area) ? fmtN(area) : 'diverges'}</dd></div>}
+          </dl>
+        )}
+        <div className="field">
+          <label htmlFor="m-calc">Calculator (uses your sliders; x is the cursor position)</label>
+          <div className="btn-row" style={{ alignItems: 'center' }}>
+            <input id="m-calc" className="input mono" style={{ flex: '1 1 220px' }} value={calc} spellCheck={false}
+              placeholder="e.g. sqrt(2) * pi / 4" onChange={(e) => setCalc(e.target.value)} />
+            {calcResult && (calcResult.err ? <span className="hint err">{calcResult.err}</span> : <b className="num calc-out">= {calcResult.v}</b>)}
+          </div>
+        </div>
+      </div>
+      </div>
     </div>
   );
 }

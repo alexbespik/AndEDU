@@ -30,6 +30,8 @@ export default function App() {
   const [online, setOnline] = useState(true);
   const [toasts, setToasts] = useState([]);
   const [agyCli, setAgyCli] = useState(false);
+  const [ideRequest, setIdeRequest] = useState(null); // a practice set asked for in My courses
+  const [homePreset, setHomePreset] = useState(null);  // e.g. the IDE's "New practice set" opens the hub on Coding practice
 
   useEffect(() => {
     api('/api/status').then((st) => setAgyCli(Boolean(st.agy_cli_enabled))).catch(() => {});
@@ -155,7 +157,9 @@ export default function App() {
         )}
 
         <main className="main" id="main">
-          {mode === 'home' && <CoursesHome user={user} onOpenCourse={openCourse} />}
+          {mode === 'home' && (
+            <CoursesHome user={user} onOpenCourse={openCourse} initialPreset={homePreset} onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }} />
+          )}
           {mode === 'course' && courseId && (
             <CourseView key={courseId} courseId={courseId} onBack={() => switchMode('home')} onOpenTopic={(id) => openTopic(id)} />
           )}
@@ -165,7 +169,8 @@ export default function App() {
           )}
           {ideMode && (
             <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
-              <EduStudioIDE initialMode="code" onSwitchToPhysics={() => setMode('physics')} />
+              <EduStudioIDE initialMode="code" onSwitchToPhysics={() => setMode('physics')} request={ideRequest}
+                onNewPracticeSet={() => { setHomePreset({ intent: 'code', at: Date.now() }); setMode('home'); }} />
             </Suspense>
           )}
           {mode === 'math' && (

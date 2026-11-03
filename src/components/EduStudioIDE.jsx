@@ -803,13 +803,15 @@ const VSCodeMarkdown = ({ content }) => {
 // ---------------------------------------------------------------------------
 // MAIN EDU IDE COMPONENT (3-PANEL HIGH-CONTRAST ALIGNMENT)
 // ---------------------------------------------------------------------------
-const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
+const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNewPracticeSet }) => {
   // App Mode: 'code' | 'math'
   const [appMode, setAppMode] = useState(initialMode || "code");
 
   // Runs on mount too: the curriculum state starts as the code course, so Math must load its own.
+  const initializedModeRef = useRef(null);  // StrictMode runs effects twice; set the mode up once
   useEffect(() => {
-    if (initialMode === "code" || initialMode === "math") {
+    if ((initialMode === "code" || initialMode === "math") && initializedModeRef.current !== initialMode) {
+      initializedModeRef.current = initialMode;
       handleModeChange(initialMode);
     }
   }, [initialMode]);
@@ -841,7 +843,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   // High-Contrast Terminal Output
   const [terminalOutput, setTerminalOutput] = useState([
     "[SYSTEM] &.edu LAB initialized.",
-    "[STATUS] Ready. Use Left Ingestion to upload files, switch between Code & Math modes, or assemble exercises."
+    "[STATUS] Ready. New practice sets start from My courses: add materials, then choose Coding practice."
   ]);
 
   // Socratic Mentor with Theory-First Briefings
@@ -862,6 +864,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const currentProblem = flatProblems[activeProblemIndex] || flatProblems[0] || null;
   const currentChapter = chapters.find(c => c.id === (currentProblem?.chapter_id || activeChapterId)) || chapters[0];
   const activeState = problemStates[activeProblemIndex] || {};
+  const currentProblemKey = currentProblem ? `${appMode}_${currentProblem.chapter_id || 1}_${currentProblem.id}_${currentProblem.title}` : null;
 
   // Resizable Panel Dimensions ("Drag and Drop Walls")
   const compact = typeof window !== 'undefined' && window.innerWidth < 1280;
@@ -972,15 +975,16 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       if (currentBriefKeyRef.current !== problemKey) return;  // student moved on (or switched mode)
 
       setChatHistory(prev => prev.some(m => m.briefKey === problemKey) ? prev : [
-        ...prev,
-        {
+        ...prev.filter(m => !(m.isBriefing && m.problemKey === problemKey)),
+        ...[{
           role: 'model',
           isBriefing: true,
           briefKey: problemKey,
+          problemKey,
           problemId: problem.id,
           content: data.briefing,
           suggestedActions: briefActions
-        }
+        }]
       ]);
     } catch (err) {
       if (currentBriefKeyRef.current !== problemKey) return;
@@ -991,27 +995,39 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         : `**Task**: Identify the loop invariant condition.\n\n**Lead**: Look at the variable mutation on each iteration step.\n\n**Check**: Which boundary test guarantees the loop terminates without crashing?`;
 
       setChatHistory(prev => prev.some(m => m.briefKey === problemKey) ? prev : [
-        ...prev,
-        {
+        ...prev.filter(m => !(m.isBriefing && m.problemKey === problemKey)),
+        ...[{
           role: 'model',
           isBriefing: true,
           briefKey: problemKey,
+          problemKey,
           problemId: problem.id,
           content: fallbackBrief,
           suggestedActions: briefActions
-        }
+        }]
       ]);
     } finally {
       setBriefLoading(false);
     }
   };
 
-  // Trigger briefing on problem navigation
+  const handledRequestRef = useRef(null);
   useEffect(() => {
-    if (currentProblem) {
-      deliverProblemBriefing(currentProblem);
-    }
-  }, [activeProblemIndex, currentProblem?.id, currentProblem?.title, appMode]);
+    if (!request || handledRequestRef.current === request.at) return;
+    handledRequestRef.current = request.at;
+    if (request.topic) setTopicInput(request.topic);
+    handleGenerate(request);
+  }, [request]);
+
+  // Trigger briefing on problem navigation
+  // The mentor shows one thread: the current problem's briefing and the student's questions about it.
+  // Briefings cost a model call, so they are only fetched while the mentor panel is open.
+  useEffect(() => {
+    if (!currentProblem) return;
+    const key = `${appMode}_${currentProblem.chapter_id || 1}_${currentProblem.id}_${currentProblem.title}`;
+    currentBriefKeyRef.current = key;
+    if (mentorOpen) deliverProblemBriefing(currentProblem);
+  }, [activeProblemIndex, currentProblem?.id, currentProblem?.title, appMode, mentorOpen]);
 
   // ---------------------------------------------------------------------------
   // 3. SWITCH APP MODE (CODE vs MATH)
@@ -1139,25 +1155,28 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   // ---------------------------------------------------------------------------
   // 5. GENERATION & SOKRATIC CHAT
   // ---------------------------------------------------------------------------
-  const handleGenerate = async () => {
-    if (!topicInput.trim() && !documentText.trim()) return;
+  const handleGenerate = async (req = null) => {
+    const instruction = req ? req.topic || '' : topicInput;
+    const docText = req ? req.text || '' : documentText;
+    const chapterCount = req ? (req.chapters || 'auto') : targetChapterCount;
+    if (!instruction.trim() && !docText.trim()) return;
 
     setLoading(true);
     briefedProblemsRef.current.clear();
     setTerminalOutput([
       `[SYNTHESIS] Reading uploaded study guides & prompt request...`,
-      `[SCOPE] ${documentText.length} characters parsed across ${uploadedFiles.length} file(s).`,
+      `[SCOPE] ${docText.length} characters of materials${req?.files?.length ? ` from ${req.files.length} file(s)` : ''}.`,
       `[AI ARCHITECT] Dynamically sizing lessons and practice problems to cover all concepts...`
     ]);
 
     try {
       let res;
       const curriculumBody = JSON.stringify({
-        user_instruction: topicInput,
-        document_text: documentText,
+        user_instruction: instruction,
+        document_text: docText,
         level: currentLevel,
         mode: appMode,
-        target_chapters: targetChapterCount === "auto" ? null : Number(targetChapterCount)
+        target_chapters: chapterCount === "auto" ? null : Number(chapterCount)
       });
       try {
         res = await authFetch("/api/generate-curriculum", {
@@ -1711,14 +1730,6 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `[SUCCESS] Correct solution! (+25 XP)`
       ]);
 
-      // Mentor congratulates and reinforces learning
-      setChatHistory(prev => [
-        ...prev,
-        {
-          role: 'model',
-          content: `**Excellent Work!** You correctly chose \`${option}\`.\n\n*Why it works*: ${currentProblem.explanation || "This choice satisfies the structural invariant perfectly."}\n\nNotice how understanding the underlying invariant made the choice clear! Ready for the next challenge?`
-        }
-      ]);
     } else {
       setTerminalOutput(prev => [
         ...prev,
@@ -1726,14 +1737,6 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `[HINT] ${currentProblem.concept_hint || "Review the step and re-evaluate."}`
       ]);
 
-      // Mentor leads with guidance
-      setChatHistory(prev => [
-        ...prev,
-        {
-          role: 'model',
-          content: `**Let's pause and review**: You selected \`${option}\`. Think about what happens when this expression executes or evaluates. Does it satisfy the boundary condition? *Hint*: ${currentProblem.concept_hint || "Re-check the invariant."}`
-        }
-      ]);
     }
   };
 
@@ -1762,13 +1765,6 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `[SUCCESS] Correct answer! (+25 XP)`
       ]);
 
-      setChatHistory(prev => [
-        ...prev,
-        {
-          role: 'model',
-          content: `**Correct!** Option (${letter}) \`${option}\` is accurate.\n\n*Pedagogical Insight*: ${currentProblem.explanation || "Your conceptual grasp of this principle is verified."}\n\nReady for the next exercise?`
-        }
-      ]);
     } else {
       setTerminalOutput(prev => [
         ...prev,
@@ -1776,13 +1772,6 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `[HINT] ${currentProblem.concept_hint || "Review the theoretical principles in the chapter notes."}`
       ]);
 
-      setChatHistory(prev => [
-        ...prev,
-        {
-          role: 'model',
-          content: `**Let's rethink this**: You picked (${letter}) \`${option}\`. Consider the underlying definition or edge cases: *${currentProblem.concept_hint || "What invariant or condition does this violate?"}*`
-        }
-      ]);
     }
   };
 
@@ -1825,14 +1814,6 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `[STEP-BY-STEP VERIFIED]:`,
         ...nextAssembled,
         `[STATUS] Sequence / Proof assembled perfectly! (+50 XP)`
-      ]);
-
-      setChatHistory(prev => [
-        ...prev,
-        {
-          role: 'model',
-          content: `**Derivation Complete!** You assembled the steps in exact logical sequence. Notice how each step logically follows from the previous one without skips!`
-        }
       ]);
     } else if (corrBlocks.length > 0 && nextAssembled.length >= corrBlocks.length) {
       evalStatus = 'wrong';
@@ -1921,14 +1902,15 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
     setChatLoading(true);
 
     const cleanMsg = msg.trim();
-    const newHistory = [...chatHistory, { role: 'user', content: cleanMsg }];
+    const problemKey = currentBriefKeyRef.current;
+    const newHistory = [...chatHistory, { role: 'user', content: cleanMsg, problemKey }];
     setChatHistory(newHistory);
 
     try {
       let res;
       const chatBody = JSON.stringify({
         message: cleanMsg,
-        history: newHistory.map(m => ({
+        history: newHistory.filter((m, i) => i === 0 || m.problemKey === problemKey).map(m => ({
           role: m.role || 'user',
           content: m.content || ''
         })),
@@ -1966,7 +1948,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       const data = await res.json();
       setChatHistory(prev => [
         ...prev,
-        { role: 'model', content: data.reply || "I am analyzing your reasoning..." }
+        { role: 'model', content: data.reply || "I am analyzing your reasoning...", problemKey }
       ]);
 
       if (data.mutated_puzzle) {
@@ -1975,7 +1957,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
     } catch (err) {
       setChatHistory(prev => [
         ...prev,
-        { role: 'model', content: `Mentor note: ${err.message}` }
+        { role: 'model', content: `Mentor note: ${err.message}`, problemKey }
       ]);
     } finally {
       setChatLoading(false);
@@ -2561,150 +2543,21 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         overflowY: 'auto',
         gap: '12px'
       }}>
-        {/* Multi-File Upload Input (Few or Any Amount) */}
-        <div>
-          <label style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            gap: '8px', 
-            padding: '10px', 
-            backgroundColor: theme.bgCard, 
-            border: `1px dashed ${theme.accentBlue}`, 
-            borderRadius: '4px', 
-            cursor: 'pointer', 
-            fontSize: '11px', 
-            color: theme.accentBlue 
-          }}>
-            <Upload size={13} />
-            <span>Upload Few or Any Files</span>
-            <input 
-              type="file" 
-              multiple 
-              accept=".pdf,.docx,.ipynb,.txt,.md,.py,.png,.jpg,.jpeg,.webp" 
-              onChange={handleMultiFileUpload} 
-              style={{ display: 'none' }} 
-            />
-          </label>
-
-          {uploadedFiles.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
-              {uploadedFiles.map((f, i) => (
-                <div key={i} style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'space-between', 
-                  backgroundColor: theme.bgCardAlt, 
-                  border: `1px solid ${theme.border}`, 
-                  padding: '4px 8px', 
-                  borderRadius: '3px', 
-                  fontSize: '11px',
-                  color: theme.textMain
-                }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
-                    {f.name}
-                  </span>
-                  <X size={12} color={theme.accentPink} style={{ cursor: 'pointer' }} onClick={() => removeUploadedFile(i)} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Topic Input */}
-        <div>
-          <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textDim, marginBottom: '4px' }}>
-            {appMode === 'math' ? 'Target Math Field' : 'Target Programming Topic'}
+        {/* Materials, topic and set size now live in My courses (the one place materials go in) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Practice set</div>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textMain, lineHeight: 1.35 }}>
+            {loading ? 'Writing your practice set…' : (curriculum.course_title || curriculum.domain || 'Python practice')}
           </div>
-          <textarea
-            value={topicInput}
-            onChange={(e) => setTopicInput(e.target.value)}
-            rows={2}
-            placeholder={appMode === 'math' ? "Calculus, Derivatives, Matrix algebra..." : "Python, C++, Rust, Algorithms..."}
-            style={{ 
-              width: '100%', 
-              backgroundColor: theme.bgInput, 
-              color: theme.textMain, 
-              border: `1px solid ${theme.borderContrast}`, 
-              padding: '8px', 
-              borderRadius: '4px', 
-              fontSize: '11px', 
-              fontFamily: theme.fontMono, 
-              resize: 'none', 
-              boxSizing: 'border-box' 
-            }}
-          />
-        </div>
-
-        {/* Desired Curriculum Scale / Chapter Count */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '10px', color: theme.textMuted, margin: '2px 0 4px 0' }}>
-          <span>Course Scale:</span>
-          <div style={{ display: 'flex', gap: '3px' }}>
-            {['auto', 3, 4, 5].map((cnt) => (
-              <button
-                key={cnt}
-                onClick={() => setTargetChapterCount(cnt)}
-                style={{
-                  backgroundColor: targetChapterCount === cnt ? theme.accentGreen : theme.bgCard,
-                  color: targetChapterCount === cnt ? theme.textOnBrand : theme.textDim,
-                  border: `1px solid ${targetChapterCount === cnt ? theme.accentGreen : theme.border}`,
-                  borderRadius: '2px',
-                  padding: '2px 6px',
-                  fontSize: '9px',
-                  fontWeight: targetChapterCount === cnt ? 700 : 400,
-                  cursor: 'pointer'
-                }}
-              >
-                {cnt === 'auto' ? 'Auto' : `${cnt} Ch`}
-              </button>
-            ))}
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={onNewPracticeSet} disabled={loading}>
+              {loading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} New practice set
+            </button>
+            <button className="btn btn-quiet btn-sm" onClick={handleMakeHarder} disabled={escalating || loading} title="Make this set harder">
+              {escalating ? <Loader2 size={12} className="animate-spin" /> : <Flame size={12} color={theme.accentOrange} />}
+            </button>
           </div>
         </div>
-
-        {/* Generate / Level Up Controls */}
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button
-            onClick={handleGenerate}
-            disabled={loading}
-            style={{ 
-              flex: 1, 
-              backgroundColor: theme.accentGreen, 
-              color: theme.textOnBrand, 
-              border: 'none', 
-              padding: '8px', 
-              borderRadius: '4px', 
-              fontSize: '11px', 
-              fontWeight: 700, 
-              cursor: 'pointer', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              gap: '6px' 
-            }}
-          >
-            {loading ? <Loader2 size={12} className="animate-spin" color={theme.textOnBrand} /> : <Play size={12} color={theme.textOnBrand} />}
-            Generate practice set
-          </button>
-          <button
-            onClick={handleMakeHarder}
-            disabled={escalating}
-            title="Escalate Tier (Level Up)"
-            style={{ 
-              backgroundColor: theme.bgCard, 
-              border: `1px solid ${theme.border}`, 
-              color: theme.textMain, 
-              padding: '8px 12px', 
-              borderRadius: '4px', 
-              cursor: 'pointer' 
-            }}
-          >
-            {escalating ? <Loader2 size={12} className="animate-spin" /> : <Flame size={12} color={theme.accentOrange} />}
-          </button>
-        </div>
-        <p style={{ fontSize: '11.5px', lineHeight: 1.45, color: theme.textMuted, margin: 0 }}>
-          Practice workspace: sets generated here are not saved to My courses. For an adaptive course with a
-          diagnostic, use My courses, then New course.
-        </p>
 
         {/* Chapters & Problem Explorer with Dynamic Chapter Generation */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
@@ -3118,26 +2971,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
                   {/* Professorial Lesson Action Bar */}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={handleGenerateVoiceover}
-                      disabled={voiceoverLoading}
-                      style={{
-                        backgroundColor: voiceoverPlaying ? theme.accentGreenBg : theme.bgCardAlt,
-                        color: theme.accentGreen,
-                        border: `1px solid ${voiceoverPlaying ? theme.accentGreen : theme.borderContrast}`,
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      {voiceoverLoading ? <Loader2 size={12} className="animate-spin" color={theme.accentGreen} /> : voiceoverPlaying ? <Volume2 size={12} className="animate-pulse" color={theme.accentGreen} /> : <Mic size={12} color={theme.accentGreen} />}
-                      <span>{voiceoverLoading ? 'Synthesizing...' : voiceoverPlaying ? 'Lecture Playing...' : 'Listen to Professor Lecture'}</span>
-                    </button>
+
 
                     <button
                       onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'code_blank')}
@@ -3371,7 +3205,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
         {/* Chat History with Active Briefings & Guided Action Pills */}
         <div style={{ flex: 1, padding: '14px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
-          {chatHistory.map((msg, i) => (
+          {chatHistory.filter((m, i) => i === 0 || m.problemKey === currentProblemKey).map((msg, i) => (
             <div 
               key={i} 
               style={{
