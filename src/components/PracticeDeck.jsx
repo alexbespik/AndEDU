@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
+import { ArrowUp, ArrowDown, RotateCcw, Play, Loader2 } from 'lucide-react';
+import { runPython } from '../lib/pyodide';
 import Md, { MdInline } from './Md';
 
 const TYPE_LABEL = {
@@ -7,6 +8,7 @@ const TYPE_LABEL = {
   order_steps: 'Put the steps in order',
   numeric: 'Calculate',
   true_false: 'True or false',
+  code: 'Write the code',
 };
 
 function seededShuffle(items, seed) {
@@ -127,7 +129,86 @@ function TrueFalse({ item }) {
   );
 }
 
-const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse };
+/** Turns a Pyodide traceback into what a student needs: which test failed, or the error and its line. */
+function explainError(raw, script, userLines) {
+  if (!raw) return '';
+  const lines = raw.split('\n').map((l) => l.trimEnd()).filter(Boolean);
+  const last = lines[lines.length - 1] || raw;
+  const frames = [...raw.matchAll(/File "<exec>", line (\d+)/g)];
+  const n = frames.length ? Number(frames[frames.length - 1][1]) : null;
+  const src = n ? (script.split('\n')[n - 1] || '').trim() : '';
+  if (/^AssertionError/.test(last) && n && n > userLines) return `Failed: ${src}${last.length > 15 ? `\n${last}` : ''}`;
+  return n && n <= userLines ? `${last}\n(your code, line ${n}: ${src})` : last;
+}
+
+function CodeExercise({ item }) {
+  const [code, setCode] = useState(item.starter || '');
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [tried, setTried] = useState(false);
+  const [showSolution, setShowSolution] = useState(false);
+
+  const run = async () => {
+    setRunning(true);
+    setResult(null);
+    const script = `${code}\n\n${item.tests}\nprint("__ALL_TESTS_PASSED__")`;
+    const res = await runPython(script);
+    const passed = res.ok && (res.output || '').includes('__ALL_TESTS_PASSED__');
+    const error = res.timedOut ? res.error : explainError(res.error, script, code.split('\n').length);
+    setResult({ ...res, error, passed, output: (res.output || '').replace('__ALL_TESTS_PASSED__\n', '').trim() });
+    setTried(true);
+    setRunning(false);
+  };
+
+  // Tab inserts four spaces instead of leaving the editor
+  const onKeyDown = (e) => {
+    if (e.key !== 'Tab' || e.shiftKey) return;
+    e.preventDefault();
+    const el = e.target;
+    const { selectionStart: a, selectionEnd: b } = el;
+    const next = `${code.slice(0, a)}    ${code.slice(b)}`;
+    setCode(next);
+    requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = a + 4; });
+  };
+
+  return (
+    <div className="stack-sm">
+      <label htmlFor={`code-${item.id}`} className="visually-hidden">Your code</label>
+      <textarea id={`code-${item.id}`} className="textarea code-editor" spellCheck={false} value={code}
+        onChange={(e) => setCode(e.target.value)} onKeyDown={onKeyDown}
+        rows={Math.min(18, Math.max(6, code.split('\n').length + 1))} />
+      <details className="hint">
+        <summary style={{ cursor: 'pointer' }}>Tests your code must pass</summary>
+        <pre className="code-tests">{item.tests}</pre>
+      </details>
+      <div className="btn-row">
+        <button type="button" className="btn btn-primary btn-sm" onClick={run} disabled={running}>
+          {running ? <Loader2 size={14} className="spin" aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+          {running ? ' Running…' : ' Run tests'}
+        </button>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={() => { setCode(item.starter || ''); setResult(null); }}>Reset</button>
+        {item.solution && tried && (
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setShowSolution((v) => !v)} aria-expanded={showSolution}>
+            {showSolution ? 'Hide solution' : 'Show solution'}
+          </button>
+        )}
+        <span className="hint">Runs in your browser; the first run loads Python (a few seconds).</span>
+      </div>
+      {result && (
+        <div className={`feedback ${result.passed ? 'ok' : 'bad'}`} aria-live="polite">
+          <p style={{ fontWeight: 700, marginBottom: 4 }}>
+            {result.passed ? 'All tests pass.' : result.timedOut ? 'Stopped.' : 'Not yet: a test failed or the code raised an error.'}
+          </p>
+          {(result.error || result.output) && <pre className="code-tests">{[result.output, result.error].filter(Boolean).join('\n')}</pre>}
+          {result.passed && item.explanation && <Md>{item.explanation}</Md>}
+        </div>
+      )}
+      {showSolution && <pre className="code-tests">{item.solution}</pre>}
+    </div>
+  );
+}
+
+const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise };
 
 export default function PracticeDeck({ items = [] }) {
   const usable = items.filter((p) => RENDER[p.type]);
