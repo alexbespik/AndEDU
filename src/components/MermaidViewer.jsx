@@ -50,10 +50,10 @@ export default function MermaidViewer({ chart }) {
           theme: 'base',
           themeVariables: {
             background: '#ffffff',
-            primaryColor: '#e3eee8',
+            primaryColor: '#dfece4',
             primaryTextColor: '#13201a',
-            primaryBorderColor: '#115740',
-            lineColor: '#755a25',
+            primaryBorderColor: '#0a4a33',
+            lineColor: '#6b4c0e',
             secondaryColor: '#f7f0e1',
             tertiaryColor: '#f1f0ea',
             fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
