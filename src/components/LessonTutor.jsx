@@ -3,6 +3,9 @@ import { Send, Loader2, RotateCcw } from 'lucide-react';
 import Md from './Md';
 import { api } from '../lib/api';
 
+// The brief costs a model call: keep it per lesson for this session instead of refetching on every visit.
+const briefCache = new Map();
+
 const STARTERS = [
   'Explain the key idea another way',
   'I got lost in the worked example',
@@ -14,7 +17,7 @@ const STARTERS = [
  * questions instead of answers. `focus` = a quiz question the student just got wrong.
  */
 export default function LessonTutor({ topic, focus, onFocusUsed }) {
-  const [brief, setBrief] = useState(null);
+  const [brief, setBrief] = useState(() => briefCache.get(topic.id) ?? null);
   const [turns, setTurns] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -22,9 +25,14 @@ export default function LessonTutor({ topic, focus, onFocusUsed }) {
   const logRef = useRef(null);
 
   useEffect(() => {
+    if (briefCache.has(topic.id)) return undefined;
     let live = true;
     api('/api/tutor/lesson', { method: 'POST', body: { topicId: topic.id, mode: 'brief' } })
-      .then((d) => live && setBrief((d.reply || '').replace(/\n(?!\n)/g, '\n\n')))  // one line per part
+      .then((d) => {
+        const text = (d.reply || '').replace(/\n(?!\n)/g, '\n\n');  // one line per part
+        briefCache.set(topic.id, text);
+        if (live) setBrief(text);
+      })
       .catch(() => live && setBrief(''));
     return () => { live = false; };
   }, [topic.id]);

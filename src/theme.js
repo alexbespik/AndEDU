@@ -13,7 +13,7 @@ export const theme = {
   bgSidebar: v('sunk'),
   bgEditor: v('surface'),
   bgActivity: v('sunk'),
-  bgHeader: v('brand'),
+  bgHeader: v('sunk'),        // IDE panel headers: a neutral surface, readable in both themes
   bgCard: v('surface'),
   bgCardAlt: v('sunk'),
   bgCardHover: v('accent-tint'),

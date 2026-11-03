@@ -1871,7 +1871,7 @@ async def tutor_chat(payload: ChatPayload):
                 p["difficulty"] = "Easy"
                 norm = normalize_single_problem(p, cid, ctitle, 999, mode)
                 return {
-                    "reply": f"💡 **Intuition Exercise**: {p.get('guiding_question', 'Try this plug-in exercise to build intuition!')}",
+                    "reply": f"**Intuition Exercise**: {p.get('guiding_question', 'Try this plug-in exercise to build intuition!')}",
                     "mutated_puzzle": norm
                 }
             # 2. Block Builder tool call
@@ -1881,7 +1881,7 @@ async def tutor_chat(payload: ChatPayload):
                 p["difficulty"] = "Moderate"
                 norm = normalize_single_problem(p, cid, ctitle, 999, mode)
                 return {
-                    "reply": f"🧩 **Block Assembly Challenge**: {p.get('guiding_question', 'Assemble the blocks in the correct logical sequence!')}",
+                    "reply": f"**Block Assembly Challenge**: {p.get('guiding_question', 'Assemble the blocks in the correct logical sequence!')}",
                     "mutated_puzzle": norm
                 }
             # 3. Coding Challenge tool call
@@ -1891,7 +1891,7 @@ async def tutor_chat(payload: ChatPayload):
                 p["difficulty"] = "Hard"
                 norm = normalize_single_problem(p, cid, ctitle, 999, mode)
                 return {
-                    "reply": f"🔥 **Rigorous Challenge**: {p.get('guiding_question', 'Implement the solution from scratch to prove your mastery!')}",
+                    "reply": f"**Rigorous Challenge**: {p.get('guiding_question', 'Implement the solution from scratch to prove your mastery!')}",
                     "mutated_puzzle": norm
                 }
             # 4. Change Assignment tool call
@@ -1927,7 +1927,7 @@ async def tutor_chat(payload: ChatPayload):
                     norm = normalize_single_problem(new_puzzle, cid, ctitle, 999, mode)
 
                 return {
-                    "reply": f"🔄 **Assignment Adjusted**: {reason}. I've tailored a new exercise on **{topic}** for you!",
+                    "reply": f"**Assignment Adjusted**: {reason}. I've tailored a new exercise on **{topic}** for you!",
                     "mutated_puzzle": norm
                 }
 
@@ -1954,18 +1954,18 @@ async def tutor_chat(payload: ChatPayload):
         hint = prob.get("concept_hint") or "Check the invariant condition and edge cases."
         gq = prob.get("guiding_question") or "What property must hold true?"
         return {
-            "reply": f"💡 **Mentor Reflection**: Consider the invariant for *{prob.get('title', 'this exercise')}*.\n\n"
-                     f"❓ **Diagnostic**: {gq}\n\n"
-                     f"🔍 **Lead**: {hint} How does your approach preserve this condition?"
+            "reply": f"**Mentor Reflection**: Consider the invariant for *{prob.get('title', 'this exercise')}*.\n\n"
+                     f"**Diagnostic**: {gq}\n\n"
+                     f"**Lead**: {hint} How does your approach preserve this condition?"
         }
 
 @app.post("/api/tutor-brief")
 async def tutor_brief(payload: BriefPayload):
     """
     Generates an ultra-concise, razor-sharp, leading Socratic task briefing:
-    - 🎯 Task (actual task in 1 sentence)
-    - 💡 Invariant/Lead (1 short sentence pointing to the core rule)
-    - ❓ Check (1 quick diagnostic question to ponder before acting)
+    - Task (actual task in 1 sentence)
+    - Invariant/Lead (1 short sentence pointing to the core rule)
+    - Check (1 quick diagnostic question to ponder before acting)
     Strictly under 45-55 words total!
     """
     p = payload.problem
@@ -1990,9 +1990,9 @@ async def tutor_brief(payload: BriefPayload):
     - Start directly with the actual task.
 
     FORMAT EXACTLY AS FOLLOWS (3 short bullet lines):
-    🎯 **Task**: [1 short sentence stating the concrete task to accomplish]
-    💡 **Lead**: [1 crisp sentence pointing out the core invariant or rule]
-    ❓ **Check**: [1 sharp diagnostic question to consider before answering]
+    **Task**: [1 short sentence stating the concrete task to accomplish]
+    **Lead**: [1 crisp sentence pointing out the core invariant or rule]
+    **Check**: [1 sharp diagnostic question to consider before answering]
     """
 
     try:
@@ -2008,9 +2008,9 @@ async def tutor_brief(payload: BriefPayload):
         hint = p.get('concept_hint') or "Preserve the structural boundary invariant."
         return {
             "briefing": (
-                f"🎯 **Task**: {task_desc}\n\n"
-                f"💡 **Lead**: {hint}\n\n"
-                f"❓ **Check**: *What boundary or edge condition would break if chosen incorrectly?*"
+                f"**Task**: {task_desc}\n\n"
+                f"**Lead**: {hint}\n\n"
+                f"**Check**: *What boundary or edge condition would break if chosen incorrectly?*"
             )
         }
 
@@ -2562,6 +2562,15 @@ def create_or_update_topic(topic: TopicModel):
     saved, warnings = save_topic(topic.model_dump())
     return {"status": "success", "id": saved["id"], "path": str(topic_path(saved["id"])), "warnings": warnings}
 
+@app.post("/api/topics/{topic_id}/opened")
+def topic_opened(topic_id: str):
+    """The student opened this lesson: adaptation will no longer rewrite it under them."""
+    topic = load_json_file(topic_path(topic_id), None)
+    if not topic or not topic_visible(topic):
+        raise HTTPException(status_code=404, detail="Topic not found")
+    klass = db.mark_class_opened(topic_id)
+    return {"status": "ok", "classId": klass["id"] if klass else None}
+
 @app.post("/api/simulations/validate")
 def validate_simulation(spec: Dict[str, Any]):
     """Lets agents check a SimSpec before saving it; returns the cleaned spec and every error found."""
@@ -2873,6 +2882,9 @@ def backfill_simulations():
     return {"queued": len(jobs), "jobs": jobs}
 
 BUILTIN_SIMULATIONS = {"rolling_without_slipping", "billiard_collisions"}
+# Generated SimSpec simulations have no player in the app yet, so classes don't spend model calls on them
+# unless SCIEDU_AUTHOR_SIMS=1 (the specs stay valid for when the player exists).
+AUTHOR_SIMS = os.environ.get("SCIEDU_AUTHOR_SIMS") == "1"
 
 # ---------------------------------------------------------------------------
 # COURSES: materials -> syllabus + diagnostic -> classes generated in sequence, adapting to results
@@ -3169,13 +3181,15 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
         topic["source"]["adaptedBecause"] = klass["instruction"]
     normalized, _ = normalize_topic(topic)
     quiz_check = verify_questions(normalized["quiz"], _topic_brief(normalized, 8000))
-    sim_task = author_simulation(_topic_brief(topic), f"Make the student SEE the key idea of: {klass['title']}")
-    checked, sim = await asyncio.gather(quiz_check, sim_task, return_exceptions=True)
-    topic["quiz"] = checked if isinstance(checked, list) else normalized["quiz"]
-    if isinstance(sim, dict):
-        topic["simulation"] = sim
+    if AUTHOR_SIMS:
+        sim_task = author_simulation(_topic_brief(topic), f"Make the student SEE the key idea of: {klass['title']}")
+        checked, sim = await asyncio.gather(quiz_check, sim_task, return_exceptions=True)
+        if isinstance(sim, dict):
+            topic["simulation"] = sim
     else:
-        print(f"[course] simulation for class {klass['seq']} skipped: {sim}")
+        checked = await asyncio.gather(quiz_check, return_exceptions=True)
+        checked = checked[0]
+    topic["quiz"] = checked if isinstance(checked, list) else normalized["quiz"]
     saved, _ = normalize_topic(topic)
     saved["notesFile"] = write_notes_file(saved)
     saved, _ = save_topic(saved, event_type="TOPIC_CREATED", auto_select=False, course_id=course["id"])
@@ -3306,6 +3320,11 @@ def queue_course_generation(course_id: str) -> Dict[str, Any]:
             course_event(course_id)
             try:
                 topic = await build_class(course, klass, classes)
+                if not db.get_course(course_id):  # deleted while this class was being written
+                    for path in (topic_path(topic["id"]), NOTES_DIR / f"{topic['id']}.md"):
+                        path.unlink(missing_ok=True)
+                    emit_event("TOPIC_UPDATED", {"autoSelect": False})
+                    return {"courseId": course_id, "cancelled": True}
                 db.update_class(klass["id"], status="ready", topic_id=topic["id"])
                 built += 1
             except Exception as e:
@@ -3651,7 +3670,6 @@ agy_execute_code_tool = types.FunctionDeclaration(
 agy_agent_tools = types.Tool(
     function_declarations=[
         agy_create_lesson_tool,
-        agy_create_simulation_tool,
         agy_adjust_class_tool,
         agy_switch_page_tool,
         agy_set_sim_config_tool,
@@ -3709,8 +3727,8 @@ async def _run_agy_process(prompt: str) -> str:
 AGY_SYSTEM_PROMPT = (
     "You are the AGY Autonomous Physics & STEM Assistant embedded inside &.edu LAB. "
     "You can change the workspace directly with your tools, and you should use them instead of only describing changes:\n"
-    "- `create_simulation` builds a new interactive simulation for ANY topic (pendulums, orbits, waves, fields, gas laws, circuits...).\n"
-    "- `create_or_update_lesson` writes lessons with KaTeX derivations, cheat sheets and quizzes (a simulation is added automatically).\n"
+    "- `create_or_update_lesson` writes lessons with KaTeX derivations, cheat sheets and quizzes.\n"
+    "There are two interactive labs (rolling without slipping, billiard collisions); do not promise new simulations.\n"
     "- `set_simulation_config` changes the live billiard simulation (restitution e, impact offset, cue height, speed, friction).\n"
     "- `switch_page` navigates to a topic/tab or mode.\n"
     "- `execute_python_code` checks numeric work.\n"
@@ -3718,14 +3736,15 @@ AGY_SYSTEM_PROMPT = (
     "Explain with LaTeX ($...$). Existing topics: {topics}. The student is viewing: {active}.{course}"
 )
 
-def course_context(course_id: Optional[str]) -> str:
+def course_context(course_id: Optional[str], open_topic: Optional[str] = None) -> str:
     course = db.get_course(course_id) if course_id else None
     if not course:
         return ""
     lines = [f"\nThe student is in the course \"{course['title']}\" (status {course['status']}). Classes:"]
     for k in db.list_classes(course_id):
         score = f", quiz {round(k['score'] * 100)}%" if k.get("score") is not None else ""
-        lines.append(f"  {k['seq']}. {k['title']} [{k['status']}{score}]")
+        here = " <- the student is reading this class now" if open_topic and k.get("topic_id") == open_topic else ""
+        lines.append(f"  {k['seq']}. {k['title']} [{k['status']}{score}]{here}")
     return "\n".join(lines)
 
 @app.post("/api/agy/prompt")
@@ -3753,7 +3772,7 @@ async def post_user_prompt(data: AgyPromptModel):
                 contents=data.prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=AGY_SYSTEM_PROMPT.format(topics=topic_ids, active=data.topicId,
-                                                                course=course_context(data.courseId)),
+                                                                course=course_context(data.courseId, data.topicId)),
                     temperature=0.3,
                     tools=[agy_agent_tools]
                 )
@@ -3766,7 +3785,7 @@ async def post_user_prompt(data: AgyPromptModel):
                     emit_event("SWITCH_TAB", {"tab": "simulation"})
                     labels = {"restitution": "Coefficient of Restitution (e)", "impact_offset": "Impact Offset (cos θ parameter)",
                               "strike_height": "Cue Height (h/R)", "strike_speed": "Strike speed", "friction": "Felt friction μ"}
-                    reply_content = "🎛️ **Live Simulation Parameters Updated!**\n\n" + "".join(
+                    reply_content = "**Live Simulation Parameters Updated!**\n\n" + "".join(
                         f"- **{labels[k]}**: `{args[k]}`\n" for k in labels if k in args)
                     break
 
@@ -3774,12 +3793,12 @@ async def post_user_prompt(data: AgyPromptModel):
                     args["id"] = slugify(args.get("id") or args.get("title", ""), f"topic-{int(time.time())}")
                     args.setdefault("difficulty", "Undergraduate")
                     saved, warnings = save_topic(args, event_type="TOPIC_CREATED")
-                    sim_job = queue_simulation_job(saved["id"]) if not saved.get("simulation") else None
+                    sim_job = queue_simulation_job(saved["id"]) if AUTHOR_SIMS and not saved.get("simulation") else None
                     emit_event("SWITCH_TOPIC", {"topicId": saved["id"], "tab": "theory", "mode": "physics"})
                     reply_content = (
-                        f"🎉 **{saved['title']}** is ready: derivations, {len(saved['cheatSheet'])} key formulas and "
+                        f"**{saved['title']}** is ready: derivations, {len(saved['cheatSheet'])} key formulas and "
                         f"{len(saved['quiz'])} quiz questions."
-                        + ("\n\n🧪 I'm building an interactive simulation for it in the background; the Simulation tab lights up when it's done." if sim_job else "")
+                        + ("\n\nI'm building an interactive simulation for it in the background; the Simulation tab lights up when it's done." if sim_job else "")
                         + (f"\n\n_Notes: {'; '.join(warnings)}_" if warnings else "")
                     )
                     break
@@ -3788,7 +3807,7 @@ async def post_user_prompt(data: AgyPromptModel):
                     tid = args.get("topic_id") or data.topicId
                     try:
                         queue_simulation_job(tid, args.get("focus", ""))
-                        reply_content = f"🧪 Building a new simulation for **{tid}** focused on: _{args.get('focus', 'the core concept')}_. It appears in the Simulation tab in about 20–40 seconds."
+                        reply_content = f"Building a new simulation for **{tid}** focused on: _{args.get('focus', 'the core concept')}_. It appears in the Simulation tab in about 20–40 seconds."
                     except HTTPException:
                         reply_content = f"I couldn't find a topic called `{tid}`. Ask me to create the lesson first."
                     break
@@ -3812,13 +3831,13 @@ async def post_user_prompt(data: AgyPromptModel):
                     tab = args.get("tab", "theory")
                     mode = args.get("mode", "physics")
                     emit_event("SWITCH_TOPIC", {"topicId": tid, "tab": tab, "mode": mode})
-                    reply_content = f"🔄 Switched workspace view to **{tid or mode}** ({tab} tab)."
+                    reply_content = f"Switched workspace view to **{tid or mode}** ({tab} tab)."
                     break
 
                 elif call.name == "execute_python_code":
                     exec_res = await asyncio.to_thread(run_python_sandboxed, args.get("code", ""), args.get("test_code", ""))
                     reply_content = (
-                        f"⚡ **Execution Result:**\n```\n{exec_res.get('stdout', '')}\n{exec_res.get('stderr', '')}\n```\n"
+                        f"**Execution Result:**\n```\n{exec_res.get('stdout', '')}\n{exec_res.get('stderr', '')}\n```\n"
                         f"Status: {'Passed' if exec_res.get('tests_passed') else 'Error'}"
                     )
                     break
@@ -3831,7 +3850,7 @@ async def post_user_prompt(data: AgyPromptModel):
 
         except Exception as e:
             print("[ERROR agy prompt Gemini call with tools]:", e)
-            reply_content = f"⚠️ {friendly_ai_error(e)}"
+            reply_content = f"{friendly_ai_error(e)}"
 
     if not reply_content:
         reply_content = "I couldn't produce an answer for that. Try rephrasing, or check the backend log."

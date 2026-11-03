@@ -120,6 +120,7 @@ MIGRATIONS = [
     ("users", "password_hash", "TEXT"),            # "scrypt$<salt hex>$<hash hex>"; NULL = local name-only profile
     ("courses", "plan_questions", "INTEGER"),      # remembered so interrupted planning can be redone
     ("courses", "plan_classes", "INTEGER"),
+    ("classes", "opened_at", "REAL"),              # first time the student opened the lesson
 ]
 
 
@@ -136,7 +137,7 @@ def init_db():
 def next_unstarted_class(course_id: str, after_seq: int) -> Optional[Dict[str, Any]]:
     """The first later class the student hasn't opened a quiz on yet: safe to rewrite."""
     return _row(conn().execute(
-        "SELECT * FROM classes WHERE course_id = ? AND seq > ? AND attempts = 0 AND completed = 0 "
+        "SELECT * FROM classes WHERE course_id = ? AND seq > ? AND attempts = 0 AND completed = 0 AND opened_at IS NULL "
         "ORDER BY seq LIMIT 1", (course_id, after_seq)).fetchone())
 
 
@@ -255,6 +256,13 @@ def update_class(class_id: str, **fields):
 
 def class_for_topic(topic_id: str) -> Optional[Dict[str, Any]]:
     return _row(conn().execute("SELECT * FROM classes WHERE topic_id = ?", (topic_id,)).fetchone())
+
+
+def mark_class_opened(topic_id: str) -> Optional[Dict[str, Any]]:
+    klass = class_for_topic(topic_id)
+    if klass and not klass.get("opened_at"):
+        update_class(klass["id"], opened_at=time.time())
+    return klass
 
 
 def reset_stuck_classes():

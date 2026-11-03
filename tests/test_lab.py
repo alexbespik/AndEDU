@@ -183,6 +183,23 @@ class Api(unittest.TestCase):
         self.assertEqual(k2["status"], "pending")
         self.assertIn("Slow down", k2["instruction"])
 
+    def test_adaptation_never_rewrites_an_opened_class(self):
+        user = db.get_or_create_user("Open Tester")
+        course = db.create_course(user["id"], "Course", "goal", "", [])
+        db.replace_classes(course["id"], [{"title": "One"}, {"title": "Two"}])
+        k1, k2 = db.list_classes(course["id"])
+        self.c.post("/api/topics", json=topic("open-one", quiz=[{"question": "q", "options": ["a", "b"], "correctAnswer": 0}],
+                                              source={"courseId": course["id"]}))
+        self.c.post("/api/topics", json=topic("open-two", source={"courseId": course["id"]}))
+        db.update_class(k1["id"], status="ready", topic_id="open-one")
+        db.update_class(k2["id"], status="ready", topic_id="open-two")
+        self.assertEqual(self.c.post("/api/topics/open-two/opened").status_code, 200)  # student peeks at class 2
+        server.queue_course_generation = lambda cid: None
+        r = self.c.post("/api/quiz/submit", json={"userId": user["id"], "topicId": "open-one", "questionId": "q1",
+                                                  "selected": 1, "isCorrect": False}).json()
+        self.assertIsNone(r["classProgress"]["adapted"])
+        self.assertEqual(db.list_classes(course["id"])[1]["status"], "ready")
+
     def test_generation_is_rate_limited(self):
         server.RATE_SCALE = 0.1  # simulation limit 20 -> 2 per hour
         try:
