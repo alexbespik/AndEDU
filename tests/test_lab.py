@@ -386,3 +386,37 @@ class Engagement(unittest.TestCase):
         self.assertEqual(q1, q2)
         self.assertEqual(len(q1), 3)
         self.assertEqual(q1[0], "xp")
+
+
+class Workspaces(unittest.TestCase):
+    def test_every_math_widget_validates(self):
+        from simspec import MATH_WIDGETS
+        minimal = {"epsilon_delta": {"f": "x^2", "a": 2, "L": 4}, "epsilon_n": {"term": "1/n", "L": 0},
+                   "secant_tangent": {"f": "sin(x)", "a": 1}, "riemann": {"f": "x^2", "a": 0, "b": 2},
+                   "series": {"term": "x^k / fact(k)", "target": "exp(x)"}, "unit_circle": {},
+                   "parametric": {"x": "cos(t)", "y": "sin(t)"}, "vector_field": {"P": "-y", "Q": "x"}, "transform2d": {}}
+        self.assertEqual(set(minimal), set(MATH_WIDGETS))
+        for widget, fields in minimal.items():
+            clean, errors = validate_spec({"kind": "math", "widget": widget, **fields})
+            self.assertEqual(errors, [], widget)
+            self.assertTrue(clean["params"] or widget == "vector_field", widget)  # the widget's sliders were added
+
+    def test_math_specs_reject_unknown_names_and_widgets(self):
+        self.assertTrue(validate_spec({"kind": "math", "widget": "epsilon_delta", "f": "x + y", "a": 0, "L": 0})[1])
+        self.assertTrue(validate_spec({"kind": "math", "widget": "fourier_magic"})[1])
+
+    def test_workspace_guess(self):
+        self.assertEqual(server.guess_workspace("Calculus", "Precise Limit Definition"), "math")
+        self.assertEqual(server.guess_workspace("Python", "Loops"), "code")
+        self.assertEqual(server.guess_workspace("Python for statistics"), "code")
+        self.assertEqual(server.guess_workspace("Physics", "Motion in Two Dimensions"), "lab")
+
+    def test_course_topics_carry_their_workspace(self):
+        with TestClient(server.app, base_url=LOCAL) as c:
+            user = db.get_or_create_user("Workspace Tester")
+            course = db.create_course(user["id"], "Limits", "epsilon delta proofs", "", [])
+            db.update_course(course["id"], subject="Calculus")
+            c.post("/api/topics", json=topic("ws-class", source={"courseId": course["id"], "courseTitle": "Limits"}))
+            self.assertEqual(c.get("/api/topics/ws-class").json()["source"]["workspace"], "math")
+            db.update_course(course["id"], workspace="lab")  # an explicit choice wins over the guess
+            self.assertEqual(c.get("/api/topics/ws-class").json()["source"]["workspace"], "lab")

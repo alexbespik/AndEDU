@@ -27,7 +27,7 @@ export default function TodayPanel({ userId, progress, onChange, onContinue, onR
           <span className="next-icon"><Play size={18} aria-hidden="true" /></span>
           <span className="stack-sm">
             <span className="hint">Continue · {p.continue.course_title}</span>
-            <strong>Class {p.continue.seq}: {p.continue.title}</strong>
+            <strong>Class {p.continue.seq}: {p.continue.title.replace(/^Class \d+:\s*/, '')}</strong>
           </span>
         </button>
       ) : (
