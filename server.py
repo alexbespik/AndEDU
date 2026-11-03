@@ -25,7 +25,7 @@ from google.genai.errors import ClientError
 from pypdf import PdfReader
 import docx
 import nbformat
-from simspec import validate_spec, SPEC_GUIDE
+from simspec import validate_spec, SPEC_GUIDE, MATH_GUIDE
 import db
 import engage
 
@@ -2543,12 +2543,13 @@ def get_topics_version():
 @app.get("/api/topics")
 def get_topics():
     topics = []
+    ws_cache: Dict[str, str] = {}
     for file_path in sorted(TOPICS_DIR.glob("*.json")):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 topic = json.load(f)
             if topic_visible(topic):
-                topics.append(topic)
+                topics.append(with_workspace(topic, ws_cache))
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
     return topics
@@ -2559,7 +2560,7 @@ def get_topic(topic_id: str):
     topic = load_json_file(file_path, None) if file_path.exists() else None
     if not topic or not topic_visible(topic):
         raise HTTPException(status_code=404, detail="Topic not found")
-    return topic
+    return with_workspace(topic)
 
 @app.post("/api/topics")
 def create_or_update_topic(topic: TopicModel):
@@ -2660,7 +2661,7 @@ def validate_simulation(spec: Dict[str, Any]):
 
 @app.get("/api/simulations/guide")
 def simulation_guide():
-    return {"guide": SPEC_GUIDE}
+    return {"guide": SPEC_GUIDE + "\n" + MATH_GUIDE}
 
 @app.post("/api/quiz/submit")
 def submit_quiz_answer(sub: QuizSubmission):
@@ -2947,9 +2948,24 @@ def _topic_brief(topic: Dict[str, Any], limit: int = 5000) -> str:
     return (f"Title: {topic.get('title')}\nCategory: {topic.get('category')}\nSummary: {topic.get('summary')}\n"
             f"Key formulas: {cheat}\nNotes:\n{(topic.get('markdownContent') or '')[:limit]}")
 
-async def author_simulation(context: str, focus: str = "", attempts: int = 3) -> Dict[str, Any]:
+async def author_simulation(context: str, focus: str = "", attempts: int = 3, math: bool = False) -> Dict[str, Any]:
     """Asks Gemini for a SimSpec and feeds validator errors back until it passes."""
-    prompt = f"""
+    if math:
+        prompt = f"""
+You design interactive math visualisations for &.edu LAB. Output ONE JSON object of kind "math" and nothing
+else: pick the widget that makes this class's key idea visible and set its functions so the picture is
+interesting (for limits use a function and point where the epsilon-delta picture is clear). Add at most 2 extra
+sliders. The description must tell the student what to drag and what to notice.
+
+{MATH_GUIDE}
+
+TOPIC CONTEXT:
+{context[:6000]}
+
+FOCUS FOR THIS VISUALISATION: {focus or 'the central concept of the topic'}
+"""
+    else:
+        prompt = f"""
 You design interactive teaching simulations for &.edu LAB. Output ONE JSON object in the SimSpec v1
 format below and nothing else. Choose "particles" for anything that moves (mechanics, orbits, charges in
 fields, oscillators, collisions, fluids as particles) and "graph" for relationships and fields (waves,
@@ -3058,7 +3074,8 @@ def queue_simulation_job(topic_id: str, focus: str = "") -> Dict[str, Any]:
     async def work(job):
         topic = load_json_file(path, {})
         _job_update(job, step=f"Designing a simulation for {topic.get('title', topic_id)}", progress=0.2)
-        spec = await author_simulation(_topic_brief(topic), focus)
+        is_math = with_workspace(topic).get("source", {}).get("workspace") == "math"
+        spec = await author_simulation(_topic_brief(topic), focus, math=is_math)
         topic = load_json_file(path, topic)  # re-read: the topic may have been edited meanwhile
         topic["simulation"] = spec
         save_topic(topic, auto_select=False)
@@ -3184,6 +3201,7 @@ def me():
 def public_course(course: Dict[str, Any]) -> Dict[str, Any]:
     """Course + classes for the UI. Diagnostic answer keys stay hidden until the student submits."""
     out = {k: v for k, v in course.items() if k != "materials_text"}
+    out["workspace"] = course_workspace(course)
     if course["status"] in ("planning", "diagnostic_ready"):
         out["diagnostic"] = [{k: v for k, v in q.items() if k not in ("correctAnswer", "explanation")}
                              for q in course.get("diagnostic") or []]
@@ -3204,6 +3222,7 @@ that reveals which concepts they have and haven't mastered.
 Return JSON only:
 {{"title": "short course title",
   "subject": "e.g. Physics / Calculus / Chemistry / Python",
+  "workspace": "math | code | lab   (math: any mathematics; code: programming; lab: physics, chemistry, other sciences)",
   "concepts": [{{"id": "kebab-case-id", "name": "Concept name", "summary": "one sentence"}}],
   "questions": [{{"id": "q1", "concept": "<concept id>", "difficulty": "Recall|Apply|Analyze",
                  "question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": 0,
@@ -3345,6 +3364,35 @@ def effective_mastery(course: Dict[str, Any], classes: List[Dict[str, Any]]) -> 
                 scores[cid] = k["score"]
     return scores
 
+WORKSPACES = ("math", "code", "lab")
+_CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure|javascript|typescript|\bjava\b|c\+\+|\brust\b|software|computer science|sql\b", re.I)
+_MATH_RE = re.compile(r"math|calculus|algebra|geometry|trigonometr|statistic|probabilit|\blimits?\b|epsilon|delta|derivative|integra|proof|number theory|"
+                      r"differential equation|real analysis|topology|combinatoric|precalc|matri|vector space|sequence|series", re.I)
+
+def guess_workspace(*texts: str) -> str:
+    """Fallback when the planner gave none: code beats math (a 'Python for statistics' course is code), math beats lab."""
+    blob = " ".join(t or "" for t in texts)
+    return "code" if _CODE_RE.search(blob) else "math" if _MATH_RE.search(blob) else "lab"
+
+def course_workspace(course: Dict[str, Any]) -> str:
+    ws = course.get("workspace")
+    return ws if ws in WORKSPACES else guess_workspace(course.get("subject", ""), course.get("title", ""), course.get("goal", ""))
+
+def with_workspace(topic: Dict[str, Any], cache: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Course classes carry the workspace they open in (older topic files don't have it stored)."""
+    src = topic.get("source") or {}
+    cid = src.get("courseId")
+    if not cid or src.get("workspace") in WORKSPACES:
+        return topic
+    if cache is None or cid not in cache:
+        course = db.get_course(cid)
+        ws = course_workspace(course) if course else guess_workspace(topic.get("category", ""), src.get("courseTitle", ""))
+        if cache is not None:
+            cache[cid] = ws
+    else:
+        ws = cache[cid]
+    return {**topic, "source": {**src, "workspace": ws}}
+
 async def plan_course(course_id: str, job, n_questions: int, class_count: Optional[int]):
     course = db.get_course(course_id)
     materials = course["materials_text"][:120000] or "(no files: plan from the goal)"
@@ -3384,7 +3432,8 @@ async def plan_course(course_id: str, job, n_questions: int, class_count: Option
     if not outline:
         outline = [{"title": c["name"], "concepts": [c["id"]], "objectives": [c["summary"]] if c["summary"] else []} for c in concepts]
 
-    db.update_course(course_id, title=data.get("title") or course["title"], subject=data.get("subject") or "",
+    workspace = data.get("workspace") if data.get("workspace") in WORKSPACES else guess_workspace(data.get("subject", ""), data.get("title", ""), goal)
+    db.update_course(course_id, title=data.get("title") or course["title"], subject=data.get("subject") or "", workspace=workspace,
                      concepts=concepts, diagnostic=questions, status="diagnostic_ready", error=None)
     db.replace_classes(course_id, outline)
     course_event(course_id)
@@ -3433,7 +3482,7 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
         "icon": "BookOpen",
         "practice": normalize_practice(data.get("practice")),
         "source": {"kind": "course", "courseId": course["id"], "courseTitle": course["title"],
-                   "classSeq": klass["seq"], "classTotal": len(classes)},
+                   "classSeq": klass["seq"], "classTotal": len(classes), "workspace": course_workspace(course)},
     }
     topic["title"] = topic.get("title") or klass["title"]
     topic["category"] = topic.get("category") or course.get("subject") or "Course"
@@ -3443,7 +3492,8 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
     normalized, _ = normalize_topic(topic)
     quiz_check = verify_questions(normalized["quiz"], _topic_brief(normalized, 8000))
     if AUTHOR_SIMS:
-        sim_task = author_simulation(_topic_brief(topic), f"Make the student SEE the key idea of: {klass['title']}")
+        sim_task = author_simulation(_topic_brief(topic), f"Make the student SEE the key idea of: {klass['title']}",
+                                     math=course_workspace(course) == "math")
         checked, sim = await asyncio.gather(quiz_check, sim_task, return_exceptions=True)
         if isinstance(sim, dict):
             topic["simulation"] = sim
@@ -3641,7 +3691,7 @@ def sign_in(req: UserRequest):
 @app.get("/api/users/{user_id}/courses")
 def list_user_courses(user_id: str):
     require_user(user_id)
-    return {"courses": db.list_courses(user_id)}
+    return {"courses": [{**c, "workspace": course_workspace(c)} for c in db.list_courses(user_id)]}
 
 @app.post("/api/courses")
 def create_course(req: CourseRequest):

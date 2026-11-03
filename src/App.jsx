@@ -19,6 +19,9 @@ const MathLab = lazy(() => import('./components/MathLab'));
 
 const FALLBACK_TOPICS = [rollingTopic, billiardTopic, lagrangianTopic];
 
+/** Where a topic opens: course classes by their course's subject (math | code | lab); the library is Lab. */
+const workspaceOf = (t) => (t?.source?.courseId ? (t.source.workspace || 'lab') : 'lab');
+
 export default function App() {
   const [user, setUser] = useState(loadProfile);
   const [mode, setMode] = useState('home'); // home | course | physics | code | math
@@ -92,7 +95,9 @@ export default function App() {
       }
     }
     setActiveTab(tab);
-    if (t.source?.courseId) { setClassTopicId(t.id); setMode('class'); }
+    const ws = workspaceOf(t);
+    if (ws === 'math') { setClassTopicId(t.id); setMode('math'); }
+    else if (ws === 'code') { setClassTopicId(t.id); setMode('class'); }
     else { setSelectedTopicId(t.id); setMode('physics'); }
   }, [toast]);
 
@@ -161,17 +166,27 @@ export default function App() {
 
   if (!user) return <LoginPage onSignedIn={signIn} />;
 
-  const libraryTopics = topics.filter((t) => !t.source?.courseId);
-  const activeTopic = libraryTopics.find((t) => t.id === selectedTopicId) || libraryTopics[0];
+  const labTopics = topics.filter((t) => workspaceOf(t) === 'lab');
+  const mathTopics = topics.filter((t) => t.source?.courseId && workspaceOf(t) === 'math');
+  const activeTopic = labTopics.find((t) => t.id === selectedTopicId) || labTopics[0];
   const classTopic = topics.find((t) => t.id === classTopicId) || null;
-  const classSiblings = classTopic
-    ? topics.filter((t) => t.source?.courseId === classTopic.source.courseId).sort((a, b) => (a.source.classSeq || 0) - (b.source.classSeq || 0))
-    : [];
-  const classIdx = classSiblings.findIndex((t) => t.id === classTopicId);
-  const viewedTopic = mode === 'class' ? classTopic : activeTopic;
+  const mathClass = classTopic && workspaceOf(classTopic) === 'math' ? classTopic : null;
+  const codeClass = classTopic && workspaceOf(classTopic) === 'code' ? classTopic : null;
+  const viewedTopic = mode === 'math' ? mathClass : mode === 'class' ? codeClass : activeTopic;
+  // previous/next class for whichever course class is on screen
+  const siblingsOf = (t) => (t?.source?.courseId
+    ? topics.filter((x) => x.source?.courseId === t.source.courseId).sort((a, b) => (a.source.classSeq || 0) - (b.source.classSeq || 0))
+    : []);
+  const classNav = (t) => {
+    const sib = siblingsOf(t), i = sib.findIndex((x) => x.id === t?.id);
+    return i < 0 ? {} : {
+      prevClass: sib[i - 1], nextClass: sib[i + 1], onHome: () => switchMode('home'),
+      onOpenClass: (id) => { openTopic(id); document.getElementById('main')?.scrollTo(0, 0); },
+    };
+  };
   const showSidebar = mode === 'physics';
   const ideMode = mode === 'code';
-  const navMode = mode === 'course' || mode === 'class' || mode === 'review' ? 'home' : mode;
+  const navMode = mode === 'class' ? 'code' : mode === 'course' || mode === 'review' ? 'home' : mode;
 
   return (
     <div className="app">
@@ -190,7 +205,7 @@ export default function App() {
 
       <div className={`workspace${showSidebar ? '' : ' no-sidebar'}${panelOpen ? ' has-panel' : ''}`}>
         {showSidebar && (
-          <Sidebar topics={libraryTopics} selectedTopicId={activeTopic?.id} open={sidebarOpen}
+          <Sidebar topics={labTopics} selectedTopicId={activeTopic?.id} open={sidebarOpen}
             onClose={() => setSidebarOpen(false)} onSelectTopic={(id) => openTopic(id)} />
         )}
 
@@ -206,13 +221,11 @@ export default function App() {
           )}
           {mode === 'physics' && (
             <TopicViewer topic={activeTopic} activeTab={activeTab} setActiveTab={setActiveTab}
-              liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} />
+              liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(activeTopic)} />
           )}
-          {mode === 'class' && (classTopic ? (
-            <TopicViewer key={classTopic.id} topic={classTopic} activeTab={activeTab} setActiveTab={setActiveTab}
-              liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} onHome={() => switchMode('home')}
-              prevClass={classSiblings[classIdx - 1]} nextClass={classSiblings[classIdx + 1]}
-              onOpenClass={(id) => { openTopic(id); document.getElementById('main')?.scrollTo(0, 0); }} />
+          {mode === 'class' && (codeClass ? (
+            <TopicViewer key={codeClass.id} topic={codeClass} activeTab={activeTab} setActiveTab={setActiveTab}
+              liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(codeClass)} />
           ) : <div className="page"><p className="hint">Loading the class…</p></div>)}
           {ideMode && (
             <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
@@ -222,13 +235,17 @@ export default function App() {
           )}
           {mode === 'math' && (
             <Suspense fallback={<div className="page"><p className="hint">Loading Math…</p></div>}>
-              <MathLab user={user} />
+              <MathLab user={user} classTopic={mathClass} mathTopics={mathTopics} onOpenTopic={(id) => openTopic(id)}
+                renderClass={(t) => (
+                  <TopicViewer key={t.id} embedded topic={t} activeTab={activeTab} setActiveTab={setActiveTab}
+                    liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(t)} />
+                )} />
             </Suspense>
           )}
         </main>
 
         <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={viewedTopic?.id} agyCli={agyCli}
-          courseId={mode === 'course' ? courseId : mode === 'class' ? classTopic?.source?.courseId : undefined} />
+          courseId={mode === 'course' ? courseId : viewedTopic?.source?.courseId} />
       </div>
 
       <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />

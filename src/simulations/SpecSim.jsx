@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import MathSim from './MathSim';
+import ChemSim from './ChemSim';
 import { Play, Pause, RotateCcw, AlertTriangle, Activity, Sliders, Info } from 'lucide-react';
 import { theme, canvasPalette } from '../theme';
 import { tryCompile } from '../lib/expr';
@@ -28,6 +30,8 @@ export default function SpecSim({ spec }) {
   if (!spec || !spec.kind) {
     return <div className="panel"><p className="hint">This topic has no simulation yet.</p></div>;
   }
+  if (spec.kind === 'math') return <MathSim spec={spec} />;
+  if (spec.kind === 'chem') return <ChemSim spec={spec} />;
   return <SpecSimPlayer spec={spec} />;
 }
 

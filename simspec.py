@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Tuple
 FUNCTIONS = {
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh",
     "sqrt", "abs", "exp", "log", "log10", "min", "max", "pow", "floor", "ceil",
-    "round", "sign", "hypot", "clamp", "if",
+    "round", "sign", "hypot", "clamp", "if", "fact",
 }
 CONSTANTS = {"pi", "tau", "E"}
 BODY_FIELDS = {"x", "y", "vx", "vy", "m", "r", "speed"}
@@ -153,8 +153,16 @@ def validate_spec(spec: Any) -> Tuple[Dict[str, Any], List[str]]:
     if not isinstance(spec, dict):
         return {}, ["simulation must be a JSON object"]
     kind = spec.get("kind")
+    if kind == "math":
+        return validate_math(spec)
+    if kind == "chem":
+        try:
+            import chemspec  # chemistry kit (agy): validate_chem(spec) -> (clean, errors)
+        except ImportError:
+            return {}, ["simulation.kind 'chem' is not available yet"]
+        return chemspec.validate_chem(spec)
     if kind not in ("particles", "graph"):
-        return {}, ["simulation.kind must be 'particles' or 'graph'"]
+        return {}, ["simulation.kind must be 'particles', 'graph', 'math' or 'chem'"]
 
     params = _clean_params(spec.get("params"), errors)
     param_names = {p["name"] for p in params}
@@ -347,4 +355,85 @@ write the curves in x (e.g. "v0*x - 0.5*g*x^2" with x label "time (s)"); use t o
  "animate":true,
  "curves":[{"expr":"A*sin(k*x-w*t)","label":"wave 1"},{"expr":"A*sin(k*x+w*t)","label":"wave 2"}]}
 Colors: accent gold green cyan pink orange purple white or #hex.
+"""
+
+
+# ---------------------------------------------------------------- kind "math": the math simulation kit
+# widget -> (expression fields with the variables each may use, sliders the player adds when missing)
+MATH_WIDGETS: Dict[str, Tuple[Dict[str, set], Dict[str, Tuple[float, float, float]]]] = {
+    "epsilon_delta": ({"f": {"x"}, "a": set(), "L": set()}, {"eps": (0.02, 2, 0.5), "delta": (0.005, 2, 0.4)}),
+    "epsilon_n": ({"term": {"n"}, "L": set()}, {"eps": (0.005, 1, 0.2)}),
+    "secant_tangent": ({"f": {"x"}, "a": set()}, {"h": (-3, 3, 1.5)}),
+    "riemann": ({"f": {"x"}, "a": set(), "b": set()}, {"n": (1, 100, 6)}),
+    "series": ({"term": {"k", "x"}, "target": {"x"}}, {"N": (0, 25, 3)}),
+    "unit_circle": ({}, {"theta": (0, 360, 45)}),
+    "parametric": ({"x": {"t"}, "y": {"t"}, "tmin": set(), "tmax": set()}, {"t": (0, 1, 0.3)}),
+    "vector_field": ({"P": {"x", "y"}, "Q": {"x", "y"}}, {}),
+    "transform2d": ({"a": set(), "b": set(), "c": set(), "d": set()}, {"m11": (-3, 3, 1), "m12": (-3, 3, 0.5), "m21": (-3, 3, 0), "m22": (-3, 3, 1)}),
+}
+MATH_DEFAULTS = {  # fields a widget can do without
+    "epsilon_n": {}, "series": {"target": None}, "parametric": {"tmin": 0, "tmax": "2*pi"},
+    "transform2d": {"a": "m11", "b": "m12", "c": "m21", "d": "m22"},
+}
+RIEMANN_METHODS = ("left", "right", "mid", "trap")
+
+
+def validate_math(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    errors: List[str] = []
+    widget = spec.get("widget")
+    if widget not in MATH_WIDGETS:
+        return {}, [f"math simulations need 'widget': one of {', '.join(MATH_WIDGETS)}"]
+    fields, sliders = MATH_WIDGETS[widget]
+    params = _clean_params(spec.get("params"), errors)
+    have = {p["name"] for p in params}
+    for name, (lo, hi, val) in sliders.items():  # the widget's own sliders, unless the spec defines them
+        if name not in have and len(params) < MAX_PARAMS:
+            params.append({"name": name, "label": name, "min": lo, "max": hi, "value": val,
+                           "step": 1 if name in ("n", "N") else (hi - lo) / 200, "unit": ""})
+    names = {p["name"] for p in params}
+    clean: Dict[str, Any] = {"version": 1, "kind": "math", "widget": widget,
+                             "title": str(spec.get("title") or "Math simulation")[:100],
+                             "description": str(spec.get("description") or "")[:600], "params": params}
+    defaults = MATH_DEFAULTS.get(widget, {})
+    for field, variables in fields.items():
+        value = spec.get(field, defaults.get(field))
+        if value is None:
+            if field in defaults:
+                continue
+            errors.append(f"math widget '{widget}' needs '{field}'")
+            continue
+        _check_expr(value, names | variables, field, errors)
+        clean[field] = value
+    if widget == "riemann":
+        clean["method"] = spec.get("method") if spec.get("method") in RIEMANN_METHODS else "left"
+    if widget == "epsilon_n":
+        clean["nmax"] = int(min(max(_num(spec.get("nmax"), 60), 10), 400))
+    view = spec.get("view") if isinstance(spec.get("view"), dict) else {}
+    v = {k: _num(view.get(k), d) for k, d in (("xmin", -5), ("xmax", 5), ("ymin", -4), ("ymax", 4))}
+    if v["xmax"] <= v["xmin"] or v["ymax"] <= v["ymin"]:
+        errors.append("view: max must be greater than min")
+    if view:
+        clean["view"] = v
+    return clean, errors
+
+
+MATH_GUIDE = """
+kind "math": interactive math widgets (pick the one that makes the class's key idea visible).
+{"kind":"math","widget":"<widget>","title":"...","description":"what to drag and what to notice",
+ "params":[{"name":"c","label":"...","min":0,"max":2,"value":1,"step":0.1}],   // optional extra sliders
+ "view":{"xmin":-1,"xmax":4,"ymin":-1,"ymax":6}, ...widget fields}
+Widgets (expressions use the same grammar as other specs; fact(n) is n!):
+- "epsilon_delta": f (in x), a, L. Sliders eps, delta are added. Shows the eps-band around L, the delta-band
+   around a, and marks where f leaves the eps-band, so the student can find a delta that works.
+- "epsilon_n": term (in n), L, optional nmax. Slider eps. Plots a_n with the eps-band and the first N after which
+   every term stays inside.
+- "secant_tangent": f, a. Slider h. Secant through (a, f(a)) and (a+h, f(a+h)) approaching the tangent.
+- "riemann": f, a, b, method "left"|"right"|"mid"|"trap". Slider n. Rectangles, their sum and the exact area.
+- "series": term (in k and x), optional target (in x). Slider N. Partial sum S_N(x) = sum of term for k=0..N
+   against the target, e.g. Taylor term "(-1)^k * x^(2*k+1) / fact(2*k+1)" with target "sin(x)".
+- "unit_circle": slider theta (degrees). Angle, cos and sin as projections, and the sine graph traced.
+- "parametric": x and y (in t), tmin, tmax. Slider t (0..1 of the way along). Curve and moving point.
+- "vector_field": P and Q (in x, y). Arrows of (P, Q); click the plot to drop a flow line.
+- "transform2d": a, b, c, d (default sliders m11 m12 m21 m22). The matrix acting on the grid and unit square,
+   with the determinant as signed area.
 """
