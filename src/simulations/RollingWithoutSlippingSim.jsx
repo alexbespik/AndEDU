@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Eye, Compass, Zap, Activity, Info } from 'lucide-react';
-import { theme } from '../theme';
+import { theme, canvasPalette } from '../theme';
 
 export default function RollingWithoutSlippingSim() {
   const canvasRef = useRef(null);
@@ -47,9 +47,13 @@ export default function RollingWithoutSlippingSim() {
 
       const canvas = canvasRef.current;
       if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== 860 * dpr) { canvas.width = 860 * dpr; canvas.height = 320 * dpr; }
       const ctx = canvas.getContext('2d');
-      const width = canvas.width;
-      const height = canvas.height;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const P = canvasPalette();
+      const width = 860;
+      const height = 320;
       const groundY = height - 70;
 
       // Effective omega
@@ -69,7 +73,8 @@ export default function RollingWithoutSlippingSim() {
         }
 
         // Trace cycloid point (red marker on rim)
-        const rimX = stateRef.current.x + radius * Math.sin(stateRef.current.theta);
+        // Note: Rim marker rotated by theta has canvas position x - R*sin(theta), y - R + R*cos(theta)
+        const rimX = stateRef.current.x - radius * Math.sin(stateRef.current.theta);
         const rimY = (groundY - radius) + radius * Math.cos(stateRef.current.theta);
         stateRef.current.cycloidPoints.push({ x: rimX, y: rimY });
         if (stateRef.current.cycloidPoints.length > 280) {
@@ -78,11 +83,11 @@ export default function RollingWithoutSlippingSim() {
       }
 
       // Clear background
-      ctx.fillStyle = '#121212';
+      ctx.fillStyle = P.surface;
       ctx.fillRect(0, 0, width, height);
 
       // Draw Grid lines
-      ctx.strokeStyle = '#1e1e1e';
+      ctx.strokeStyle = P.sunk;
       ctx.lineWidth = 1;
       for (let gx = 0; gx < width; gx += 40) {
         ctx.beginPath();
@@ -98,7 +103,7 @@ export default function RollingWithoutSlippingSim() {
       }
 
       // Draw Ground
-      ctx.strokeStyle = '#23a55a';
+      ctx.strokeStyle = P.accent;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(0, groundY);
@@ -106,7 +111,7 @@ export default function RollingWithoutSlippingSim() {
       ctx.stroke();
 
       // Ground hatching
-      ctx.strokeStyle = '#1e3825';
+      ctx.strokeStyle = P['rule-strong'];
       ctx.lineWidth = 1.5;
       for (let hx = 0; hx < width; hx += 16) {
         ctx.beginPath();
@@ -117,7 +122,7 @@ export default function RollingWithoutSlippingSim() {
 
       // Draw Cycloid Trail
       if (showCycloid && stateRef.current.cycloidPoints.length > 1) {
-        ctx.strokeStyle = 'rgba(229, 184, 92, 0.75)';
+        ctx.strokeStyle = P['gold-text'];
         ctx.lineWidth = 2.5;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
@@ -141,22 +146,22 @@ export default function RollingWithoutSlippingSim() {
       // Wheel shadow / outer glow
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#1e1e1e';
+      ctx.fillStyle = P.sunk;
       ctx.fill();
       ctx.lineWidth = 4;
-      ctx.strokeStyle = '#e5b85c';
+      ctx.strokeStyle = P['gold-text'];
       ctx.stroke();
 
       // Inner disc fill depending on inertia
       ctx.beginPath();
       ctx.arc(0, 0, radius - 4, 0, Math.PI * 2);
-      ctx.fillStyle = objectType === 'hoop' ? '#141414' : '#262626';
+      ctx.fillStyle = objectType === 'hoop' ? P.surface : P.rule;
       ctx.fill();
 
       // Draw Rotating Spokes
       ctx.rotate(currentTheta);
       ctx.lineWidth = 2;
-      ctx.strokeStyle = '#64748b';
+      ctx.strokeStyle = P.muted;
       for (let i = 0; i < 8; i++) {
         ctx.beginPath();
         ctx.moveTo(0, 0);
@@ -168,18 +173,18 @@ export default function RollingWithoutSlippingSim() {
       // Traced Rim Marker (Red/Gold Dot)
       ctx.beginPath();
       ctx.arc(0, radius, 6, 0, Math.PI * 2);
-      ctx.fillStyle = '#f92672';
+      ctx.fillStyle = P.bad;
       ctx.fill();
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = P.surface;
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
       // Hub center
       ctx.beginPath();
       ctx.arc(0, 0, 8, 0, Math.PI * 2);
-      ctx.fillStyle = '#23a55a';
+      ctx.fillStyle = P.accent;
       ctx.fill();
-      ctx.strokeStyle = '#f8f8f2';
+      ctx.strokeStyle = P.surface;
       ctx.lineWidth = 2;
       ctx.stroke();
 
@@ -221,31 +226,31 @@ export default function RollingWithoutSlippingSim() {
         const vBottom = (vCm - effectiveOmega * radius) * vScale;
 
         // Center vector
-        drawArrow(wheelX, wheelY, wheelX + vCenter, wheelY, '#23a55a', `v_cm = ${Math.round(vCm)}`);
+        drawArrow(wheelX, wheelY, wheelX + vCenter, wheelY, P.accent, `v_cm = ${Math.round(vCm)}`);
 
         // Top of wheel vector (2 * v_cm)
-        drawArrow(wheelX, wheelY - radius, wheelX + vTop, wheelY - radius, '#e5b85c', `v_top = ${Math.round(vCm + effectiveOmega * radius)}`);
+        drawArrow(wheelX, wheelY - radius, wheelX + vTop, wheelY - radius, P['gold-text'], `v_top = ${Math.round(vCm + effectiveOmega * radius)}`);
 
         // Bottom Contact Point Vector
         if (Math.abs(vBottom) < 0.8) {
           // Exactly at rest
           ctx.beginPath();
           ctx.arc(wheelX, groundY, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#23a55a';
+          ctx.fillStyle = P.accent;
           ctx.fill();
           ctx.font = '11px "JetBrains Mono", monospace';
-          ctx.fillStyle = '#23a55a';
+          ctx.fillStyle = P.accent;
           ctx.fillText('v_contact = 0 (Instantaneous Rest)', wheelX + 12, groundY + 16);
         } else {
-          drawArrow(wheelX, groundY, wheelX + vBottom, groundY, '#f92672', `v_slip = ${Math.round(vBottom)}`);
+          drawArrow(wheelX, groundY, wheelX + vBottom, groundY, P.bad, `v_slip = ${Math.round(vBottom)}`);
         }
       }
 
       // Draw Free Body Diagram Forces
       if (showForces) {
         // Gravity
-        ctx.strokeStyle = '#66d9ef';
-        ctx.fillStyle = '#66d9ef';
+        ctx.strokeStyle = P.info;
+        ctx.fillStyle = P.info;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(wheelX, wheelY);
@@ -254,8 +259,8 @@ export default function RollingWithoutSlippingSim() {
         ctx.fillText('Mg', wheelX + 6, wheelY + 40);
 
         // Normal Force
-        ctx.strokeStyle = '#ae81ff';
-        ctx.fillStyle = '#ae81ff';
+        ctx.strokeStyle = P.plum;
+        ctx.fillStyle = P.plum;
         ctx.beginPath();
         ctx.moveTo(wheelX, groundY);
         ctx.lineTo(wheelX, groundY - 45);
@@ -279,102 +284,28 @@ export default function RollingWithoutSlippingSim() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Simulation Screen */}
-      <div style={{
-        background: '#0d0d0d',
-        border: `1px solid ${theme.border}`,
-        borderRadius: 8,
-        position: 'relative',
-        overflow: 'hidden',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)'
-      }}>
-        <canvas 
-          ref={canvasRef} 
-          width={860} 
-          height={320} 
-          style={{ width: '100%', height: 'auto', display: 'block' }}
-        />
-
-        {/* Live Status Overlay */}
-        <div style={{
-          position: 'absolute',
-          top: 12,
-          left: 12,
-          background: 'rgba(18, 18, 18, 0.88)',
-          backdropFilter: 'blur(8px)',
-          border: `1px solid ${theme.border}`,
-          borderRadius: 6,
-          padding: '8px 12px',
-          fontFamily: theme.fontMono,
-          fontSize: '0.78rem',
-          display: 'flex',
-          gap: 16,
-          alignItems: 'center'
-        }}>
-          <div>
-            <span style={{ color: theme.textMuted }}>State: </span>
-            <span style={{ 
-              color: Math.abs(slipVelocity) < 0.1 ? theme.accentGreen : theme.accentPink,
-              fontWeight: 700 
-            }}>
-              {Math.abs(slipVelocity) < 0.1 ? '⚡ Pure Rolling (No Slip)' : slipVelocity > 0 ? '⚠️ Forward Skidding' : '⚠️ Backward Spin'}
-            </span>
-          </div>
-          <div>
-            <span style={{ color: theme.textMuted }}>v_cm: </span>
-            <span style={{ color: theme.accentGold }}>{Math.round(vCm)} px/s</span>
-          </div>
-          <div>
-            <span style={{ color: theme.textMuted }}>ω·R: </span>
-            <span style={{ color: theme.accentCyan }}>{Math.round(currentOmega * radius)} px/s</span>
-          </div>
+      {/* Toolbar sits above the canvas so controls never cover the simulation or each other */}
+      <div className="btn-row" style={{ justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+        <div className="readouts" role="status">
+          <span>State: <strong style={{ color: Math.abs(slipVelocity) < 0.1 ? theme.success : theme.error }}>
+            {Math.abs(slipVelocity) < 0.1 ? 'Rolling without slipping' : slipVelocity > 0 ? 'Skidding forward' : 'Spinning backward'}
+          </strong></span>
+          <span>v<sub>cm</sub> <b>{Math.round(vCm)} px/s</b></span>
+          <span>ωR <b>{Math.round(currentOmega * radius)} px/s</b></span>
         </div>
-
-        {/* Play / Reset Controls on Canvas */}
-        <div style={{
-          position: 'absolute',
-          top: 12,
-          right: 12,
-          display: 'flex',
-          gap: 8
-        }}>
-          <button 
-            onClick={() => setIsRunning(!isRunning)}
-            style={{
-              background: isRunning ? 'rgba(229, 184, 92, 0.2)' : 'rgba(35, 165, 90, 0.25)',
-              border: `1px solid ${isRunning ? theme.accentGold : theme.accentGreen}`,
-              color: isRunning ? theme.accentGold : theme.accentGreen,
-              borderRadius: 4,
-              padding: '6px 12px',
-              fontFamily: theme.fontMono,
-              fontSize: '0.8rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
-            {isRunning ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Play</>}
+        <div className="btn-row">
+          <button type="button" className={`btn btn-sm ${isRunning ? 'btn-secondary' : 'btn-primary'}`} onClick={() => setIsRunning(!isRunning)}>
+            {isRunning ? <><Pause size={14} aria-hidden="true" /> Pause</> : <><Play size={14} aria-hidden="true" /> Play</>}
           </button>
-          <button 
-            onClick={handleReset}
-            style={{
-              background: 'rgba(255, 255, 255, 0.08)',
-              border: `1px solid ${theme.border}`,
-              color: theme.textMain,
-              borderRadius: 4,
-              padding: '6px 12px',
-              fontFamily: theme.fontMono,
-              fontSize: '0.8rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
-            <RotateCcw size={14} /> Reset
+          <button type="button" className="btn btn-quiet btn-sm" onClick={handleReset}>
+            <RotateCcw size={14} aria-hidden="true" /> Reset
           </button>
         </div>
+      </div>
+
+      <div className="sim-canvas">
+        <canvas ref={canvasRef} width={860} height={320}
+          role="img" aria-label="Wheel rolling along the ground with its rim point tracing a cycloid" />
       </div>
 
       {/* Control Panel Grid */}
@@ -390,7 +321,7 @@ export default function RollingWithoutSlippingSim() {
         {/* Sliders */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4, fontFamily: theme.fontMono }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4, fontFamily: theme.fontSans }}>
               <span>Linear Velocity (v_cm):</span>
               <span style={{ color: theme.accentGreen }}>{vCm} px/s</span>
             </div>
@@ -405,7 +336,7 @@ export default function RollingWithoutSlippingSim() {
           </div>
 
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4, fontFamily: theme.fontMono }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4, fontFamily: theme.fontSans }}>
               <span>Radius (R):</span>
               <span style={{ color: theme.accentGold }}>{radius} px</span>
             </div>
@@ -421,7 +352,7 @@ export default function RollingWithoutSlippingSim() {
 
           {!lockNoSlip && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4, fontFamily: theme.fontMono }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4, fontFamily: theme.fontSans }}>
                 <span>Spin Multiplier (ω / (v/R)):</span>
                 <span style={{ color: theme.accentCyan }}>{omegaRatio.toFixed(2)}x</span>
               </div>
@@ -493,8 +424,8 @@ export default function RollingWithoutSlippingSim() {
           flexDirection: 'column',
           gap: 8
         }}>
-          <div style={{ fontSize: '0.78rem', color: theme.accentGold, fontWeight: 700, fontFamily: theme.fontMono }}>
-            ⚡ KINETIC ENERGY FRACTION
+          <div style={{ fontSize: '0.78rem', color: theme.accentGold, fontWeight: 700, fontFamily: theme.fontSans }}>
+            Share of kinetic energy
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <select 
@@ -506,7 +437,7 @@ export default function RollingWithoutSlippingSim() {
                 color: theme.textMain,
                 padding: '4px 8px',
                 borderRadius: 4,
-                fontFamily: theme.fontMono,
+                fontFamily: theme.fontSans,
                 fontSize: '0.78rem',
                 width: '100%'
               }}
@@ -523,7 +454,7 @@ export default function RollingWithoutSlippingSim() {
           </div>
 
           {/* Energy split bar */}
-          <div style={{ height: 10, background: '#121212', borderRadius: 5, overflow: 'hidden', display: 'flex' }}>
+          <div style={{ height: 10, background: theme.bgCardAlt, borderRadius: 5, overflow: 'hidden', display: 'flex' }}>
             <div style={{ width: `${kTransRatio * 100}%`, background: theme.accentGreen }} title="Translational" />
             <div style={{ width: `${kRotRatio * 100}%`, background: theme.accentCyan }} title="Rotational" />
           </div>

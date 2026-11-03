@@ -1,339 +1,166 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import remarkGfm from 'remark-gfm';
-import { 
-  BookOpen, Compass, Award, Copy, Check, ExternalLink, 
-  Sparkles, Terminal, FileCode, CheckCircle2, AlertTriangle,
-  Lightbulb, RefreshCw
-} from 'lucide-react';
-import { theme } from '../theme';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, Download, FlaskConical, Loader2 } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
 import QuizEngine from './QuizEngine';
+import PracticeDeck from './PracticeDeck';
 import MermaidViewer from './MermaidViewer';
+import Md, { MdInline } from './Md';
+import { api, useAgyEvents, downloadFile } from '../lib/api';
 
-export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig }) {
-  const [copiedFormula, setCopiedFormula] = useState(null);
+const BUILTIN = {
+  rolling_without_slipping: () => <RollingWithoutSlippingSim />,
+  billiard_collisions: (cfg) => <BilliardSim config={cfg} />,
+};
 
-  if (!topic) {
+function SimulationTab({ topic, liveSimConfig }) {
+  const [job, setJob] = useState(null);
+  const [error, setError] = useState(null);
+
+  useAgyEvents((evt) => {
+    if (evt.type === 'JOB_UPDATE' && job && evt.payload.id === job.id) setJob(evt.payload);
+  });
+
+  if (BUILTIN[topic.simulationType]) return BUILTIN[topic.simulationType](liveSimConfig);
+
+  if (topic.simulation) {
+    const s = topic.simulation;
     return (
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: theme.textMuted,
-        fontFamily: theme.fontMono,
-        fontSize: '0.9rem'
-      }}>
-        Select a topic from the sidebar to begin.
-      </div>
+      <section className="panel stack">
+        <h2>{s.title}</h2>
+        {s.description && <p>{s.description}</p>}
+        {s.params?.length > 0 && (
+          <ul className="stack-sm" style={{ margin: 0, paddingLeft: '1.2em' }}>
+            {s.params.map((p) => (
+              <li key={p.name}>{p.label}: {p.min} to {p.max}{p.unit ? ` ${p.unit}` : ''}</li>
+            ))}
+          </ul>
+        )}
+        <p className="notice notice-info">This simulation is saved and validated. The interactive renderer for generated simulations isn't wired up yet, so it can't be played here.</p>
+      </section>
     );
   }
 
-  const copyFormula = (f, idx) => {
-    navigator.clipboard.writeText(f);
-    setCopiedFormula(idx);
-    setTimeout(() => setCopiedFormula(null), 2000);
+  const running = job && (job.status === 'queued' || job.status === 'running');
+  const start = async () => {
+    setError(null);
+    try {
+      setJob(await api('/api/simulations/generate', { method: 'POST', body: { topicId: topic.id } }));
+    } catch (e) {
+      setError(e.message);
+    }
   };
 
   return (
-    <div style={{ flex: 1, height: '100%', overflowY: 'auto', background: theme.bgApp, padding: '24px 32px' }}>
-      <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
-        
-        {/* Header Title & Meta */}
-        <div style={{ borderBottom: `1px solid ${theme.border}`, paddingBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <span style={{
-              background: 'rgba(35, 165, 90, 0.15)',
-              color: theme.accentGreen,
-              border: `1px solid rgba(35, 165, 90, 0.35)`,
-              borderRadius: 4,
-              padding: '2px 8px',
-              fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
-              fontWeight: 700
-            }}>
-              {topic.category}
-            </span>
-            <span style={{
-              background: 'rgba(229, 184, 92, 0.15)',
-              color: theme.accentGold,
-              border: `1px solid rgba(229, 184, 92, 0.35)`,
-              borderRadius: 4,
-              padding: '2px 8px',
-              fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
-              fontWeight: 700
-            }}>
-              {topic.difficulty || 'Undergraduate'}
-            </span>
+    <section className="panel empty-sim">
+      <FlaskConical size={28} color="var(--wm-green)" aria-hidden="true" />
+      <h2>No simulation for this topic yet</h2>
+      <p style={{ maxWidth: '52ch' }}>AGY can design one from this lesson: sliders for the quantities that matter, plus live readouts of what they change.</p>
+      <div className="btn-row" style={{ justifyContent: 'center' }}>
+        <button type="button" className="btn btn-primary" onClick={start} disabled={running}>
+          {running ? <><Loader2 size={16} className="spin" aria-hidden="true" /> {job.step || 'Working'}</> : 'Generate simulation'}
+        </button>
+      </div>
+      {job?.status === 'error' && <p className="notice notice-bad">{job.error}</p>}
+      {job?.status === 'done' && <p className="notice notice-ok">Simulation created. It will appear here in a moment.</p>}
+      {error && <p className="notice notice-bad">{error}</p>}
+    </section>
+  );
+}
+
+function LessonTab({ topic }) {
+  const [copied, setCopied] = useState(null);
+  const copy = async (text, i) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(i);
+      setTimeout(() => setCopied(null), 1600);
+    } catch { /* clipboard blocked; the formula is still selectable */ }
+  };
+
+  return (
+    <div className="stack">
+      {topic.cheatSheet?.length > 0 && (
+        <section className="stack-sm" aria-labelledby="formulas-h">
+          <h2 id="formulas-h" style={{ fontSize: '1.2rem' }}>Key formulas</h2>
+          <div className="formula-grid">
+            {topic.cheatSheet.map((item, i) => (
+              <div key={i} className="formula">
+                <div style={{ minWidth: 0 }}>
+                  {(item.label || item.name) && <span className="lbl">{item.label || item.name}</span>}
+                  <div className="tex"><MdInline>{`$${item.formula}$`}</MdInline></div>
+                </div>
+                <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={() => copy(item.formula, i)}
+                  aria-label={copied === i ? 'Copied' : `Copy LaTeX for ${item.label || 'formula'}`}>
+                  {copied === i ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
+            ))}
           </div>
+        </section>
+      )}
+      {topic.mermaid && <MermaidViewer chart={topic.mermaid} />}
+      <Md className="prose">{topic.markdownContent}</Md>
+    </div>
+  );
+}
 
-          <h1 style={{
-            fontSize: '2rem',
-            fontWeight: 800,
-            color: theme.textMain,
-            fontFamily: theme.fontMono,
-            letterSpacing: '-0.02em',
-            marginBottom: 8
-          }}>
-            {topic.title}
-          </h1>
+export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse }) {
+  if (!topic) {
+    return <div className="page"><p className="hint">Pick a topic from the list to start.</p></div>;
+  }
 
-          <p style={{ color: theme.textDim, fontSize: '0.95rem', lineHeight: 1.5 }}>
-            {topic.summary}
-          </p>
+  const hasSim = Boolean(topic.simulation || BUILTIN[topic.simulationType]);
+  const tabs = [
+    { id: 'theory', label: 'Lesson', icon: BookOpen },
+    { id: 'simulation', label: 'Simulation', icon: Compass, note: hasSim ? null : 'none yet' },
+    { id: 'quiz', label: 'Quiz', icon: Award, count: topic.quiz?.length || 0 },
+    { id: 'practice', label: 'Practice', icon: Puzzle, count: topic.practice?.length || 0 },
+  ];
+  const tab = tabs.some((t) => t.id === activeTab) ? activeTab : 'theory';
+  const src = topic.source || {};
+
+  return (
+    <div className="page">
+      <header className="topic-head">
+        {src.courseId && (
+          <nav className="crumbs" aria-label="Breadcrumb">
+            <button type="button" onClick={() => onOpenCourse?.(src.courseId)}>{course?.title || src.courseTitle || 'Course'}</button>
+            <span aria-hidden="true">/</span>
+            <span>Class {src.classSeq}{src.classTotal ? ` of ${src.classTotal}` : ''}</span>
+          </nav>
+        )}
+        <h1>{topic.title}</h1>
+        <div className="topic-tags">
+          {topic.category && <span>{topic.category}</span>}
+          {topic.difficulty && <span>{topic.difficulty}</span>}
         </div>
-
-        {/* Tab 1: Theory & Mathematical Derivations */}
-        {activeTab === 'theory' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {/* Quick Notation & Formula Cheat Sheet */}
-            {topic.cheatSheet && topic.cheatSheet.length > 0 && (
-              <div style={{
-                background: theme.bgPanel,
-                border: `1px solid ${theme.border}`,
-                borderRadius: 8,
-                padding: 16
-              }}>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  marginBottom: 12,
-                  fontFamily: theme.fontMono,
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  color: theme.accentGold
-                }}>
-                  <span>⚡ KEY SCIENTIFIC NOTATIONS & CONSTRAINTS</span>
-                </div>
-
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: 10
-                }}>
-                  {topic.cheatSheet.map((item, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        background: theme.bgCard,
-                        border: `1px solid ${theme.border}`,
-                        borderRadius: 6,
-                        padding: '8px 12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 12
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: '0.72rem', color: theme.textMuted, fontFamily: theme.fontMono }}>
-                          {item.label}
-                        </span>
-                        <div style={{ fontSize: '0.95rem', color: theme.textMain }}>
-                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                            {`$${item.formula}$`}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => copyFormula(item.formula, idx)}
-                        title="Copy LaTeX Formula"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: copiedFormula === idx ? theme.accentGreen : theme.textMuted,
-                          cursor: 'pointer',
-                          padding: 4
-                        }}
-                      >
-                        {copiedFormula === idx ? <Check size={14} /> : <Copy size={14} />}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Mermaid Architecture Flowchart */}
-            {topic.mermaid && (
-              <div>
-                <div style={{
-                  fontSize: '0.8rem',
-                  fontFamily: theme.fontMono,
-                  fontWeight: 700,
-                  color: theme.accentCyan,
-                  marginBottom: 6
-                }}>
-                  STRUCTURED REASONING FLOW:
-                </div>
-                <MermaidViewer chart={topic.mermaid} />
-              </div>
-            )}
-
-            {/* Main Markdown Body with KaTeX & Tables */}
-            <article className="markdown-body">
-              <ReactMarkdown
-                remarkPlugins={[remarkMath, remarkGfm]}
-                rehypePlugins={[rehypeKatex]}
-              >
-                {topic.markdownContent}
-              </ReactMarkdown>
-            </article>
-
-            {/* Next Steps: Interactive Prompt */}
-            <div style={{
-              background: 'rgba(35, 165, 90, 0.08)',
-              border: `1px solid rgba(35, 165, 90, 0.3)`,
-              borderRadius: 8,
-              padding: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16
-            }}>
-              <div>
-                <h4 style={{ color: theme.accentGreen, fontFamily: theme.fontMono, fontSize: '0.95rem', marginBottom: 4 }}>
-                  Ready to test your intuition?
-                </h4>
-                <p style={{ color: theme.textDim, fontSize: '0.84rem' }}>
-                  Open the real-time physics simulation to play with velocity vectors or take the assessment quiz.
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10 }}>
-                {topic.simulationType && (
-                  <button
-                    onClick={() => setActiveTab('simulation')}
-                    style={{
-                      background: theme.accentGreen,
-                      color: '#000000',
-                      border: 'none',
-                      borderRadius: 4,
-                      padding: '8px 16px',
-                      fontSize: '0.82rem',
-                      fontFamily: theme.fontMono,
-                      fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Open Simulation
-                  </button>
-                )}
-                {topic.quiz && (
-                  <button
-                    onClick={() => setActiveTab('quiz')}
-                    style={{
-                      background: theme.accentGold,
-                      color: '#000000',
-                      border: 'none',
-                      borderRadius: 4,
-                      padding: '8px 16px',
-                      fontSize: '0.82rem',
-                      fontFamily: theme.fontMono,
-                      fontWeight: 700,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Take Quiz ({topic.quiz.length})
-                  </button>
-                )}
-              </div>
-            </div>
+        {topic.summary && <p className="summary">{topic.summary}</p>}
+        {topic.notesFile && (
+          <div className="btn-row">
+            <button type="button" className="btn btn-quiet btn-sm"
+              onClick={() => downloadFile(`/api/notes/${topic.id}.md`, `${topic.id}.md`).catch(() => {})}>
+              <Download size={14} aria-hidden="true" /> Download notes (.md)
+            </button>
           </div>
         )}
+        <div className="tabs" role="tablist" aria-label="Topic sections">
+          {tabs.map(({ id, label, icon: Icon, count, note }) => (
+            <button key={id} type="button" role="tab" id={`tab-${id}`} aria-selected={tab === id} aria-controls={`panel-${id}`}
+              className="tab" onClick={() => setActiveTab(id)}>
+              <Icon size={16} aria-hidden="true" /> {label}
+              {count > 0 && <span className="count">{count}</span>}
+              {note && <span className="count">{note}</span>}
+            </button>
+          ))}
+        </div>
+      </header>
 
-        {/* Tab 2: Interactive Simulation */}
-        {activeTab === 'simulation' && (
-          <div>
-            {topic.simulationType === 'rolling_without_slipping' ? (
-              <RollingWithoutSlippingSim />
-            ) : topic.simulationType === 'billiard_collisions' ? (
-              <BilliardSim config={liveSimConfig} />
-            ) : (
-              <div style={{
-                background: theme.bgPanel,
-                border: `1px solid ${theme.border}`,
-                borderRadius: 8,
-                padding: 32,
-                textAlign: 'center',
-                color: theme.textMuted,
-                fontFamily: theme.fontMono
-              }}>
-                No specialized simulation wired for this topic yet.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tab 3: Interactive Assessment Quiz */}
-        {activeTab === 'quiz' && (
-          <QuizEngine 
-            quiz={topic.quiz} 
-            topicId={topic.id}
-          />
-        )}
-
-        {/* Tab 4: Agent Hub & Dynamic Protocol */}
-        {activeTab === 'agent' && (
-          <div style={{
-            background: theme.bgPanel,
-            border: `1px solid ${theme.border}`,
-            borderRadius: 8,
-            padding: 24,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 20
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: theme.accentGreen, fontFamily: theme.fontMono, fontWeight: 700 }}>
-              <Terminal size={18} />
-              <span>AUTONOMOUS CODING AGENT PROTOCOL</span>
-            </div>
-
-            <p style={{ color: theme.textDim, fontSize: '0.88rem', lineHeight: 1.6 }}>
-              This platform was built from the ground up to support continuous, autonomous AI coding agents (such as Google Antigravity, Claude Code, Cursor, or background loop agents). An agent can generate new scientific explanations, LaTeX derivations, and assessment quizzes simply by writing a JSON file or calling the local API.
-            </p>
-
-            {/* Agent Command Example */}
-            <div style={{
-              background: '#0d0d0d',
-              border: `1px solid ${theme.border}`,
-              borderRadius: 6,
-              padding: 14,
-              fontFamily: theme.fontMono,
-              fontSize: '0.82rem'
-            }}>
-              <div style={{ color: theme.accentGold, marginBottom: 6 }}># Agent CLI Ingestion:</div>
-              <code style={{ color: theme.accentGreen }}>
-                python3 scripts/agent_add_topic.py --file my_topic.json
-              </code>
-            </div>
-
-            {/* REST API Endpoints */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: '0.82rem', fontFamily: theme.fontMono, fontWeight: 700, color: theme.accentCyan }}>
-                AVAILABLE AGENT ENDPOINTS:
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8, fontSize: '0.8rem', fontFamily: theme.fontMono }}>
-                <span style={{ color: theme.accentGreen }}>GET /api/topics</span>
-                <span style={{ color: theme.textDim }}>List all topics & active metadata</span>
-                <span style={{ color: theme.accentGold }}>POST /api/topics</span>
-                <span style={{ color: theme.textDim }}>Dynamically ingest or update a topic</span>
-                <span style={{ color: theme.accentPink }}>POST /api/quiz/submit</span>
-                <span style={{ color: theme.textDim }}>Record user assessment answers & metrics</span>
-                <span style={{ color: theme.accentCyan }}>GET /api/status</span>
-                <span style={{ color: theme.textDim }}>Poll agent status & hot reload state</span>
-              </div>
-            </div>
-          </div>
-        )}
-
+      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+        {tab === 'theory' && <LessonTab topic={topic} />}
+        {tab === 'simulation' && <SimulationTab key={topic.id} topic={topic} liveSimConfig={liveSimConfig} />}
+        {tab === 'quiz' && <QuizEngine key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId} />}
+        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} />}
       </div>
     </div>
   );

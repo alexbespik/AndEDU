@@ -4,7 +4,6 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import katex from 'katex';
-import 'katex/dist/katex.min.css';
 import { 
   Terminal, Send, Play, CheckCircle2, AlertTriangle, RefreshCw, 
   Loader2, Sparkles, Upload, BookOpen, Code2, Plus, ArrowDown, 
@@ -19,42 +18,9 @@ import {
 
 const STORAGE_KEY = 'andedu_studio_v5';
 
-// ---------------------------------------------------------------------------
-// MONOKAI BLACK & FOREST ACCENT PALETTE (Deep Obsidian & Lush Pine)
-// ---------------------------------------------------------------------------
-const theme = {
-  bgApp: '#121212',        // Monokai Black canvas base
-  bgPanel: '#1a1a1a',      // Monokai deep charcoal panel
-  bgSidebar: '#161616',    // Sleek Monokai Black sidebar
-  bgEditor: '#121212',     // Pure Monokai Black editor slate
-  bgActivity: '#0d0d0d',   // Ultra-dark activity dock
-  bgHeader: '#141414',     // Dark Monokai header
-  bgCard: '#1e1e1e',       // Monokai Black card surface
-  bgCardAlt: '#262626',    // Elevated card surface
-  bgHighlight: '#2f2f2f',  // Active selection / line highlight
-  bgInput: '#181818',      // Monokai dark input field
-  border: '#282828',       // Subtle dark boundary
-  borderActive: '#e5b85c', // Luminous Pine/Collegiate Gold
-  borderContrast: '#383838', // Crisp Monokai divider
-  borderLight: '#484848',   // Light border accent
-  textMain: '#f8f8f2',     // Classic Monokai text white
-  textDim: '#a8a8a2',      // Monokai dim text
-  textMuted: '#7e8a82',    // Balanced sage muted text
-  accent: '#23a55a',       // True Forest Green
-  accentGreen: '#23a55a',  // Unmistakable deep Forest Green
-  accentForestLight: '#2ecc71', // Bright spring pine highlight
-  accentGold: '#e5b85c',   // Luminous Gold
-  accentYellow: '#e5b85c', // Luminous Gold
-  accentPink: '#f92672',   // Canonical Monokai pink/crimson
-  accentBlue: '#66d9ef',   // Canonical Monokai cyan/blue
-  accentOrange: '#fd971f', // Canonical Monokai orange
-  accentPurple: '#ae81ff', // Canonical Monokai purple
-  accentCyan: '#66d9ef',
-  success: '#23a55a',
-  error: '#f92672',
-  warning: '#e5b85c',
-  fontMono: '"JetBrains Mono", Menlo, Monaco, "Courier New", monospace'
-};
+// Shared &.edu LAB (William & Mary) palette
+import { theme } from '../theme';
+import { authFetch } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // LINUX TUX PENGUIN SHADOW WATERMARK (Centered Linux Emblem)
@@ -72,7 +38,7 @@ const PenguinShadow = ({ size = 320, color = theme.accentGreen }) => {
         fill={color} 
         xmlns="http://www.w3.org/2000/svg"
         style={{
-          filter: 'drop-shadow(0 20px 30px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 35px rgba(35, 165, 90, 0.3))'
+          filter: 'drop-shadow(0 20px 30px rgba(28, 38, 34, 0.35)) drop-shadow(0 0 35px rgba(17, 87, 64, 0.16))'
         }}
       >
         <path d={tuxPath} />
@@ -111,7 +77,7 @@ const DEFAULT_CODE_CURRICULUM = {
       estimated_time_minutes: 20,
       content_markdown: `# Chapter 1: Syntax Essentials & Safe Loops
 
-Welcome to **&edu Studio**. In this chapter, we master fundamental compound syntax and loop safety invariants.
+Welcome to **&.edu LAB**. In this chapter, we master fundamental compound syntax and loop safety invariants.
 
 ## 1. Syntax Mechanics: The Power of Compound Headers
 
@@ -321,7 +287,7 @@ const DEFAULT_MATH_CURRICULUM = {
       estimated_time_minutes: 20,
       content_markdown: `# Chapter 1: Limits & The Power Rule
 
-Welcome to **&edu Studio: Mathematics**. In this chapter, we explore foundational differential calculus, rate of change, and algebraic derivation rules.
+Welcome to **&.edu LAB: Mathematics**. In this chapter, we explore foundational differential calculus, rate of change, and algebraic derivation rules.
 
 ## 1. The Limit Definition of the Derivative
 
@@ -872,7 +838,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
   // High-Contrast Terminal Output
   const [terminalOutput, setTerminalOutput] = useState([
-    "[SYSTEM] &edu Studio initialized.",
+    "[SYSTEM] &.edu LAB initialized.",
     "[STATUS] Ready. Use Left Ingestion to upload files, switch between Code & Math modes, or assemble exercises."
   ]);
 
@@ -882,7 +848,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const [chatHistory, setChatHistory] = useState([
     { 
       role: 'model', 
-      content: "👋 Welcome to **&edu Studio**! I am your senior Socratic mentor. I will guide you **theory-first**, ask diagnostic check questions, and review your reasoning step-by-step as you progress." 
+      content: "👋 Welcome to **&.edu LAB**! I am your senior Socratic mentor. I will guide you **theory-first**, ask diagnostic check questions, and review your reasoning step-by-step as you progress." 
     }
   ]);
   const [userInput, setUserInput] = useState("");
@@ -1028,13 +994,13 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       });
 
       try {
-        res = await fetch("http://127.0.0.1:8000/api/tutor-brief", {
+        res = await authFetch("/api/tutor-brief", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: briefBody
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/tutor-brief", {
+        res = await authFetch("/api/tutor-brief", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: briefBody
@@ -1171,12 +1137,12 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
     try {
       let res;
       try {
-        res = await fetch("http://127.0.0.1:8000/api/upload-multimodal", {
+        res = await authFetch("/api/upload-multimodal", {
           method: "POST",
           body: formData,
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/upload-multimodal", {
+        res = await authFetch("/api/upload-multimodal", {
           method: "POST",
           body: formData,
         });
@@ -1239,13 +1205,13 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         target_chapters: targetChapterCount === "auto" ? null : Number(targetChapterCount)
       });
       try {
-        res = await fetch("http://127.0.0.1:8000/api/generate-curriculum", {
+        res = await authFetch("/api/generate-curriculum", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: curriculumBody
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/generate-curriculum", {
+        res = await authFetch("/api/generate-curriculum", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: curriculumBody
@@ -1294,13 +1260,13 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         mode: appMode
       });
       try {
-        res = await fetch("http://127.0.0.1:8000/api/make-harder", {
+        res = await authFetch("/api/make-harder", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: harderBody
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/make-harder", {
+        res = await authFetch("/api/make-harder", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: harderBody
@@ -1383,14 +1349,14 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       });
 
       try {
-        res = await fetch("http://localhost:8000/api/elevenlabs-voiceover", {
+        res = await authFetch("/api/elevenlabs-voiceover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: payloadBody
         });
       } catch (e1) {
         // Fallback to 127.0.0.1 in case localhost resolved to IPv6 ::1
-        res = await fetch("http://127.0.0.1:8000/api/elevenlabs-voiceover", {
+        res = await authFetch("/api/elevenlabs-voiceover", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: payloadBody
@@ -1485,7 +1451,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       }
     } catch (err) {
       console.warn("Voiceover error:", err);
-      const errMsg = `Connection error: ${err.message}. Ensure backend is running at http://localhost:8000`;
+      const errMsg = `Connection error: ${err.message}. Ensure the backend is running on port 8090 (scripts/start.sh)`;
       setVoiceoverError(errMsg);
       setVoiceoverSource("error");
       setTerminalOutput(prev => [
@@ -1535,13 +1501,13 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         target_problems_count: 3
       });
       try {
-        res = await fetch("http://127.0.0.1:8000/api/generate-chapter", {
+        res = await authFetch("/api/generate-chapter", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: chapterBody
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/generate-chapter", {
+        res = await authFetch("/api/generate-chapter", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: chapterBody
@@ -1641,13 +1607,13 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       });
 
       try {
-        res = await fetch("http://127.0.0.1:8000/api/generate-problem", {
+        res = await authFetch("/api/generate-problem", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: bodyStr
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/generate-problem", {
+        res = await authFetch("/api/generate-problem", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: bodyStr
@@ -2017,13 +1983,13 @@ sys.stderr = _sys_err
         let res;
         const execBody = JSON.stringify({ code, test_code: testCode });
         try {
-          res = await fetch("http://127.0.0.1:8000/api/execute-code", {
+          res = await authFetch("/api/execute-code", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: execBody
           });
         } catch (e1) {
-          res = await fetch("http://localhost:8000/api/execute-code", {
+          res = await authFetch("/api/execute-code", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: execBody
@@ -2095,13 +2061,13 @@ sys.stderr = _sys_err
       });
 
       try {
-        res = await fetch("http://127.0.0.1:8000/api/tutor-chat", {
+        res = await authFetch("/api/tutor-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: chatBody
         });
       } catch (e1) {
-        res = await fetch("http://localhost:8000/api/tutor-chat", {
+        res = await authFetch("/api/tutor-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: chatBody
@@ -2169,7 +2135,7 @@ sys.stderr = _sys_err
               display: 'flex',
               alignItems: 'center',
               gap: '14px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+              boxShadow: '0 4px 20px rgba(28, 38, 34, 0.12)'
             }}>
               <MathFormula math={currentProblem.code_prefix} inline={true} />
 
@@ -2180,7 +2146,7 @@ sys.stderr = _sys_err
                   minWidth: '130px',
                   minHeight: '44px',
                   padding: '4px 16px',
-                  backgroundColor: slotChoice ? (evalStatus === 'correct' ? '#103522' : '#381519') : theme.bgInput,
+                  backgroundColor: slotChoice ? (evalStatus === 'correct' ? theme.successBg : theme.errorBg) : theme.bgInput,
                   border: `2px dashed ${evalStatus === 'correct' ? theme.accentGreen : evalStatus === 'wrong' ? theme.accentPink : theme.accentBlue}`,
                   borderRadius: '6px',
                   display: 'inline-flex',
@@ -2189,7 +2155,7 @@ sys.stderr = _sys_err
                   fontSize: '18px',
                   fontWeight: 600,
                   color: slotChoice ? theme.textMain : theme.accentBlue,
-                  transition: 'all 0.15s ease'
+                  transition: 'background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s'
                 }}
               >
                 {slotChoice ? <MathFormula math={slotChoice} inline={true} /> : "⬚ drop or select term"}
@@ -2372,7 +2338,7 @@ sys.stderr = _sys_err
                   height: '24px',
                   padding: '0 10px',
                   margin: '0 6px',
-                  backgroundColor: slotChoice ? (evalStatus === 'correct' ? '#103522' : '#381519') : theme.bgCard,
+                  backgroundColor: slotChoice ? (evalStatus === 'correct' ? theme.successBg : theme.errorBg) : theme.bgCard,
                   border: `1.5px ${slotChoice ? 'solid' : 'dashed'} ${evalStatus === 'correct' ? theme.accentGreen : evalStatus === 'wrong' ? theme.accentPink : theme.accentBlue}`,
                   borderRadius: '3px',
                   color: slotChoice ? theme.textMain : theme.accentBlue,
@@ -2540,7 +2506,7 @@ sys.stderr = _sys_err
             </div>
 
             {choice && (
-              <div style={{ backgroundColor: evalStatus === 'correct' ? '#103522' : '#381519', padding: '12px', borderRadius: '4px', border: `1px solid ${evalStatus === 'correct' ? theme.accentGreen : theme.accentPink}` }}>
+              <div style={{ backgroundColor: evalStatus === 'correct' ? theme.successBg : theme.errorBg, padding: '12px', borderRadius: '4px', border: `1px solid ${evalStatus === 'correct' ? theme.accentGreen : theme.accentPink}` }}>
                 <div style={{ fontWeight: 700, color: theme.textMain, marginBottom: '4px' }}>
                   {evalStatus === 'correct' ? 'Verified!' : 'Incorrect'}
                 </div>
@@ -2692,8 +2658,8 @@ sys.stderr = _sys_err
   return (
     <div style={{ 
       display: 'flex', 
-      height: '100vh', 
-      width: '100vw', 
+      height: '100%', 
+      width: '100%', 
       backgroundColor: theme.bgApp, 
       color: theme.textMain, 
       overflow: 'hidden',
@@ -2716,10 +2682,12 @@ sys.stderr = _sys_err
       }}>
         {/* Brand & Mode Switcher */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${theme.border}`, paddingBottom: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: theme.accentGreen }} />
-            <span style={{ fontWeight: 700, fontSize: '12px', color: theme.textMain }}>&edu Studio</span>
-            <span style={{ fontSize: '9px', backgroundColor: theme.bgCardAlt, color: theme.accentGold, padding: '1px 5px', borderRadius: '3px', fontWeight: 600 }}>William & Mary</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: theme.accentForestLight || '#2ecc71', boxShadow: '0 0 8px rgba(17, 87, 64, 0.30)' }} />
+            <span style={{ fontWeight: 800, fontSize: '12.5px', color: '#ffffff', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ color: theme.accentForestLight || '#2ecc71' }}>&amp;</span>.edu
+              <span style={{ fontSize: '9px', backgroundColor: 'rgba(17, 87, 64, 0.10)', color: theme.accentForestLight || '#2ecc71', border: '1px solid rgba(17, 87, 64, 0.22)', padding: '1px 5px', borderRadius: '3px', fontWeight: 800, letterSpacing: '0.08em' }}>LAB</span>
+            </span>
           </div>
 
           <div style={{ display: 'flex', backgroundColor: theme.bgInput, border: `1px solid ${theme.border}`, borderRadius: '4px', padding: '2px', gap: '2px' }}>
@@ -2956,7 +2924,7 @@ sys.stderr = _sys_err
               title="Listen to conversational audio lecture by elderly male professor"
               style={{
                 flex: 1,
-                backgroundColor: voiceoverPlaying ? '#17482d' : theme.accentGreen,
+                backgroundColor: voiceoverPlaying ? theme.accentGreenBg : theme.accentGreen,
                 color: voiceoverPlaying ? theme.accentGreen : '#ffffff',
                 border: `1px solid ${voiceoverPlaying ? theme.accentGreen : 'transparent'}`,
                 padding: '8px',
@@ -2968,7 +2936,7 @@ sys.stderr = _sys_err
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                transition: 'all 0.15s ease'
+                transition: 'background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s'
               }}
             >
               {voiceoverLoading ? (
@@ -2986,7 +2954,7 @@ sys.stderr = _sys_err
                 onClick={handleStopVoiceover}
                 title="Stop voiceover lecture"
                 style={{
-                  backgroundColor: '#4a2128',
+                  backgroundColor: theme.errorBg,
                   border: `1px solid ${theme.accentPink}`,
                   color: theme.accentPink,
                   padding: '8px 10px',
@@ -3022,7 +2990,7 @@ sys.stderr = _sys_err
           {/* ElevenLabs Error & Fallback Banner */}
           {voiceoverError && (
             <div style={{
-              backgroundColor: '#4a2128',
+              backgroundColor: theme.errorBg,
               border: `1px solid ${theme.accentPink}`,
               borderRadius: '4px',
               padding: '6px 8px',
@@ -3035,7 +3003,7 @@ sys.stderr = _sys_err
               <div style={{ color: theme.accentPink, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <AlertTriangle size={11} /> ElevenLabs Connection Notice:
               </div>
-              <div style={{ fontSize: '9px', color: '#ffb3ba' }}>{voiceoverError}</div>
+              <div style={{ fontSize: '9px', color: theme.accentPink }}>{voiceoverError}</div>
               <button
                 onClick={handlePlayBrowserFallbackSpeech}
                 style={{
@@ -3336,7 +3304,7 @@ sys.stderr = _sys_err
           <div style={{ 
             padding: '10px', 
             borderRadius: '4px', 
-            backgroundColor: activeState.evaluation === 'correct' ? '#103522' : '#381519', 
+            backgroundColor: activeState.evaluation === 'correct' ? theme.successBg : theme.errorBg, 
             border: `1px solid ${activeState.evaluation === 'correct' ? theme.accentGreen : theme.accentPink}`, 
             fontSize: '11px' 
           }}>
@@ -3523,7 +3491,7 @@ sys.stderr = _sys_err
                       onClick={handleGenerateVoiceover}
                       disabled={voiceoverLoading}
                       style={{
-                        backgroundColor: voiceoverPlaying ? '#17482d' : theme.bgCardAlt,
+                        backgroundColor: voiceoverPlaying ? theme.accentGreenBg : theme.bgCardAlt,
                         color: theme.accentGreen,
                         border: `1px solid ${voiceoverPlaying ? theme.accentGreen : theme.borderContrast}`,
                         padding: '6px 12px',
@@ -3810,7 +3778,7 @@ sys.stderr = _sys_err
                         borderRadius: '3px',
                         fontSize: '10px',
                         cursor: 'pointer',
-                        transition: 'all 0.1s ease'
+                        transition: 'background-color 0.1s, color 0.1s, border-color 0.1s, opacity 0.1s'
                       }}
                     >
                       {action}

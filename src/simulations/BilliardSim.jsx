@@ -63,7 +63,7 @@ export default function BilliardSim({ config }) {
 
   const tableRef = useRef({
     b1: { x: 180, y: baseTableY, vx: 0, vy: 0, omega: 0, theta: 0, mass: 1.0, color: '#fdfbf7', name: 'Cue Ball' },
-    b2: { x: 520, y: baseTableY + impactOffset * R, vx: 0, vy: 0, omega: 0, theta: 0, mass: 1.0, color: '#e5b85c', name: 'Object Ball (#1)' },
+    b2: { x: 520, y: baseTableY + impactOffset * R, vx: 0, vy: 0, omega: 0, theta: 0, mass: 1.0, color: '#b9975b', name: 'Object Ball (#1)' },
     cueAnim: 0,
     hasStruck: false,
     lastTime: null,
@@ -82,7 +82,7 @@ export default function BilliardSim({ config }) {
 
   const handleResetRack = () => {
     tableRef.current.b1 = { x: 180, y: baseTableY, vx: 0, vy: 0, omega: 0, theta: 0, mass: 1.0, color: '#fdfbf7', name: 'Cue Ball' };
-    tableRef.current.b2 = { x: 520, y: baseTableY + impactOffset * R, vx: 0, vy: 0, omega: 0, theta: 0, mass: 1.0, color: '#e5b85c', name: 'Object Ball (#1)' };
+    tableRef.current.b2 = { x: 520, y: baseTableY + impactOffset * R, vx: 0, vy: 0, omega: 0, theta: 0, mass: 1.0, color: '#b9975b', name: 'Object Ball (#1)' };
     tableRef.current.cueAnim = 0;
     tableRef.current.hasStruck = false;
     tableRef.current.lastTime = null;
@@ -111,11 +111,15 @@ export default function BilliardSim({ config }) {
     }
   }, [impactOffset]);
 
+  const cueTimerRef = useRef(null);
+  useEffect(() => () => clearInterval(cueTimerRef.current), []);
+
   const handleStrike = () => {
-    if (isRunning && tableRef.current.hasStruck) return;
+    if (cueStriking || tableRef.current.hasStruck) return;
     setCueStriking(true);
     let animProgress = 0;
     
+    clearInterval(cueTimerRef.current);
     const cueInterval = setInterval(() => {
       animProgress += 0.15;
       if (animProgress >= 1.0) {
@@ -127,10 +131,13 @@ export default function BilliardSim({ config }) {
         b1.vx = v0 * Math.cos(rad);
         b1.vy = v0 * Math.sin(rad);
         b1.omega = (2.5 * strikeH * v0) / R;
+        b1.hx = Math.cos(rad);
+        b1.hy = Math.sin(rad);
         tableRef.current.hasStruck = true;
         setIsRunning(true);
       }
     }, 20);
+    cueTimerRef.current = cueInterval;
   };
 
   const applyRestitutionPreset = (eVal) => {
@@ -142,6 +149,19 @@ export default function BilliardSim({ config }) {
     setImpactOffset(offsetVal);
     handleResetRack();
   };
+
+  // When a ball's direction changes, project its spin onto the new heading.
+  const reHead = (ball) => {
+    const sp = Math.hypot(ball.vx, ball.vy);
+    if (sp < 0.5) return;
+    const nx = ball.vx / sp;
+    const ny = ball.vy / sp;
+    ball.omega *= (ball.hx ?? 1) * nx + (ball.hy ?? 0) * ny;
+    ball.hx = nx;
+    ball.hy = ny;
+  };
+
+  const hudTickRef = useRef(0);
 
   useEffect(() => {
     let animId;
@@ -155,9 +175,12 @@ export default function BilliardSim({ config }) {
 
       const canvas = canvasRef.current;
       if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== 860 * dpr) { canvas.width = 860 * dpr; canvas.height = 340 * dpr; }
       const ctx = canvas.getContext('2d');
-      const W = canvas.width;
-      const H = canvas.height;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const W = 860;
+      const H = 340;
 
       const b1 = tableRef.current.b1;
       const b2 = tableRef.current.b2;
@@ -167,26 +190,37 @@ export default function BilliardSim({ config }) {
       // -------------------------------------------------------------
       if (isRunning && tableRef.current.hasStruck) {
         [b1, b2].forEach((ball) => {
-          const v = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-          const dirX = v > 0.001 ? ball.vx / v : 1;
-          const dirY = v > 0.001 ? ball.vy / v : 0;
-          const v_contact = v - R * ball.omega;
+          // Spin is a scalar about the axis perpendicular to the ball's heading (hx, hy).
+          // u is the SIGNED speed along that heading, so backspin can drive it negative (a draw shot).
+          if (ball.hx === undefined) { ball.hx = 1; ball.hy = 0; }
+          const u = ball.vx * ball.hx + ball.vy * ball.hy;
+          let px = ball.vx - u * ball.hx;
+          let py = ball.vy - u * ball.hy;
+          const slip = u - R * ball.omega;
+          let u2 = u;
 
-          if (Math.abs(v_contact) > 1.5) {
-            const fk_dir = v_contact > 0 ? -1 : 1;
-            const dv = fk_dir * (effectiveMuK * g) * dt;
-            const newV = Math.max(0, v + dv);
-            ball.vx = newV * dirX;
-            ball.vy = newV * dirY;
-            const d_omega = -fk_dir * (2.5 * effectiveMuK * g / R) * dt;
-            ball.omega += d_omega;
-          } else {
+          if (Math.abs(slip) > 1.5 && effectiveMuK > 0) {
+            // Kinetic friction opposes the contact-point slip: du = -mu g dt, R dw = (5/2) mu g dt.
+            // Slip closes at 3.5 mu g; clamp the step so it never overshoots pure rolling.
+            const sgn = Math.sign(slip);
+            const k = Math.min(1, Math.abs(slip) / (3.5 * effectiveMuK * g * dt));
+            u2 = u - sgn * effectiveMuK * g * dt * k;
+            ball.omega += sgn * (2.5 * effectiveMuK * g / R) * dt * k;
+          } else if (Math.abs(slip) <= 1.5) {
             const rollDecel = 28 * dt;
-            const newV = Math.max(0, v - rollDecel);
-            ball.vx = newV * dirX;
-            ball.vy = newV * dirY;
-            ball.omega = newV / R;
+            u2 = Math.sign(u) * Math.max(0, Math.abs(u) - rollDecel);
+            ball.omega = u2 / R;
           }
+
+          // Sideways sliding (from cushions or glancing hits) is damped by friction too
+          const pMag = Math.hypot(px, py);
+          if (pMag > 0) {
+            const keep = Math.max(0, 1 - (effectiveMuK * g * dt + 4 * dt) / pMag);
+            px *= keep;
+            py *= keep;
+          }
+          ball.vx = u2 * ball.hx + px;
+          ball.vy = u2 * ball.hy + py;
 
           ball.x += ball.vx * dt;
           ball.y += ball.vy * dt;
@@ -197,6 +231,7 @@ export default function BilliardSim({ config }) {
           if (ball.x > W - pad) { ball.x = W - pad; ball.vx = -ball.vx * 0.75; }
           if (ball.y < pad) { ball.y = pad; ball.vy = -ball.vy * 0.75; }
           if (ball.y > H - pad) { ball.y = H - pad; ball.vy = -ball.vy * 0.75; }
+          reHead(ball);
         });
 
         // -------------------------------------------------------------
@@ -239,6 +274,8 @@ export default function BilliardSim({ config }) {
             b1.vy = v1n_after * ny + v1t * ty;
             b2.vx = v2n_after * nx + v2t * tx;
             b2.vy = v2n_after * ny + v2t * ty;
+            reHead(b1);
+            reHead(b2);
 
             // Calculate Energy Dissipation
             const k1_after = 0.5 * b1.mass * (b1.vx * b1.vx + b1.vy * b1.vy);
@@ -264,17 +301,44 @@ export default function BilliardSim({ config }) {
       // -------------------------------------------------------------
       ctx.clearRect(0, 0, W, H);
 
-      // Wood Rail
-      ctx.fillStyle = '#21150c';
+      // Wood Rail with Subtle Edge Bevel
+      ctx.fillStyle = '#1c130d';
       ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = '#2d1f15';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, W - 2, H - 2);
 
-      // Table Felt
+      // Diamond / Sight Inlays on Wood Rail
       const railSize = 16;
-      ctx.fillStyle = '#0f3e24';
+      ctx.fillStyle = '#b9975b';
+      // Top & Bottom Sights
+      [W * 0.25, W * 0.5, W * 0.75].forEach(sx => {
+        ctx.beginPath();
+        ctx.arc(sx, railSize / 2, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(sx, H - railSize / 2, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      // Left & Right Sights
+      [H * 0.33, H * 0.66].forEach(sy => {
+        ctx.beginPath();
+        ctx.arc(railSize / 2, sy, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(W - railSize / 2, sy, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Tournament Table Felt (Radial Gradient for subtle stadium lamp lighting)
+      const feltGrad = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, W * 0.6);
+      feltGrad.addColorStop(0, '#1a6a4e');
+      feltGrad.addColorStop(1, '#115740');
+      ctx.fillStyle = feltGrad;
       ctx.fillRect(railSize, railSize, W - 2 * railSize, H - 2 * railSize);
 
-      // Table Cloth Grid
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      // Subtle Table Cloth Grid
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = railSize; x < W - railSize; x += 40) {
@@ -288,7 +352,7 @@ export default function BilliardSim({ config }) {
       ctx.stroke();
 
       // Pockets
-      const pocketR = 18;
+      const pocketR = 19;
       const pockets = [
         { x: railSize, y: railSize },
         { x: W / 2, y: railSize },
@@ -311,16 +375,17 @@ export default function BilliardSim({ config }) {
       if (!tableRef.current.hasStruck) {
         // Aim Ray
         const rad = (aimAngleDeg * Math.PI) / 180;
-        ctx.strokeStyle = 'rgba(229, 184, 92, 0.5)';
+        ctx.strokeStyle = 'rgba(229, 214, 176, 0.7)';
         ctx.setLineDash([5, 5]);
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(b1.x, b1.y);
-        ctx.lineTo(b2.x, b1.y);
+        const aimLen = Math.hypot(b2.x - b1.x, b2.y - b1.y);
+        ctx.lineTo(b1.x + Math.cos(rad) * aimLen, b1.y + Math.sin(rad) * aimLen);
         ctx.stroke();
 
         // Line of centers normal vector
-        ctx.strokeStyle = 'rgba(102, 217, 239, 0.6)';
+        ctx.strokeStyle = 'rgba(232, 240, 236, 0.55)';
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
         ctx.moveTo(b1.x, b1.y);
@@ -343,7 +408,7 @@ export default function BilliardSim({ config }) {
         ctx.lineTo(cueEndX, cueEndY);
         ctx.stroke();
 
-        ctx.strokeStyle = '#66d9ef';
+        ctx.strokeStyle = '#2f5d7c';
         ctx.lineWidth = 5;
         ctx.beginPath();
         ctx.moveTo(cueStartX, cueStartY);
@@ -371,9 +436,9 @@ export default function BilliardSim({ config }) {
           grad.addColorStop(0.75, '#e5e3db');
           grad.addColorStop(1, '#9b998f');
         } else {
-          grad.addColorStop(0, '#ffe885');
-          grad.addColorStop(0.75, '#e5b85c');
-          grad.addColorStop(1, '#8f6515');
+          grad.addColorStop(0, '#e4d1a8');
+          grad.addColorStop(0.75, '#b9975b');
+          grad.addColorStop(1, '#7d6334');
         }
 
         ctx.fillStyle = grad;
@@ -387,7 +452,7 @@ export default function BilliardSim({ config }) {
         // Orientation Spin Dots
         const dotR = 3.5;
         const distFromCenter = R * 0.55;
-        ctx.fillStyle = isCue ? '#f92672' : '#141414';
+        ctx.fillStyle = isCue ? '#9e2a35' : '#141414';
         for (let a = 0; a < 4; a++) {
           const dotAngle = ball.theta + (a * Math.PI) / 2;
           const dxDot = ball.x + Math.cos(dotAngle) * distFromCenter;
@@ -397,7 +462,7 @@ export default function BilliardSim({ config }) {
           ctx.fill();
         }
 
-        ctx.fillStyle = '#000000';
+        ctx.fillStyle = '#1c2622';
         ctx.beginPath();
         ctx.arc(ball.x, ball.y, 2, 0, Math.PI * 2);
         ctx.fill();
@@ -409,8 +474,8 @@ export default function BilliardSim({ config }) {
           const vxEnd = ball.x + ball.vx * scaleV;
           const vyEnd = ball.y + ball.vy * scaleV;
           
-          ctx.strokeStyle = theme.accentCyan;
-          ctx.fillStyle = theme.accentCyan;
+          ctx.strokeStyle = '#cfe0ec';
+          ctx.fillStyle = '#cfe0ec';
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.moveTo(ball.x, ball.y);
@@ -427,7 +492,7 @@ export default function BilliardSim({ config }) {
         }
 
         if (showSpinRing && Math.abs(ball.omega) > 0.05) {
-          ctx.strokeStyle = ball.omega > 0 ? theme.accentGold : theme.accentPink;
+          ctx.strokeStyle = ball.omega > 0 ? '#e4d1a8' : '#f2b8b0';
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.arc(ball.x, ball.y, R + 6, 0, Math.PI * 2);
@@ -443,8 +508,8 @@ export default function BilliardSim({ config }) {
             const fEndX = ball.x + dirX * fk_dir * 35;
             const fEndY = ball.y + dirY * fk_dir * 35;
 
-            ctx.strokeStyle = theme.accentPink;
-            ctx.fillStyle = theme.accentPink;
+            ctx.strokeStyle = '#f2b8b0';
+            ctx.fillStyle = '#f2b8b0';
             ctx.lineWidth = 2.5;
             ctx.beginPath();
             ctx.moveTo(ball.x, ball.y + R);
@@ -469,6 +534,8 @@ export default function BilliardSim({ config }) {
         }
       }
 
+      if (currentTime - hudTickRef.current > 100) {
+      hudTickRef.current = currentTime;
       setHudData({
         b1_v: b1_speed.toFixed(1),
         b1_omega: b1.omega.toFixed(1),
@@ -479,13 +546,14 @@ export default function BilliardSim({ config }) {
         theta_deg: collisionAngleDeg,
         k_loss: energyLoss.toFixed(0)
       });
+      }
 
       animId = requestAnimationFrame(render);
     };
 
     animId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animId);
-  }, [isRunning, strikeH, strikeSpeed, restitution, impactOffset, aimAngleDeg, showVectors, showFriction, showSpinRing, cueStriking, energyLoss]);
+  }, [isRunning, strikeH, strikeSpeed, restitution, impactOffset, aimAngleDeg, showVectors, showFriction, showSpinRing, cueStriking, energyLoss, effectiveMuK]);
 
   return (
     <div style={{
@@ -503,7 +571,7 @@ export default function BilliardSim({ config }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Target size={20} color={theme.accentGold} />
           <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: theme.textMain, fontFamily: theme.fontMono }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: theme.textMain, fontFamily: theme.fontSans }}>
               Billiard Collisions & Restitution (e) Lab
             </h3>
             <p style={{ fontSize: '0.8rem', color: theme.textDim }}>
@@ -518,11 +586,11 @@ export default function BilliardSim({ config }) {
             disabled={cueStriking || (isRunning && tableRef.current.hasStruck)}
             style={{
               background: cueStriking || (isRunning && tableRef.current.hasStruck) ? theme.bgCard : theme.accentGreen,
-              color: cueStriking || (isRunning && tableRef.current.hasStruck) ? theme.textDim : '#000000',
+              color: cueStriking || (isRunning && tableRef.current.hasStruck) ? theme.textDim : theme.textOnBrand,
               border: 'none',
               borderRadius: 4,
               padding: '6px 14px',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontSize: '0.82rem',
               fontWeight: 700,
               cursor: cueStriking || (isRunning && tableRef.current.hasStruck) ? 'not-allowed' : 'pointer',
@@ -546,7 +614,7 @@ export default function BilliardSim({ config }) {
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontSize: '0.82rem'
             }}
           >
@@ -562,7 +630,7 @@ export default function BilliardSim({ config }) {
         borderRadius: 8,
         overflow: 'hidden',
         border: `2px solid ${theme.borderContrast}`,
-        boxShadow: 'inset 0 4px 20px rgba(0,0,0,0.8)'
+        boxShadow: 'inset 0 1px 4px rgba(28, 38, 34, 0.25)'
       }}>
         <canvas
           ref={canvasRef}
@@ -571,28 +639,10 @@ export default function BilliardSim({ config }) {
           style={{ width: '100%', height: 'auto', display: 'block' }}
         />
 
-        {/* Live HUD Overlay */}
-        <div style={{
-          position: 'absolute',
-          top: 14,
-          left: 20,
-          background: 'rgba(18, 18, 18, 0.88)',
-          border: `1px solid ${theme.borderActive}`,
-          borderRadius: 6,
-          padding: '8px 14px',
-          backdropFilter: 'blur(6px)',
-          fontFamily: theme.fontMono,
-          fontSize: '0.74rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4
-        }}>
-          <div style={{ color: theme.accentGold, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Activity size={12} />
-            <span>COLLISION DYNAMICS TELEMETRY:</span>
-          </div>
-          <div>Restitution (e): <span style={{ color: theme.accentGreen, fontWeight: 700 }}>{restitution.toFixed(2)}</span> ({restitution === 1 ? 'Elastic' : restitution === 0 ? 'Totally Inelastic' : 'Inelastic'})</div>
-          <div>Felt Friction (μk): <span style={{ color: enableFriction ? theme.accentPink : theme.accentGreen, fontWeight: 700 }}>{enableFriction ? `${mu_k.toFixed(2)} (Active)` : '0.00 (Frictionless Table)'}</span></div>
+        {/* Live readouts sit under the table, never on top of it */}
+        <div className="readouts" role="status" style={{ padding: 'var(--space-3) var(--space-4)', borderTop: `1px solid ${theme.border}`, background: theme.bgPanel }}>
+          <div>Restitution (e): <span style={{ color: theme.accentForestLight, fontWeight: 700 }}>{restitution.toFixed(2)}</span> ({restitution === 1 ? 'Elastic' : restitution === 0 ? 'Totally Inelastic' : 'Inelastic'})</div>
+          <div>Felt Friction (μk): <span style={{ color: enableFriction ? theme.accentPink : theme.accentForestLight, fontWeight: 700 }}>{enableFriction ? `${mu_k.toFixed(2)} (Active)` : '0.00 (Frictionless Table)'}</span></div>
           <div>Collision Angle (θ): <span style={{ color: theme.accentCyan, fontWeight: 700 }}>{hudData.theta_deg}°</span> (cos θ = <strong style={{ color: theme.accentGold }}>{hudData.cos_theta}</strong>)</div>
           <div>Cue Ball Speed (v1): <span style={{ color: theme.accentCyan, fontWeight: 700 }}>{hudData.b1_v} px/s</span></div>
           <div>Object Ball Speed (v2): <span style={{ color: theme.accentGold, fontWeight: 700 }}>{hudData.b2_v} px/s</span></div>
@@ -617,19 +667,19 @@ export default function BilliardSim({ config }) {
           border: `1px solid ${theme.border}`,
           flexWrap: 'wrap'
         }}>
-          <span style={{ fontSize: '0.76rem', fontFamily: theme.fontMono, color: theme.accentGreen, fontWeight: 700 }}>
-            RESTITUTION (e):
+          <span style={{ fontSize: '0.92rem', fontFamily: theme.fontSans, color: theme.textMain, fontWeight: 600 }}>
+            Restitution (e)
           </span>
           <button
             onClick={() => applyRestitutionPreset(1.0)}
             style={{
               background: restitution === 1.0 ? theme.accentGreen : theme.bgPanel,
-              color: restitution === 1.0 ? '#000000' : theme.textMain,
+              color: restitution === 1.0 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -640,12 +690,12 @@ export default function BilliardSim({ config }) {
             onClick={() => applyRestitutionPreset(0.92)}
             style={{
               background: restitution === 0.92 ? theme.accentGold : theme.bgPanel,
-              color: restitution === 0.92 ? '#000000' : theme.textMain,
+              color: restitution === 0.92 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -656,12 +706,12 @@ export default function BilliardSim({ config }) {
             onClick={() => applyRestitutionPreset(0.50)}
             style={{
               background: restitution === 0.50 ? theme.accentPink : theme.bgPanel,
-              color: restitution === 0.50 ? '#ffffff' : theme.textMain,
+              color: restitution === 0.50 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -671,13 +721,13 @@ export default function BilliardSim({ config }) {
           <button
             onClick={() => applyRestitutionPreset(0.0)}
             style={{
-              background: restitution === 0.0 ? '#e06c75' : theme.bgPanel,
-              color: restitution === 0.0 ? '#000000' : theme.textMain,
+              background: restitution === 0.0 ? theme.error : theme.bgPanel,
+              color: restitution === 0.0 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -697,35 +747,35 @@ export default function BilliardSim({ config }) {
           border: `1px solid ${theme.border}`,
           flexWrap: 'wrap'
         }}>
-          <span style={{ fontSize: '0.76rem', fontFamily: theme.fontMono, color: theme.accentPink, fontWeight: 700 }}>
-            FELT FRICTION (μk):
+          <span style={{ fontSize: '0.92rem', fontFamily: theme.fontSans, color: theme.textMain, fontWeight: 600 }}>
+            Felt friction (μk)
           </span>
           <button
             onClick={() => setEnableFriction(!enableFriction)}
             style={{
-              background: enableFriction ? theme.accentGreen : '#e06c75',
-              color: '#000000',
+              background: enableFriction ? theme.accentGreen : theme.error,
+              color: theme.textOnBrand,
               border: 'none',
               padding: '3px 10px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 800,
               cursor: 'pointer'
             }}
           >
-            {enableFriction ? '✓ Friction: ACTIVE' : '✗ Friction: REMOVED (0.00)'}
+            {enableFriction ? 'Friction on' : 'Friction off (μk = 0)'}
           </button>
           <button
             onClick={() => { setEnableFriction(true); setMu_k(0.28); }}
             style={{
               background: enableFriction && mu_k === 0.28 ? theme.accentGold : theme.bgPanel,
-              color: enableFriction && mu_k === 0.28 ? '#000000' : theme.textMain,
+              color: enableFriction && mu_k === 0.28 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -736,12 +786,12 @@ export default function BilliardSim({ config }) {
             onClick={() => { setEnableFriction(true); setMu_k(0.12); }}
             style={{
               background: enableFriction && mu_k === 0.12 ? theme.accentCyan : theme.bgPanel,
-              color: enableFriction && mu_k === 0.12 ? '#000000' : theme.textMain,
+              color: enableFriction && mu_k === 0.12 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -751,13 +801,13 @@ export default function BilliardSim({ config }) {
           <button
             onClick={() => { setEnableFriction(false); setMu_k(0.0); }}
             style={{
-              background: !enableFriction ? '#e06c75' : theme.bgPanel,
-              color: !enableFriction ? '#ffffff' : theme.textMain,
+              background: !enableFriction ? theme.error : theme.bgPanel,
+              color: !enableFriction ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -777,19 +827,19 @@ export default function BilliardSim({ config }) {
           border: `1px solid ${theme.border}`,
           flexWrap: 'wrap'
         }}>
-          <span style={{ fontSize: '0.76rem', fontFamily: theme.fontMono, color: theme.accentGold, fontWeight: 700 }}>
-            COLLISION COS(θ) PRESETS:
+          <span style={{ fontSize: '0.92rem', fontFamily: theme.fontSans, color: theme.textMain, fontWeight: 600 }}>
+            Collision angle presets, cos θ
           </span>
           <button
             onClick={() => applyOffsetPreset(0.0)}
             style={{
               background: impactOffset === 0 ? theme.accentGold : theme.bgPanel,
-              color: impactOffset === 0 ? '#000000' : theme.textMain,
+              color: impactOffset === 0 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -800,12 +850,12 @@ export default function BilliardSim({ config }) {
             onClick={() => applyOffsetPreset(1.0)}
             style={{
               background: Math.abs(impactOffset - 1.0) < 0.1 ? theme.accentCyan : theme.bgPanel,
-              color: Math.abs(impactOffset - 1.0) < 0.1 ? '#000000' : theme.textMain,
+              color: Math.abs(impactOffset - 1.0) < 0.1 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -816,12 +866,12 @@ export default function BilliardSim({ config }) {
             onClick={() => applyOffsetPreset(1.41)}
             style={{
               background: Math.abs(impactOffset - 1.41) < 0.1 ? theme.accentGreen : theme.bgPanel,
-              color: Math.abs(impactOffset - 1.41) < 0.1 ? '#000000' : theme.textMain,
+              color: Math.abs(impactOffset - 1.41) < 0.1 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -832,12 +882,12 @@ export default function BilliardSim({ config }) {
             onClick={() => applyOffsetPreset(1.73)}
             style={{
               background: Math.abs(impactOffset - 1.73) < 0.1 ? theme.accentPink : theme.bgPanel,
-              color: Math.abs(impactOffset - 1.73) < 0.1 ? '#ffffff' : theme.textMain,
+              color: Math.abs(impactOffset - 1.73) < 0.1 ? theme.textOnBrand : theme.textMain,
               border: `1px solid ${theme.border}`,
               padding: '3px 8px',
               borderRadius: 4,
               fontSize: '0.74rem',
-              fontFamily: theme.fontMono,
+              fontFamily: theme.fontSans,
               fontWeight: 700,
               cursor: 'pointer'
             }}
@@ -855,9 +905,9 @@ export default function BilliardSim({ config }) {
       }}>
         {/* Slider 1: Table Felt Friction μk */}
         <div style={{ background: theme.bgCard, padding: 12, borderRadius: 6, border: `1px solid ${theme.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontMono, marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontSans, marginBottom: 6 }}>
             <span>Felt Friction (μk):</span>
-            <span style={{ color: enableFriction ? theme.accentPink : '#e06c75', fontWeight: 700 }}>
+            <span style={{ color: enableFriction ? theme.accentPink : theme.error, fontWeight: 700 }}>
               {enableFriction ? mu_k.toFixed(2) : '0.00 (Frictionless)'}
             </span>
           </div>
@@ -883,7 +933,7 @@ export default function BilliardSim({ config }) {
 
         {/* Slider 2: Coefficient of Restitution e */}
         <div style={{ background: theme.bgCard, padding: 12, borderRadius: 6, border: `1px solid ${theme.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontMono, marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontSans, marginBottom: 6 }}>
             <span>Restitution Coefficient (e):</span>
             <span style={{ color: theme.accentGreen, fontWeight: 700 }}>{restitution.toFixed(2)}</span>
           </div>
@@ -908,7 +958,7 @@ export default function BilliardSim({ config }) {
 
         {/* Slider 2: Impact Parameter / cos theta */}
         <div style={{ background: theme.bgCard, padding: 12, borderRadius: 6, border: `1px solid ${theme.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontMono, marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontSans, marginBottom: 6 }}>
             <span>Collision Angle cos(θ):</span>
             <span style={{ color: theme.accentGold, fontWeight: 700 }}>{hudData.cos_theta} ({hudData.theta_deg}°)</span>
           </div>
@@ -933,7 +983,7 @@ export default function BilliardSim({ config }) {
 
         {/* Slider 3: Cue Strike Height h/R */}
         <div style={{ background: theme.bgCard, padding: 12, borderRadius: 6, border: `1px solid ${theme.border}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontMono, marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', fontFamily: theme.fontSans, marginBottom: 6 }}>
             <span>Cue Height (h / R):</span>
             <span style={{ color: strikeH === 0.4 ? theme.accentGreen : theme.accentCyan, fontWeight: 700 }}>
               {strikeH >= 0 ? `+${strikeH.toFixed(2)}R` : `${strikeH.toFixed(2)}R`}
