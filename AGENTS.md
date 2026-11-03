@@ -6,9 +6,11 @@ Autonomous agents (agy, Claude Code, background loops) can add lessons and simul
 frontend code.
 
 ## Workspaces
-My courses (one place to add materials: learn, test prep, or continue a course) · **Lab** (physics and
-chemistry lessons and simulations; internal mode id `physics`) · **IDE** (code, `EduStudioIDE.jsx`) ·
-**Math** (`MathLab.jsx`: graphing with sliders, LaTeX notebook, checked practice).
+My courses (one place to add materials: learn, test prep, continue a course, coding practice) ·
+**Lab** (physics and chemistry library and lab-course classes; internal mode id `physics`) ·
+**IDE** (code, `EduStudioIDE.jsx`) · **Math** (`MathLab.jsx`: Class, Courses, Graph, Notebook, Practice, Sim kit).
+Every course has `workspace` = `math` | `code` | `lab` (planner sets it; `server.guess_workspace` is the
+fallback) and its class topics carry it in `source.workspace`; `src/App.jsx` opens each class there.
 
 ## Architecture
 - **Frontend:** React 19 + Vite (`src/`). Styling lives in `src/styles/lab.css` (light, dark and system
@@ -61,6 +63,9 @@ Data only, never code: the browser evaluates expressions with its own small inte
 - `kind: "particles"` for anything that moves (projectiles, pendulums via `links: rod`, springs, orbits via
   `gravitation`, charges via `custom` forces); `kind: "graph"` for y = f(x, t) families (waves, gas laws,
   distributions). Give 2–5 sliders and a `description` that tells the student what to try.
+- `kind: "math"`: one of 9 widgets (epsilon_delta, epsilon_n, secant_tangent, riemann, series, unit_circle,
+  parametric, vector_field, transform2d), see `simspec.MATH_GUIDE`; played by `src/simulations/MathSim.jsx`.
+  Math classes get these automatically. `kind: "chem"` is reserved for the chemistry kit (`chemspec.py`).
 - Or let the server author one: `POST /api/simulations/generate {"topicId": "..."}`, or fill every topic that
   lacks one with `POST /api/simulations/backfill`.
 

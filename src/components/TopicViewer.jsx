@@ -119,7 +119,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
           {topic.category && <span>{topic.category}</span>}
           {topic.difficulty && <span>{topic.difficulty}</span>}
         </div>
-        {topic.summary && <p className="summary">{topic.summary}</p>}
+        {topic.summary && <p className="summary"><MdInline>{topic.summary}</MdInline></p>}
         <MoreMenu key={topic.id} topic={topic} courseTitle={course?.title || src.courseTitle} />
         <div className="tabs" role="tablist" aria-label="Topic sections">
           {tabs.map(({ id, label, icon: Icon, count, note }) => (

@@ -263,10 +263,10 @@ const WIDGETS = {
     view: () => ({ xmin: -4, xmax: 4, ymin: -3, ymax: 3 }),
     draw(ctx, F, W, H, pal, fn, sc, s, st) {
       const V = (x, y) => [fn.P({ ...sc, x, y }), fn.Q({ ...sc, x, y })];
-      const step = niceStep(F.xmax - F.xmin) / 1.5;
+      const step = (F.xmax - F.xmin) / 18;
       let vmax = 1e-9;
       const pts = [];
-      for (let x = Math.ceil(F.xmin / step) * step; x <= F.xmax; x += step) for (let y = Math.ceil(F.ymin / step) * step; y <= F.ymax; y += step) {
+      for (let x = F.xmin + step / 2; x <= F.xmax; x += step) for (let y = F.ymin + step / 2; y <= F.ymax; y += step) {
         const [u, v] = V(x, y); if (Number.isFinite(u) && Number.isFinite(v)) { pts.push([x, y, u, v]); vmax = Math.max(vmax, Math.hypot(u, v)); }
       }
       for (const [x, y, u, v] of pts) {
@@ -440,12 +440,12 @@ export default function MathSim({ spec, editable = false }) {
       )}
       {errs.length > 0 && <p className="notice notice-bad">{errs.join(' · ')}</p>}
 
-      <canvas ref={canvasRef} className="math-canvas math-sim-canvas" aria-label={spec.title}
-        onPointerMove={onMove} onPointerLeave={() => setHover(null)} onClick={onClick} />
-
       <div className="readouts math-readouts" role="status">
         {readouts.map((r, i) => <p key={i} className={i === 0 ? 'lead' : 'hint'}>{r}</p>)}
       </div>
+      <canvas ref={canvasRef} className="math-canvas math-sim-canvas" aria-label={spec.title}
+        onPointerMove={onMove} onPointerLeave={() => setHover(null)} onClick={onClick} />
+
 
       {spec.widget === 'riemann' && (
         <div className="btn-row" role="group" aria-label="Rule">

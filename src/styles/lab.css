@@ -666,5 +666,6 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .class-list .card-link[aria-current="page"] { background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--gold); font-weight: 600; }
 .class-num-sm { font: 700 0.9rem/1 var(--font-mono); color: var(--gold-text); }
 .math-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-2) var(--space-4); }
-.math-sim-canvas { height: min(62vh, 540px); }
+.math-sim-canvas { height: min(50vh, 440px); }
+.math-readouts { min-height: 3.2em; }
 .math-readouts .lead { font-weight: 600; color: var(--ink); }
