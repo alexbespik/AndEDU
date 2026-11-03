@@ -1,5 +1,9 @@
 # Next steps (for Claude, after agy runs)
 
+> **Before any deployment** (pilot, hosted server, W&M): work through `PRIVACY_AND_DEPLOYMENT.md`. Student data
+> currently goes to Gemini on a free-tier key, transcripts are sent whole for OCR, there is no "delete my data", and
+> the course catalog can't be downloaded (the Advisor shows an "out of date" notice). Logged 2026-11-03.
+
 State at this commit:
 - Workspaces: courses have `workspace` (math | code | lab). Math classes open in Math (Class tab), lab classes
   in Lab, code classes in a lesson page under IDE until agy's Part B lands.

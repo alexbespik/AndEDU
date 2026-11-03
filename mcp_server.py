@@ -124,8 +124,9 @@ TOOLS = [
     ("catalog_import", "Import catalog entries: rows [{code, title, credits, description, prereqs, attributes}] or raw catalog text "
      "('DEPT 123. Title. (3 Credits)' layout). Set use_model to let the app's model read text the parser can't (uses quota).",
      S(rows=ARR("course rows", optional=True), text=STR("catalog text", optional=True), source=STR("where it came from", optional=True),
+       year=STR("catalog year, e.g. 2016-2017 (shown to students as possibly outdated)", optional=True),
        use_model={"type": "boolean", "optional": True, "description": "fall back to the model"}),
-     lambda a: call("POST", "/api/advisor/catalog/import", {"rows": a.get("rows"), "text": a.get("text", ""), "source": a.get("source", "mcp"), "useModel": bool(a.get("use_model"))})),
+     lambda a: call("POST", "/api/advisor/catalog/import", {"rows": a.get("rows"), "text": a.get("text", ""), "source": a.get("source", "mcp"), "year": a.get("year", ""), "useModel": bool(a.get("use_model"))})),
     ("student_record", "Courses a student has completed (codes, grades, terms).",
      S(user_id=STR("profile id")), lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/completed")),
     ("add_completed_courses", "Record completed courses from transcript text or rows [{code, title?, grade?, term?}].",

@@ -145,11 +145,28 @@ def search(query: str = "", dept: str = "", limit: int = 40, school: str = "wm")
     return [_row(r) for r in db.conn().execute(sql, args)]
 
 
+YEAR_RE = re.compile(r"\b((?:19|20)\d\d)\s*[-–/]\s*((?:19|20)?\d\d)\b")
+
+
+def catalog_year(text: str) -> str:
+    """'2016-2017' from a catalog's opening pages, or '' when it doesn't say."""
+    m = YEAR_RE.search((text or "")[:5000])
+    if not m:
+        return ""
+    end = m.group(2) if len(m.group(2)) == 4 else m.group(1)[:2] + m.group(2)
+    return f"{m.group(1)}-{end}" if int(end) == int(m.group(1)) + 1 else ""
+
+
 def stats(school: str = "wm") -> Dict[str, Any]:
     c = db.conn()
     n = c.execute("SELECT COUNT(*) FROM catalog_courses WHERE school = ?", (school,)).fetchone()[0]
     depts = [r[0] for r in c.execute("SELECT DISTINCT substr(code, 1, instr(code, ' ') - 1) FROM catalog_courses WHERE school = ? ORDER BY 1", (school,))]
-    return {"courses": n, "departments": depts}
+    sources = [{"source": r[0], "courses": r[1]} for r in c.execute(
+        "SELECT source, COUNT(*) FROM catalog_courses WHERE school = ? GROUP BY source ORDER BY 2 DESC", (school,))]
+    years = sorted({m.group(0) for s in sources for m in [re.search(r"(?:19|20)\d\d-(?:19|20)\d\d", s["source"])] if m})
+    return {"courses": n, "departments": depts, "sources": sources, "years": years,
+            # anything older than the current academic year (or of unknown year) is shown as possibly outdated
+            "outdated": bool(n) and (not years or int(years[-1][-4:]) < int(time.strftime("%Y")) + (1 if int(time.strftime("%m")) >= 8 else 0))}
 
 
 # ---------------------------------------------------------------- the student's record

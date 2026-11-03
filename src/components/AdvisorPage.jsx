@@ -99,6 +99,17 @@ export default function AdvisorPage({ user, onOpenCourse }) {
           <p>Add the courses you have done, explore the W&amp;M catalog, see what you can take next, and test whether you're ready for a course before you register.</p>
         </div>
       </div>
+      {stats && (stats.courses ? stats.outdated : true) && (
+        <div className="notice notice-bad" role="note">
+          <strong>Catalog may be out of date.</strong>{' '}
+          {stats.courses
+            ? <>This advisor works on {stats.years?.length ? `the ${stats.years.join(', ')} catalog` : 'an imported catalog of unknown year'}.
+              Course numbers, titles and prerequisites can change from year to year: check every course in the current catalog
+              (catalog.wm.edu) and with your advisor before you register.</>
+            : <>No catalog is loaded. W&amp;M's current catalog and course list can't be downloaded automatically; import the pages or
+              a catalog PDF below, and treat any older catalog as a guide only.</>}
+        </div>
+      )}
       {notice && <p className="notice notice-info">{notice}</p>}
 
       <div className="split">
@@ -149,7 +160,8 @@ export default function AdvisorPage({ user, onOpenCourse }) {
             <p className="hint">
               W&amp;M's catalog (catalog.wm.edu) blocks automated downloads, so import what your browser shows: save a department's course
               page or a catalog PDF and upload it, or copy its text here. Entries like <code>CSCI 241. Data Structures. (3 Credits)</code> are
-              read directly; past catalogs are in the SWEM archive (dspace.swem.wm.edu).
+              read directly; past catalogs are in the SWEM archive (dspace.swem.wm.edu). The catalog year is read from the
+              file (or say it in the text, e.g. "2016-2017") so students see how old the data is.
             </p>
             <Importer label="Catalog text or PDF" hint="Paste catalog course listings…" accept=".pdf,.txt,.html,.png,.jpg"
               onText={(text) => api('/api/advisor/catalog/import', { method: 'POST', body: { text, source: 'upload', useModel: true } })
