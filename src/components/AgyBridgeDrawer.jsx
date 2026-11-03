@@ -1,349 +1,100 @@
-import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { 
-  Zap, Send, Bot, User, ChevronUp, ChevronDown, 
-  Sparkles, CheckCircle2, AlertTriangle, Layers, Compass, Award
-} from 'lucide-react';
-import { theme } from '../theme';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Send, Loader2 } from 'lucide-react';
+import Md from './Md';
+import { api, useAgyEvents } from '../lib/api';
 
-export default function AgyBridgeDrawer({ 
-  activeTopicId, 
-  onTriggerEvent, 
-  onSwitchTab 
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState([
-    {
-      id: 'welcome',
-      sender: 'agy',
-      content: "👋 I'm your **AGY Physics Companion**. Ask me anything about this derivation, request custom simulations, or ask for tailored assessment problems. I update your workspace in real-time without wasting credits!",
-      timestamp: Date.now()
-    }
-  ]);
-  const [inputVal, setInputVal] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [latestToast, setLatestToast] = useState(null);
-  const messagesEndRef = useRef(null);
+const SUGGESTIONS = [
+  'Make a simulation for this topic',
+  'Explain this lesson more simply',
+  'Make the next class easier',
+];
 
-  // Poll for messages and events every 2 seconds
-  useEffect(() => {
-    const pollEvents = async () => {
-      try {
-        const res = await fetch('/api/agy/events');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.events && data.events.length > 0) {
-            const lastEvent = data.events[data.events.length - 1];
-            if (lastEvent.type === 'QUIZ_SUBMITTED') {
-              setLatestToast({
-                text: lastEvent.payload.statusMessage,
-                type: lastEvent.payload.isCorrect ? 'success' : 'warn'
-              });
-              setTimeout(() => setLatestToast(null), 4000);
-            }
-          }
-        }
-      } catch (e) {}
-    };
-
-    pollEvents();
-    const interval = setInterval(pollEvents, 2500);
-    return () => clearInterval(interval);
-  }, []);
+/** AGY companion: its own column on wide screens, a sheet over the page on narrow ones. */
+export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(null);
+  const logRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
-    if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, isOpen]);
+    if (!open) return;
+    api('/api/agy/messages')
+      .then((list) => Array.isArray(list) && setMessages(list.slice(-60)))
+      .catch(() => {});
+    inputRef.current?.focus();
+  }, [open]);
 
-  const handleSend = async (textToSend) => {
-    const text = textToSend || inputVal;
-    if (!text.trim() || isSending) return;
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
 
-    const userMsg = {
-      id: `usr-${Date.now()}`,
-      sender: 'user',
-      content: text,
-      timestamp: Date.now()
-    };
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+  }, [messages, open]);
 
-    setMessages(prev => [...prev, userMsg]);
-    setInputVal('');
-    setIsSending(true);
+  // Replies written by the backend (Gemini tools or the agy CLI) arrive as NEW_MESSAGE events
+  useAgyEvents((evt) => {
+    if (evt.type !== 'NEW_MESSAGE' || !evt.payload?.message) return;
+    const m = evt.payload.message;
+    setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
+  });
 
+  const send = async (text) => {
+    const prompt = (text ?? input).trim();
+    if (!prompt || sending) return;
+    setInput('');
+    setError(null);
+    setSending(true);
+    setMessages((list) => [...list, { id: `local-${Date.now()}`, sender: 'user', content: prompt }]);
     try {
-      const res = await fetch('/api/agy/prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text, topicId: activeTopicId })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(prev => [
-          ...prev,
-          {
-            id: `agy-${Date.now()}`,
-            sender: 'agy',
-            content: data.reply,
-            timestamp: Date.now()
-          }
-        ]);
-      }
+      await api('/api/agy/prompt', { method: 'POST', body: { prompt, topicId: activeTopicId, courseId } });
     } catch (e) {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          sender: 'agy',
-          content: "*(AGY Event Recorded)* Your prompt has been logged in `content/agy_messages.json`.",
-          timestamp: Date.now()
-        }
-      ]);
+      setError(`AGY didn't answer: ${e.message}`);
     } finally {
-      setIsSending(false);
+      setSending(false);
     }
   };
 
-  const handleQuickAction = (action) => {
-    if (action === 'race') {
-      if (onSwitchTab) onSwitchTab('simulation');
-      handleSend("Show me the difference between a solid sphere and a hollow hoop rolling down an incline!");
-    } else if (action === 'contact_proof') {
-      handleSend("Can you mathematically prove why the contact point has instantaneous velocity zero ($v_{\\text{contact}} = 0$)?");
-    } else if (action === 'quiz_hard') {
-      if (onSwitchTab) onSwitchTab('quiz');
-      handleSend("Generate an advanced rotational dynamics problem for me to solve!");
-    }
-  };
+  if (!open) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 0,
-      right: 24,
-      width: isOpen ? 440 : 280,
-      background: theme.bgPanel,
-      border: `1px solid ${theme.borderActive}`,
-      borderBottom: 'none',
-      borderRadius: '8px 8px 0 0',
-      boxShadow: '0 -8px 30px rgba(0, 0, 0, 0.7)',
-      zIndex: 1000,
-      transition: 'width 0.25s ease',
-      display: 'flex',
-      flexDirection: 'column',
-      maxHeight: isOpen ? '75vh' : 42
-    }}>
-      {/* Drawer Header Bar */}
-      <div 
-        onClick={() => setIsOpen(!isOpen)}
-        style={{
-          padding: '10px 14px',
-          background: theme.bgHeader,
-          borderBottom: isOpen ? `1px solid ${theme.border}` : 'none',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          userSelect: 'none'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Zap size={15} color={theme.accentGold} />
-          <span style={{ fontFamily: theme.fontMono, fontSize: '0.82rem', fontWeight: 700, color: theme.accentGold }}>
-            AGY LIVE BRIDGE
-          </span>
-          <span style={{
-            fontSize: '0.65rem',
-            background: 'rgba(35, 165, 90, 0.2)',
-            color: theme.accentGreen,
-            padding: '1px 5px',
-            borderRadius: 3,
-            fontFamily: theme.fontMono,
-            fontWeight: 700
-          }}>
-            REAL-TIME
-          </span>
+    <>
+      <div className="agy-scrim" onClick={onClose} aria-hidden="true" />
+      <aside className="agy-panel" aria-label="AGY assistant">
+        <div className="agy-head">
+          <h2>AGY assistant</h2>
+          <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={onClose} aria-label="Close AGY"><X size={16} /></button>
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {latestToast && (
-            <span style={{
-              fontSize: '0.72rem',
-              color: latestToast.type === 'success' ? theme.accentGreen : theme.accentGold,
-              fontFamily: theme.fontMono
-            }}>
-              {latestToast.text}
-            </span>
+        <div className="agy-log" ref={logRef} aria-live="polite">
+          {messages.length === 0 && (
+            <p className="hint">Ask about the lesson you're on, or have AGY build a simulation, a new lesson or harder questions. Changes show up in the workspace as they land.</p>
           )}
-          {isOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          {messages.map((m) => (
+            <div key={m.id} className={`msg ${m.sender === 'user' ? 'msg-user' : 'msg-agy'}`}>
+              <span className="who">{m.sender === 'user' ? 'You' : 'AGY'}</span>
+              {m.sender === 'user' ? <p>{m.content}</p> : <Md>{m.content}</Md>}
+            </div>
+          ))}
+          {sending && <p className="hint"><Loader2 size={14} className="spin" aria-hidden="true" /> AGY is working…</p>}
+          {error && <p className="notice notice-bad">{error}</p>}
         </div>
-      </div>
-
-      {/* Expanded Content */}
-      {isOpen && (
-        <div style={{ display: 'flex', flexDirection: 'column', height: 420 }}>
-          {/* Quick Action Chips */}
-          <div style={{
-            padding: '8px 12px',
-            borderBottom: `1px solid ${theme.border}`,
-            background: '#121212',
-            display: 'flex',
-            gap: 6,
-            overflowX: 'auto'
-          }}>
-            <button
-              onClick={() => handleQuickAction('race')}
-              style={{
-                background: theme.bgCard,
-                border: `1px solid ${theme.border}`,
-                color: theme.accentCyan,
-                borderRadius: 4,
-                padding: '4px 8px',
-                fontSize: '0.72rem',
-                fontFamily: theme.fontMono,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              🏎️ Incline Race Sim
-            </button>
-            <button
-              onClick={() => handleQuickAction('contact_proof')}
-              style={{
-                background: theme.bgCard,
-                border: `1px solid ${theme.border}`,
-                color: theme.accentGold,
-                borderRadius: 4,
-                padding: '4px 8px',
-                fontSize: '0.72rem',
-                fontFamily: theme.fontMono,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              📐 Prove v_contact = 0
-            </button>
-            <button
-              onClick={() => handleQuickAction('quiz_hard')}
-              style={{
-                background: theme.bgCard,
-                border: `1px solid ${theme.border}`,
-                color: theme.accentGreen,
-                borderRadius: 4,
-                padding: '4px 8px',
-                fontSize: '0.72rem',
-                fontFamily: theme.fontMono,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              🎯 Test Intuition
-            </button>
-          </div>
-
-          {/* Messages Stream */}
-          <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: 12,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-            background: '#141414'
-          }}>
-            {messages.map(msg => {
-              const isAgy = msg.sender === 'agy';
-              return (
-                <div
-                  key={msg.id}
-                  style={{
-                    alignSelf: isAgy ? 'flex-start' : 'flex-end',
-                    maxWidth: '88%',
-                    background: isAgy ? theme.bgCard : 'rgba(35, 165, 90, 0.2)',
-                    border: `1px solid ${isAgy ? theme.border : theme.accentGreen}`,
-                    borderRadius: 6,
-                    padding: '8px 12px',
-                    fontSize: '0.82rem',
-                    lineHeight: 1.5,
-                    color: theme.textMain
-                  }}
-                >
-                  <div style={{
-                    fontSize: '0.68rem',
-                    fontFamily: theme.fontMono,
-                    color: isAgy ? theme.accentGold : theme.accentGreen,
-                    marginBottom: 3,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4
-                  }}>
-                    {isAgy ? <><Bot size={12} /> AGY Companion</> : <><User size={12} /> You</>}
-                  </div>
-                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
-              );
-            })}
-            {isSending && (
-              <div style={{ alignSelf: 'flex-start', color: theme.accentGold, fontSize: '0.75rem', fontFamily: theme.fontMono }}>
-                Thinking & updating derivations...
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Box */}
-          <div style={{
-            padding: 10,
-            borderTop: `1px solid ${theme.border}`,
-            background: theme.bgPanel,
-            display: 'flex',
-            gap: 8
-          }}>
-            <input
-              type="text"
-              placeholder="Ask AGY or request custom notation..."
-              value={inputVal}
-              onChange={(e) => setInputVal(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSend();
-              }}
-              style={{
-                flex: 1,
-                background: theme.bgInput,
-                border: `1px solid ${theme.border}`,
-                borderRadius: 4,
-                padding: '8px 10px',
-                color: theme.textMain,
-                fontSize: '0.82rem',
-                fontFamily: theme.fontMono,
-                outline: 'none'
-              }}
-            />
-            <button
-              onClick={() => handleSend()}
-              disabled={isSending || !inputVal.trim()}
-              style={{
-                background: theme.accentGreen,
-                border: 'none',
-                borderRadius: 4,
-                padding: '0 12px',
-                color: '#000',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <Send size={14} />
-            </button>
-          </div>
+        <div className="agy-suggest">
+          {SUGGESTIONS.map((s) => (
+            <button key={s} type="button" className="btn btn-quiet btn-sm" disabled={sending} onClick={() => send(s)}>{s}</button>
+          ))}
         </div>
-      )}
-    </div>
+        <form className="agy-form" onSubmit={(e) => { e.preventDefault(); send(); }}>
+          <label htmlFor="agy-input" className="visually-hidden">Message AGY</label>
+          <input id="agy-input" ref={inputRef} className="input" value={input} onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask AGY…" autoComplete="off" />
+          <button type="submit" className="btn btn-primary btn-icon" disabled={sending || !input.trim()} aria-label="Send"><Send size={16} /></button>
+        </form>
+      </aside>
+    </>
   );
 }
