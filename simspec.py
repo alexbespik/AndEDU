@@ -202,6 +202,7 @@ def validate_spec(spec: Any) -> Tuple[Dict[str, Any], List[str]]:
         "width": width, "height": height,
         "ground": bool(world.get("ground", False)),
         "walls": bool(world.get("walls", False)),
+        "collisions": bool(world.get("collisions", True)),   # bodies bounce off each other and off rods
         "label": str(world.get("label") or "")[:60],
     }
     base_names = param_names | {"t"}
@@ -316,7 +317,9 @@ time t. Units are SI; the canvas auto-scales the world box. y points UP.
 kind "particles":
 {"kind":"particles","title":"...","description":"what to try with the sliders",
  "params":[{"name":"k","label":"Spring constant","min":1,"max":100,"value":20,"step":1,"unit":"N/m"}],
- "world":{"width":10,"height":6,"ground":true,"walls":false,"gravity":"g","restitution":"0.8"},
+ "world":{"width":10,"height":6,"ground":true,"walls":false,"gravity":"g","restitution":"0.8","collisions":true},
+   // collisions (default true): bodies bounce off each other and off rods (a ball can strike a pendulum rod)
+   // with gravity on, set ground: true unless falling forever is the point; keep motion inside the world box
  "bodies":[{"id":"anchor","x":"5","y":"6","fixed":true,"radius":"0.08","color":"white"},
            {"id":"bob","x":"5+L*sin(theta0)","y":"6-L*cos(theta0)","mass":"m","radius":"0.2","trail":true}],
  "forces":[{"type":"spring","a":"anchor","b":"bob","k":"k","rest":"L","damping":"0"},
@@ -331,7 +334,8 @@ kind "particles":
  "duration":20}   // optional: auto-reset after N seconds
 Body fields usable in readouts/series/vectors/custom forces: <id>.x .y .vx .vy .m .r .speed
 
-kind "graph":
+kind "graph": x is the HORIZONTAL axis variable. To plot something against time, make x the time axis and
+write the curves in x (e.g. "v0*x - 0.5*g*x^2" with x label "time (s)"); use t only for animation (animate: true).
 {"kind":"graph","title":"...","description":"...","params":[...],
  "x":{"min":0,"max":10,"label":"x (m)"},"y":{"min":-2,"max":2,"label":"displacement (m)"},
  "animate":true,

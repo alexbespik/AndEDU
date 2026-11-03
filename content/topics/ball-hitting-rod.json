@@ -52,5 +52,99 @@
       "correctAnswer": 2
     }
   ],
-  "practice": []
+  "practice": [],
+  "simulation": {
+    "version": 1,
+    "kind": "particles",
+    "title": "Ball Hitting a Rod",
+    "description": "Adjust the incoming ball velocity and rod length to observe impulse and angular momentum transfer.",
+    "params": [
+      {
+        "name": "v0",
+        "label": "Impact Velocity",
+        "min": 2.0,
+        "max": 15.0,
+        "value": 6.0,
+        "step": 0.5,
+        "unit": "m/s"
+      },
+      {
+        "name": "L",
+        "label": "Rod Length",
+        "min": 1.0,
+        "max": 4.0,
+        "value": 2.5,
+        "step": 0.1,
+        "unit": "m"
+      }
+    ],
+    "world": {
+      "width": 8.0,
+      "height": 6.0,
+      "ground": false,
+      "walls": false,
+      "gravity": "9.8"
+    },
+    "bodies": [
+      {
+        "id": "pivot",
+        "label": "Pivot",
+        "color": "white",
+        "fixed": true,
+        "radius": 0.1,
+        "x": "4",
+        "y": "5"
+      },
+      {
+        "id": "tip",
+        "label": "Rod Tip",
+        "color": "gold",
+        "fixed": false,
+        "trail": true,
+        "radius": 0.18,
+        "mass": 2.0,
+        "x": "4",
+        "y": "5 - L"
+      },
+      {
+        "id": "ball",
+        "label": "Striker Ball",
+        "color": "cyan",
+        "fixed": false,
+        "trail": true,
+        "radius": 0.22,
+        "mass": 1.0,
+        "x": "1",
+        "y": "5 - L * 0.7",
+        "vx": "v0",
+        "vy": "0"
+      }
+    ],
+    "links": [
+      {
+        "type": "rod",
+        "a": "pivot",
+        "b": "tip",
+        "length": "L"
+      }
+    ],
+    "readouts": [
+      {
+        "label": "Ball Speed",
+        "expr": "ball.speed",
+        "unit": "m/s"
+      },
+      {
+        "label": "Tip Speed",
+        "expr": "tip.speed",
+        "unit": "m/s"
+      }
+    ],
+    "series": [
+      {
+        "label": "Tip Y",
+        "expr": "tip.y"
+      }
+    ]
+  }
 }

@@ -13,10 +13,19 @@ ROOT = Path(__file__).resolve().parent.parent
 TMP = tempfile.TemporaryDirectory(prefix="andedu-test-")
 os.environ["SCIEDU_CONTENT_DIR"] = TMP.name
 os.environ.pop("SCIEDU_AUTH", None)
+os.environ["api_KEY"] = ""          # set before import: load_dotenv() does not override existing variables
+os.environ["GEMINI_API_KEY"] = ""
 sys.path.insert(0, str(ROOT))
 
 import db  # noqa: E402
 import server  # noqa: E402
+
+
+def _offline(*args, **kwargs):
+    raise RuntimeError("Gemini API key is not configured in .env (tests run offline)")
+
+
+server.call_gemini = _offline  # no test may spend real model quota
 from simspec import validate_spec  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -171,7 +180,7 @@ class Api(unittest.TestCase):
         self.assertEqual([e["payload"]["tab"] for e in later["events"]], ["theory"])
 
     def test_sandbox_hides_api_keys(self):
-        os.environ["api_KEY"] = os.environ.get("api_KEY") or "test-secret"
+        os.environ["api_KEY"] = "test-secret"  # only to prove the sandbox can't see it
         out = self.c.post("/api/execute-code", json={"code": "import os\nprint(os.environ.get('api_KEY'))"}).json()
         self.assertEqual(out["stdout"].strip(), "None")
 

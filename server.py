@@ -2888,9 +2888,9 @@ def backfill_simulations():
     return {"queued": len(jobs), "jobs": jobs}
 
 BUILTIN_SIMULATIONS = {"rolling_without_slipping", "billiard_collisions"}
-# Generated SimSpec simulations have no player in the app yet, so classes don't spend model calls on them
-# unless SCIEDU_AUTHOR_SIMS=1 (the specs stay valid for when the player exists).
-AUTHOR_SIMS = os.environ.get("SCIEDU_AUTHOR_SIMS") == "1"
+# Generated SimSpec simulations are played live by SpecSim.jsx.
+# Classes author simulations by default; turn off with SCIEDU_AUTHOR_SIMS=0 to save quota.
+AUTHOR_SIMS = os.environ.get("SCIEDU_AUTHOR_SIMS", "1") != "0"
 
 # ---------------------------------------------------------------------------
 # COURSES: materials -> syllabus + diagnostic -> classes generated in sequence, adapting to results
@@ -3060,7 +3060,7 @@ Return JSON only:
   "summary": "1-2 sentences addressed to the student: what this class gives them and which earlier gap it fixes",
   "markdownContent": "Full Markdown lesson: recap link to the previous class, intuition first, then step-by-step explanation/derivation with LaTeX ($...$ and $$...$$), one fully worked example with numbers and units, a common-mistakes section aimed at the misses above, and a short summary. 600-1200 words.",
   "cheatSheet": [{{"label": "...", "formula": "LaTeX without $"}}],
-  "mermaid": "graph TD; ... concept map with quoted labels like A[\\"label\\"], or empty string",
+  "mermaid": "graph TD; ... concept map. Quote EVERY node label A[\\"label\\"] and edge label -->|\\"label\\"|; no LaTeX, $, braces or backslashes inside the diagram; or empty string",
   "quiz": [{{"id": "q1", "question": "...", "options": ["a","b","c","d"], "correctAnswer": 0, "hint": "...", "explanation": "..."}}],
   "practice": [
     {{"type": "fill_blank", "prompt": "sentence or equation with ___", "options": ["...","...","...","..."], "answer": "exact option text", "explanation": "..."}},
@@ -3679,6 +3679,7 @@ agy_execute_code_tool = types.FunctionDeclaration(
 agy_agent_tools = types.Tool(
     function_declarations=[
         agy_create_lesson_tool,
+        agy_create_simulation_tool,
         agy_adjust_class_tool,
         agy_switch_page_tool,
         agy_set_sim_config_tool,
@@ -3736,8 +3737,8 @@ async def _run_agy_process(prompt: str) -> str:
 AGY_SYSTEM_PROMPT = (
     "You are the AGY Autonomous Physics & STEM Assistant embedded inside &.edu LAB. "
     "You can change the workspace directly with your tools, and you should use them instead of only describing changes:\n"
-    "- `create_or_update_lesson` writes lessons with KaTeX derivations, cheat sheets and quizzes.\n"
-    "There are two interactive labs (rolling without slipping, billiard collisions); do not promise new simulations.\n"
+    "- `create_simulation` builds a brand-new interactive simulation for ANY topic (pendulums, orbits, waves, fields, gas laws, circuits...).\n"
+    "- `create_or_update_lesson` writes lessons with KaTeX derivations, cheat sheets and quizzes (matching simulation is built automatically).\n"
     "- `set_simulation_config` changes the live billiard simulation (restitution e, impact offset, cue height, speed, friction).\n"
     "- `switch_page` navigates to a topic/tab or mode.\n"
     "- `execute_python_code` checks numeric work.\n"
