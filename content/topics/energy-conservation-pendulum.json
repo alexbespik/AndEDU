@@ -1,0 +1,215 @@
+{
+  "id": "energy-conservation-pendulum",
+  "title": "Energy Conservation: the Pendulum",
+  "category": "Classical Mechanics",
+  "difficulty": "Introductory",
+  "summary": "A swinging pendulum trades potential energy for kinetic energy and back; the total stays constant until friction takes some away. Watch the energy bars move in real time.",
+  "simulationType": null,
+  "simulation": {
+    "version": 1,
+    "kind": "particles",
+    "title": "Pendulum energy",
+    "description": "The energy panel shows kinetic, potential and total energy as the bob swings. Raise the drag to see energy leave the pendulum as heat.",
+    "params": [
+      {
+        "name": "L",
+        "label": "Length",
+        "min": 0.5,
+        "max": 3.0,
+        "value": 2.0,
+        "step": 0.1,
+        "unit": "m"
+      },
+      {
+        "name": "th",
+        "label": "Release angle",
+        "min": 10.0,
+        "max": 80.0,
+        "value": 45.0,
+        "step": 1.0,
+        "unit": "deg"
+      },
+      {
+        "name": "c",
+        "label": "Air drag",
+        "min": 0.0,
+        "max": 0.5,
+        "value": 0.0,
+        "step": 0.02,
+        "unit": "kg/s"
+      }
+    ],
+    "world": {
+      "width": 7.0,
+      "height": 5.0,
+      "ground": false,
+      "walls": false,
+      "collisions": true,
+      "label": "",
+      "gravity": "9.81"
+    },
+    "bodies": [
+      {
+        "id": "pivot",
+        "label": "Pivot",
+        "color": "white",
+        "fixed": true,
+        "trail": false,
+        "x": "3.5",
+        "y": "4.7",
+        "vx": 0,
+        "vy": 0,
+        "mass": 1,
+        "radius": "0.06"
+      },
+      {
+        "id": "bob",
+        "label": "Bob",
+        "color": "gold",
+        "fixed": false,
+        "trail": true,
+        "x": "3.5 + L*sin(th*pi/180)",
+        "y": "4.7 - L*cos(th*pi/180)",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.15"
+      }
+    ],
+    "forces": [
+      {
+        "type": "drag",
+        "body": "bob",
+        "coef": "c",
+        "power": "1"
+      }
+    ],
+    "links": [
+      {
+        "type": "rod",
+        "a": "pivot",
+        "b": "bob",
+        "length": "L"
+      }
+    ],
+    "readouts": [
+      {
+        "expr": "bob.speed",
+        "label": "Speed",
+        "unit": "m/s",
+        "color": "gold"
+      },
+      {
+        "expr": "bob.y - (4.7 - L)",
+        "label": "Height above lowest point",
+        "unit": "m",
+        "color": "cyan"
+      },
+      {
+        "expr": "sqrt(2*9.81*L*(1 - cos(th*pi/180)))",
+        "label": "Predicted max speed",
+        "unit": "m/s",
+        "color": "pink"
+      }
+    ],
+    "series": [
+      {
+        "expr": "0.5*bob.m*bob.speed^2",
+        "label": "KE",
+        "unit": "",
+        "color": "cyan"
+      },
+      {
+        "expr": "bob.m*9.81*(bob.y - (4.7 - L))",
+        "label": "PE",
+        "unit": "",
+        "color": "gold"
+      }
+    ],
+    "vectors": [],
+    "duration": 0,
+    "overlays": {
+      "fbd": false,
+      "energy": true,
+      "momentum": false,
+      "stress": false
+    }
+  },
+  "cheatSheet": [
+    {
+      "label": "Kinetic energy",
+      "formula": "K = \\tfrac12 m v^2"
+    },
+    {
+      "label": "Gravitational potential energy",
+      "formula": "U = mgh"
+    },
+    {
+      "label": "Conservation",
+      "formula": "K_1 + U_1 = K_2 + U_2"
+    },
+    {
+      "label": "Speed at the bottom",
+      "formula": "v = \\sqrt{2gL(1-\\cos\\theta_0)}"
+    }
+  ],
+  "mermaid": "graph LR\n  A[\"Top: all potential\"] --> B[\"Swinging down: U becomes K\"]\n  B --> C[\"Bottom: most kinetic\"]\n  C --> D[\"Swinging up: K becomes U\"]\n  D --> A",
+  "markdownContent": "# Energy Conservation: the Pendulum\n\nEnergy is never created or destroyed; it changes form. For a pendulum the two forms are\n\n$$K = \\tfrac12 m v^2 \\qquad U = mgh$$\n\nand without friction their sum, the **mechanical energy**, is constant:\n\n$$K_1 + U_1 = K_2 + U_2$$\n\n## Why the rod does no work\n\nThe rod's tension always points along the rod, perpendicular to the bob's motion, so it does no work. Only gravity\ndoes work, and gravity's work is exactly the change in $U$. That is why energy is conserved here even though the rod\npulls with a large, changing force (turn on **Forces** to see it).\n\n## Worked example\n\nRelease a pendulum of length $L = 2\\,\\text{m}$ from $\\theta_0 = 45^\\circ$. It drops a height\n$h = L(1 - \\cos\\theta_0) = 2(1 - 0.707) = 0.586\\,\\text{m}$, so at the bottom\n\n$$v = \\sqrt{2gh} = \\sqrt{2(9.81)(0.586)} = 3.39\\,\\text{m/s}$$\n\nNotice the mass cancels: a heavy and a light bob swing at the same speed.\n\n## When energy is lost\n\nWith air drag ($c > 0$) some mechanical energy becomes heat every swing. The total bar shrinks and the **lost** bar\ngrows by exactly the same amount: energy is still conserved, it has just left the pendulum.\n\n## Common mistakes\n\n> The fastest point is the **bottom**, where $U$ is smallest, not the moment of release.\n\n- Measuring $h$ from the pivot instead of from the lowest point of the swing.\n\n## Try it\n\nWatch the energy panel as the bob swings: KE and PE trade places while the total stays flat. Then raise the drag $c$.\n",
+  "quiz": [
+    {
+      "question": "Where is the pendulum bob moving fastest?",
+      "options": [
+        "At the release point",
+        "At the lowest point of the swing",
+        "Halfway down",
+        "At the highest point on the other side"
+      ],
+      "correctAnswer": 1,
+      "hint": "Where is the potential energy smallest?",
+      "explanation": "With the total fixed, kinetic energy is largest where potential energy is smallest: the bottom.",
+      "id": "q1"
+    },
+    {
+      "question": "A pendulum of length 1.0 m is released from 60°. What is its speed at the bottom? ($g = 9.81\\,\\text{m/s}^2$)",
+      "options": [
+        "1.57 m/s",
+        "3.13 m/s",
+        "4.43 m/s",
+        "9.81 m/s"
+      ],
+      "correctAnswer": 1,
+      "hint": "$h = L(1-\\cos\\theta_0)$, then $v = \\sqrt{2gh}$.",
+      "explanation": "$h = 1.0(1 - 0.5) = 0.5\\,\\text{m}$, so $v = \\sqrt{2(9.81)(0.5)} = 3.13\\,\\text{m/s}$.",
+      "id": "q2"
+    },
+    {
+      "question": "Why does the rod's tension do no work on the bob?",
+      "options": [
+        "Tension is small",
+        "Tension is always perpendicular to the bob's velocity",
+        "The rod is massless",
+        "Tension cancels gravity"
+      ],
+      "correctAnswer": 1,
+      "hint": "Work is $\\vec F \\cdot \\vec d$.",
+      "explanation": "The bob moves along a circle, always perpendicular to the rod, so $\\vec T \\cdot d\\vec s = 0$.",
+      "id": "q3"
+    }
+  ],
+  "practice": [
+    {
+      "type": "numeric",
+      "prompt": "A 0.5 kg bob on a 2 m pendulum is released from 30°. How much potential energy does it lose by the bottom? ($g = 9.81\\,\\text{m/s}^2$)",
+      "answer": 1.314,
+      "tolerance": 0.03,
+      "unit": "J",
+      "explanation": "$h = 2(1 - \\cos 30^\\circ) = 0.268\\,\\text{m}$, $\\Delta U = mgh = 0.5(9.81)(0.268) = 1.31\\,\\text{J}$."
+    },
+    {
+      "type": "true_false",
+      "prompt": "Doubling the bob's mass doubles its speed at the bottom of the swing.",
+      "answer": false,
+      "explanation": "Mass cancels in $mgh = \\tfrac12 m v^2$; the speed is the same."
+    }
+  ]
+}

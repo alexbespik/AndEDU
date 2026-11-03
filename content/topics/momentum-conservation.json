@@ -1,0 +1,238 @@
+{
+  "id": "momentum-conservation",
+  "title": "Momentum Conservation in Collisions",
+  "category": "Classical Mechanics",
+  "difficulty": "Introductory",
+  "summary": "In a collision the total momentum never changes; only kinetic energy can be lost. Collide two carts with any masses, speeds and bounciness and watch the total stay put.",
+  "simulationType": null,
+  "simulation": {
+    "version": 1,
+    "kind": "particles",
+    "title": "Two carts on a frictionless track",
+    "description": "Set the masses, starting velocities and bounciness e, then press Reset. The gold arrow is the total momentum; the energy panel shows how much kinetic energy each collision loses.",
+    "params": [
+      {
+        "name": "m1",
+        "label": "Mass of cart A",
+        "min": 0.5,
+        "max": 5.0,
+        "value": 2.0,
+        "step": 0.1,
+        "unit": "kg"
+      },
+      {
+        "name": "m2",
+        "label": "Mass of cart B",
+        "min": 0.5,
+        "max": 5.0,
+        "value": 1.0,
+        "step": 0.1,
+        "unit": "kg"
+      },
+      {
+        "name": "v1",
+        "label": "Velocity of A",
+        "min": 0.0,
+        "max": 6.0,
+        "value": 3.0,
+        "step": 0.1,
+        "unit": "m/s"
+      },
+      {
+        "name": "v2",
+        "label": "Velocity of B",
+        "min": -6.0,
+        "max": 6.0,
+        "value": -1.0,
+        "step": 0.1,
+        "unit": "m/s"
+      },
+      {
+        "name": "e",
+        "label": "Bounciness e",
+        "min": 0.0,
+        "max": 1.0,
+        "value": 1.0,
+        "step": 0.05,
+        "unit": ""
+      }
+    ],
+    "world": {
+      "width": 16.0,
+      "height": 3.0,
+      "ground": false,
+      "walls": false,
+      "collisions": true,
+      "label": "",
+      "gravity": "0",
+      "restitution": "e"
+    },
+    "bodies": [
+      {
+        "id": "a",
+        "label": "A",
+        "color": "gold",
+        "fixed": false,
+        "trail": true,
+        "x": "4",
+        "y": "1.5",
+        "vx": "v1",
+        "vy": 0,
+        "mass": "m1",
+        "radius": "0.25 + 0.08*m1"
+      },
+      {
+        "id": "b",
+        "label": "B",
+        "color": "cyan",
+        "fixed": false,
+        "trail": true,
+        "x": "10",
+        "y": "1.5",
+        "vx": "v2",
+        "vy": 0,
+        "mass": "m2",
+        "radius": "0.25 + 0.08*m2"
+      }
+    ],
+    "forces": [],
+    "links": [],
+    "readouts": [
+      {
+        "expr": "a.m*a.vx + b.m*b.vx",
+        "label": "Total momentum",
+        "unit": "kg m/s",
+        "color": "gold"
+      },
+      {
+        "expr": "0.5*a.m*a.speed^2 + 0.5*b.m*b.speed^2",
+        "label": "Total kinetic energy",
+        "unit": "J",
+        "color": "cyan"
+      },
+      {
+        "expr": "a.vx",
+        "label": "v of A",
+        "unit": "m/s",
+        "color": "pink"
+      },
+      {
+        "expr": "b.vx",
+        "label": "v of B",
+        "unit": "m/s",
+        "color": "green"
+      }
+    ],
+    "series": [
+      {
+        "expr": "a.m*a.vx + b.m*b.vx",
+        "label": "total p",
+        "unit": "",
+        "color": "gold"
+      },
+      {
+        "expr": "0.5*a.m*a.speed^2 + 0.5*b.m*b.speed^2",
+        "label": "total KE",
+        "unit": "",
+        "color": "cyan"
+      }
+    ],
+    "vectors": [],
+    "duration": 0,
+    "overlays": {
+      "fbd": false,
+      "energy": true,
+      "momentum": true,
+      "stress": false
+    }
+  },
+  "cheatSheet": [
+    {
+      "label": "Momentum",
+      "formula": "\\vec p = m\\vec v"
+    },
+    {
+      "label": "Conservation",
+      "formula": "m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'"
+    },
+    {
+      "label": "Coefficient of restitution",
+      "formula": "e = \\frac{v_2' - v_1'}{v_1 - v_2}"
+    },
+    {
+      "label": "Perfectly inelastic",
+      "formula": "v' = \\frac{m_1 v_1 + m_2 v_2}{m_1 + m_2}"
+    }
+  ],
+  "mermaid": "graph TD\n  A[\"No external force on the pair\"] --> B[\"Total momentum is constant\"]\n  B --> C[\"Elastic e = 1: KE also kept\"]\n  B --> D[\"Inelastic e < 1: some KE becomes heat and sound\"]",
+  "markdownContent": "# Momentum Conservation in Collisions\n\nMomentum is mass times velocity, $\\vec p = m\\vec v$. During a collision the two objects push on each other with\nequal and opposite forces (Newton's third law), for the same short time. So whatever momentum one gains,\nthe other loses, and the **total stays the same**:\n\n$$m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'$$\n\nThis holds for every collision, bouncy or sticky, as long as no outside force acts during the impact.\n\n## Elastic or inelastic: what changes is energy\n\nThe coefficient of restitution $e$ says how bouncy the collision is:\n\n$$e = \\frac{v_2' - v_1'}{v_1 - v_2}$$\n\n| $e$ | Name | Kinetic energy |\n| --- | --- | --- |\n| 1 | Elastic | Kept |\n| between 0 and 1 | Inelastic | Partly lost |\n| 0 | Perfectly inelastic: objects move together | Most lost |\n\n## Worked example\n\nA $2\\,\\text{kg}$ cart at $3\\,\\text{m/s}$ hits a $1\\,\\text{kg}$ cart moving at $-1\\,\\text{m/s}$, and they stick ($e = 0$):\n\n$$v' = \\frac{(2)(3) + (1)(-1)}{2 + 1} = \\frac{5}{3} = 1.67\\,\\text{m/s}$$\n\nKinetic energy before: $\\tfrac12(2)(3^2) + \\tfrac12(1)(1^2) = 9.5\\,\\text{J}$. After: $\\tfrac12(3)(1.67^2) = 4.2\\,\\text{J}$.\nMomentum is the same, $5\\,\\text{kg·m/s}$, but $5.3\\,\\text{J}$ of kinetic energy turned into heat and sound.\n\n## Common mistakes\n\n> \"In an inelastic collision momentum is lost.\" No: momentum is conserved in **every** collision. Kinetic energy is what gets lost.\n\n- Forgetting signs: a cart moving left has negative velocity and negative momentum.\n\n## Try it\n\nKeep **Momentum** and **Energy** switched on. Slide $e$ from 1 down to 0: the gold total-momentum arrow and the $p$ readout do not change, while the energy panel shows a growing **lost** bar.\n",
+  "quiz": [
+    {
+      "question": "Two carts collide and stick together. What happens to the total momentum of the two carts?",
+      "options": [
+        "It stays the same",
+        "It decreases, because they stick",
+        "It increases",
+        "It becomes zero"
+      ],
+      "correctAnswer": 0,
+      "hint": "Compare the forces the carts exert on each other.",
+      "explanation": "The carts exert equal and opposite forces on each other for the same time, so total momentum is conserved; it is kinetic energy that decreases.",
+      "id": "q1"
+    },
+    {
+      "question": "A 3 kg cart at 4 m/s collides with a 1 kg cart at rest and they stick. What is their common speed?",
+      "options": [
+        "4 m/s",
+        "3 m/s",
+        "2 m/s",
+        "1 m/s"
+      ],
+      "correctAnswer": 1,
+      "hint": "Total momentum before = total momentum after.",
+      "explanation": "$v' = (3)(4)/(3+1) = 3\\,\\text{m/s}$.",
+      "id": "q2"
+    },
+    {
+      "question": "In the simulation, lowering $e$ from 1 to 0 changes which quantity after the collision?",
+      "options": [
+        "Total momentum",
+        "Total kinetic energy",
+        "Both",
+        "Neither"
+      ],
+      "correctAnswer": 1,
+      "hint": "Watch the momentum readout and the energy panel while you move the slider.",
+      "explanation": "Momentum is conserved for every value of $e$; the energy lost in the collision grows as $e$ falls.",
+      "id": "q3"
+    }
+  ],
+  "practice": [
+    {
+      "type": "numeric",
+      "prompt": "A 2 kg cart at 3 m/s hits a 1 kg cart moving at $-1$ m/s and they stick. What is their velocity afterwards?",
+      "answer": 1.667,
+      "tolerance": 0.02,
+      "unit": "m/s",
+      "explanation": "$v' = (2\\cdot 3 + 1\\cdot(-1))/3 = 5/3 \\approx 1.67\\,\\text{m/s}$."
+    },
+    {
+      "type": "fill_blank",
+      "prompt": "In every collision without outside forces, total ___ is conserved.",
+      "options": [
+        "momentum",
+        "kinetic energy",
+        "velocity",
+        "speed"
+      ],
+      "answer": "momentum",
+      "explanation": "Momentum is always conserved; kinetic energy only in elastic collisions."
+    },
+    {
+      "type": "true_false",
+      "prompt": "In a perfectly elastic collision, both momentum and kinetic energy are conserved.",
+      "answer": true,
+      "explanation": "That is the definition of an elastic collision ($e = 1$)."
+    }
+  ]
+}

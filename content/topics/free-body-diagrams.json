@@ -1,0 +1,263 @@
+{
+  "id": "free-body-diagrams",
+  "title": "Free-Body Diagrams",
+  "category": "Classical Mechanics",
+  "difficulty": "Introductory",
+  "summary": "Isolate one object, draw every force on it, and Newton's second law writes itself. Watch live free-body diagrams for a resting box, a hanging mass and a ball flying through air.",
+  "simulationType": null,
+  "simulation": {
+    "version": 1,
+    "kind": "particles",
+    "title": "Live free-body diagrams",
+    "description": "Every arrow is a real force the simulation is using, drawn to scale. Change the mass, the spring stiffness, the drag and a push on the box, and watch each diagram respond.",
+    "params": [
+      {
+        "name": "m",
+        "label": "Mass of box and hanging mass",
+        "min": 0.5,
+        "max": 5.0,
+        "value": 2.0,
+        "step": 0.1,
+        "unit": "kg"
+      },
+      {
+        "name": "k",
+        "label": "Spring stiffness",
+        "min": 5.0,
+        "max": 60.0,
+        "value": 25.0,
+        "step": 1.0,
+        "unit": "N/m"
+      },
+      {
+        "name": "c",
+        "label": "Drag coefficient on the ball",
+        "min": 0.0,
+        "max": 0.3,
+        "value": 0.08,
+        "step": 0.01,
+        "unit": "kg/m"
+      },
+      {
+        "name": "F",
+        "label": "Push on the box",
+        "min": 0.0,
+        "max": 20.0,
+        "value": 0.0,
+        "step": 0.5,
+        "unit": "N"
+      }
+    ],
+    "world": {
+      "width": 12.0,
+      "height": 7.0,
+      "ground": true,
+      "walls": true,
+      "collisions": true,
+      "label": "",
+      "gravity": "9.81",
+      "restitution": "0.4"
+    },
+    "bodies": [
+      {
+        "id": "box",
+        "label": "Box",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "2",
+        "y": "0.45",
+        "vx": 0,
+        "vy": 0,
+        "mass": "m",
+        "radius": "0.45"
+      },
+      {
+        "id": "anchor",
+        "label": "Anchor",
+        "color": "white",
+        "fixed": true,
+        "trail": false,
+        "x": "6.5",
+        "y": "6.6",
+        "vx": 0,
+        "vy": 0,
+        "mass": 1,
+        "radius": "0.08"
+      },
+      {
+        "id": "hang",
+        "label": "Hanging mass",
+        "color": "accent",
+        "fixed": false,
+        "trail": false,
+        "x": "6.5",
+        "y": "4.6",
+        "vx": 0,
+        "vy": 0,
+        "mass": "m",
+        "radius": "0.3"
+      },
+      {
+        "id": "ball",
+        "label": "Ball",
+        "color": "cyan",
+        "fixed": false,
+        "trail": true,
+        "x": "8.8",
+        "y": "0.8",
+        "vx": "2.5",
+        "vy": "8",
+        "mass": "0.5",
+        "radius": "0.2"
+      }
+    ],
+    "forces": [
+      {
+        "type": "spring",
+        "a": "anchor",
+        "b": "hang",
+        "k": "k",
+        "rest": "1.2",
+        "damping": "0.6"
+      },
+      {
+        "type": "drag",
+        "body": "ball",
+        "coef": "c",
+        "power": "2"
+      },
+      {
+        "type": "uniform",
+        "fx": "F",
+        "fy": "0",
+        "bodies": [
+          "box"
+        ]
+      }
+    ],
+    "links": [],
+    "readouts": [
+      {
+        "expr": "6.6 - hang.y - 1.2",
+        "label": "Spring stretch",
+        "unit": "m",
+        "color": "gold"
+      },
+      {
+        "expr": "m*9.81/k",
+        "label": "Expected mg/k",
+        "unit": "m",
+        "color": "cyan"
+      },
+      {
+        "expr": "ball.speed",
+        "label": "Ball speed",
+        "unit": "m/s",
+        "color": "pink"
+      }
+    ],
+    "series": [],
+    "vectors": [],
+    "duration": 0,
+    "overlays": {
+      "fbd": true,
+      "energy": false,
+      "momentum": false,
+      "stress": false
+    }
+  },
+  "cheatSheet": [
+    {
+      "label": "Newton's second law",
+      "formula": "\\sum \\vec F = m\\vec a"
+    },
+    {
+      "label": "Weight",
+      "formula": "W = mg"
+    },
+    {
+      "label": "Hooke's law",
+      "formula": "F_s = -k\\,\\Delta x"
+    },
+    {
+      "label": "Quadratic drag",
+      "formula": "F_D = c\\,v^2"
+    },
+    {
+      "label": "Equilibrium",
+      "formula": "\\sum F_x = 0,\\ \\sum F_y = 0"
+    }
+  ],
+  "mermaid": "graph LR\n  A[\"Pick one object\"] --> B[\"Draw every force on it\"]\n  B --> C[\"Choose axes\"]\n  C --> D[\"Sum forces per axis\"]\n  D --> E[\"Solve for a or the unknown force\"]",
+  "markdownContent": "# Free-Body Diagrams\n\nA free-body diagram (FBD) shows **one object** and **every force acting on it**, nothing else. Once you have it,\nNewton's second law is just bookkeeping:\n\n$$\\sum \\vec F = m\\vec a$$\n\n## How to draw one\n\n1. **Isolate the object.** Draw it as a dot or a simple shape, cut off from everything it touches.\n2. **Gravity first.** Every object near Earth has weight $W = mg$, pointing straight down.\n3. **Then every contact.** Each thing touching the object can push or pull on it:\n   a floor pushes up with a normal force $N$, a spring pulls or pushes along its length, a string pulls with tension $T$.\n4. **Then non-contact forces** like air drag, which always points opposite to the velocity.\n5. **Never draw forces the object exerts on others.** Those belong on the other object's diagram.\n\n## Three cases in the simulation\n\n| Object | Forces | What the diagram tells you |\n| --- | --- | --- |\n| Box on the floor | $W$ down, $N$ up | At rest, so $N = W = mg$ |\n| Mass on a spring | $W$ down, spring force up | At equilibrium $k\\,\\Delta x = mg$, so $\\Delta x = mg/k$ |\n| Ball in flight | $W$ down, drag opposite to $\\vec v$ | No force pushes it forward; it only slows down |\n\n## Worked example\n\nA $2.0\\,\\text{kg}$ mass hangs from a spring with $k = 25\\,\\text{N/m}$. At rest, the FBD has the weight\n$W = (2.0)(9.81) = 19.6\\,\\text{N}$ down and the spring force up. Equilibrium means they balance:\n\n$$k\\,\\Delta x = mg \\quad\\Rightarrow\\quad \\Delta x = \\frac{19.6}{25} = 0.78\\,\\text{m}$$\n\n## Common mistakes\n\n> A thrown ball has **no force in its direction of motion**. Students often add a \"force of the throw\";\n> that force ended when the ball left the hand. Look at the ball's diagram in the simulation: only weight and drag.\n\n- Drawing the normal force as always equal to $mg$: it only is when nothing else pushes vertically and the object does not accelerate vertically.\n- Forgetting that drag flips direction as the ball goes up and comes down.\n\n## Try it\n\nTurn on **Forces (free-body)** if it is off. Increase the mass $m$ and watch $W$ and $N$ grow together,\nincrease the drag coefficient $c$ and watch the ball's drag arrow lengthen, and add a push $F$ to the box.\n",
+  "quiz": [
+    {
+      "question": "A ball is thrown upward and is still rising. Ignoring air resistance, which forces act on it?",
+      "options": [
+        "Only its weight, pointing down",
+        "Its weight and an upward force from the throw",
+        "No forces, because it moves freely",
+        "An upward force larger than its weight"
+      ],
+      "correctAnswer": 0,
+      "hint": "Which objects are touching it right now?",
+      "explanation": "Once the ball leaves the hand nothing touches it; only gravity acts. The upward velocity is left over from the throw, not a force.",
+      "id": "q1"
+    },
+    {
+      "question": "A 3.0 kg box rests on a level floor while you push straight down on it with 10 N. What is the normal force? ($g = 9.81\\,\\text{m/s}^2$)",
+      "options": [
+        "29.4 N",
+        "39.4 N",
+        "19.4 N",
+        "10 N"
+      ],
+      "correctAnswer": 1,
+      "hint": "Draw all the vertical forces on the box and set their sum to zero.",
+      "explanation": "Up: $N$. Down: $mg = 29.4\\,\\text{N}$ plus your 10 N. Equilibrium gives $N = 39.4\\,\\text{N}$.",
+      "id": "q2"
+    },
+    {
+      "question": "Air drag on a moving object always points…",
+      "options": [
+        "Down",
+        "Opposite to the object's velocity",
+        "Opposite to its acceleration",
+        "Toward the ground"
+      ],
+      "correctAnswer": 1,
+      "hint": "Watch the drag arrow on the ball in the simulation as it rises and falls.",
+      "explanation": "Drag opposes motion through the air, so it is always antiparallel to the velocity.",
+      "id": "q3"
+    }
+  ],
+  "practice": [
+    {
+      "type": "numeric",
+      "prompt": "A 1.5 kg mass hangs at rest from a spring with $k = 30\\,\\text{N/m}$. How far is the spring stretched? ($g = 9.81\\,\\text{m/s}^2$)",
+      "answer": 0.49,
+      "tolerance": 0.03,
+      "unit": "m",
+      "explanation": "$\\Delta x = mg/k = (1.5)(9.81)/30 = 0.49\\,\\text{m}$."
+    },
+    {
+      "type": "order_steps",
+      "prompt": "Put the steps for solving a dynamics problem with a free-body diagram in order.",
+      "steps": [
+        "Isolate the object you care about",
+        "Draw its weight",
+        "Draw every contact and non-contact force on it",
+        "Choose axes and resolve forces into components",
+        "Apply $\\sum F = ma$ along each axis"
+      ],
+      "explanation": "Isolate, draw all forces, choose axes, then apply Newton's second law per axis."
+    },
+    {
+      "type": "true_false",
+      "prompt": "The normal force on an object on a level floor is always equal to its weight.",
+      "answer": false,
+      "explanation": "Only if nothing else pushes vertically and it is not accelerating vertically; pushing down on it increases $N$."
+    }
+  ]
+}

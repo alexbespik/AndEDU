@@ -1,0 +1,494 @@
+{
+  "id": "material-stress-truss",
+  "title": "Stress and Strain in a Loaded Truss",
+  "category": "Mechanics of Materials",
+  "difficulty": "Intermediate",
+  "summary": "Hang a load on the tip of a cantilever truss and see which members stretch (tension) and which squeeze (compression). Stress, strain and stiffness made visible.",
+  "simulationType": null,
+  "simulation": {
+    "version": 1,
+    "kind": "particles",
+    "title": "Cantilever truss under a tip load",
+    "description": "Members are colored by strain: red stretched (tension), blue squeezed (compression). Increase the load P or lower the stiffness k and watch where the truss works hardest.",
+    "params": [
+      {
+        "name": "P",
+        "label": "Tip load P",
+        "min": 0.0,
+        "max": 200.0,
+        "value": 80.0,
+        "step": 5.0,
+        "unit": "N"
+      },
+      {
+        "name": "k",
+        "label": "Member stiffness k",
+        "min": 3000.0,
+        "max": 20000.0,
+        "value": 8000.0,
+        "step": 500.0,
+        "unit": "N/m"
+      }
+    ],
+    "world": {
+      "width": 10.5,
+      "height": 4.5,
+      "ground": false,
+      "walls": false,
+      "collisions": false,
+      "label": "",
+      "gravity": "0"
+    },
+    "bodies": [
+      {
+        "id": "t0",
+        "label": "t0",
+        "color": "white",
+        "fixed": true,
+        "trail": false,
+        "x": "1.0",
+        "y": "3.4",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "b0",
+        "label": "b0",
+        "color": "white",
+        "fixed": true,
+        "trail": false,
+        "x": "1.0",
+        "y": "2.0",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "t1",
+        "label": "t1",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "2.6",
+        "y": "3.4",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "b1",
+        "label": "b1",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "2.6",
+        "y": "2.0",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "t2",
+        "label": "t2",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "4.2",
+        "y": "3.4",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "b2",
+        "label": "b2",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "4.2",
+        "y": "2.0",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "t3",
+        "label": "t3",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "5.800000000000001",
+        "y": "3.4",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "b3",
+        "label": "b3",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "5.800000000000001",
+        "y": "2.0",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "t4",
+        "label": "t4",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "7.4",
+        "y": "3.4",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "b4",
+        "label": "b4",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "7.4",
+        "y": "2.0",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "t5",
+        "label": "t5",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "9.0",
+        "y": "3.4",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      },
+      {
+        "id": "b5",
+        "label": "b5",
+        "color": "gold",
+        "fixed": false,
+        "trail": false,
+        "x": "9.0",
+        "y": "2.0",
+        "vx": 0,
+        "vy": 0,
+        "mass": "1",
+        "radius": "0.09"
+      }
+    ],
+    "forces": [
+      {
+        "type": "spring",
+        "a": "t0",
+        "b": "t1",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "b0",
+        "b": "b1",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t0",
+        "b": "b1",
+        "k": "k",
+        "rest": "2.1260",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t1",
+        "b": "t2",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "b1",
+        "b": "b2",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t1",
+        "b": "b2",
+        "k": "k",
+        "rest": "2.1260",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t2",
+        "b": "t3",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "b2",
+        "b": "b3",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t2",
+        "b": "b3",
+        "k": "k",
+        "rest": "2.1260",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t3",
+        "b": "t4",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "b3",
+        "b": "b4",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t3",
+        "b": "b4",
+        "k": "k",
+        "rest": "2.1260",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t4",
+        "b": "t5",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "b4",
+        "b": "b5",
+        "k": "k",
+        "rest": "1.6000",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t4",
+        "b": "b5",
+        "k": "k",
+        "rest": "2.1260",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t1",
+        "b": "b1",
+        "k": "k",
+        "rest": "1.4",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t2",
+        "b": "b2",
+        "k": "k",
+        "rest": "1.4",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t3",
+        "b": "b3",
+        "k": "k",
+        "rest": "1.4",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t4",
+        "b": "b4",
+        "k": "k",
+        "rest": "1.4",
+        "damping": "30"
+      },
+      {
+        "type": "spring",
+        "a": "t5",
+        "b": "b5",
+        "k": "k",
+        "rest": "1.4",
+        "damping": "30"
+      },
+      {
+        "type": "uniform",
+        "fx": "0",
+        "fy": "-P",
+        "bodies": [
+          "b5"
+        ]
+      }
+    ],
+    "links": [],
+    "readouts": [
+      {
+        "expr": "2.0 - b5.y",
+        "label": "Tip deflection",
+        "unit": "m",
+        "color": "gold"
+      },
+      {
+        "expr": "(t1.x - t0.x - 1.6) / 1.6",
+        "label": "Top chord strain at wall",
+        "unit": "",
+        "color": "cyan"
+      },
+      {
+        "expr": "(b1.x - b0.x - 1.6) / 1.6",
+        "label": "Bottom chord strain at wall",
+        "unit": "",
+        "color": "pink"
+      }
+    ],
+    "series": [],
+    "vectors": [],
+    "duration": 0,
+    "overlays": {
+      "fbd": false,
+      "energy": false,
+      "momentum": false,
+      "stress": true
+    }
+  },
+  "cheatSheet": [
+    {
+      "label": "Normal stress",
+      "formula": "\\sigma = \\frac{F}{A}"
+    },
+    {
+      "label": "Strain",
+      "formula": "\\varepsilon = \\frac{\\Delta L}{L_0}"
+    },
+    {
+      "label": "Hooke's law (material)",
+      "formula": "\\sigma = E\\,\\varepsilon"
+    },
+    {
+      "label": "Member stiffness",
+      "formula": "k = \\frac{EA}{L_0}"
+    },
+    {
+      "label": "Bending: top and bottom",
+      "formula": "\\sigma_{\\text{top}} > 0,\\ \\sigma_{\\text{bottom}} < 0"
+    }
+  ],
+  "mermaid": "graph TD\n  A[\"Load P at the tip\"] --> B[\"Truss bends down\"]\n  B --> C[\"Top chord stretches: tension\"]\n  B --> D[\"Bottom chord squeezes: compression\"]\n  C --> E[\"Largest strain near the wall\"]\n  D --> E",
+  "markdownContent": "# Stress and Strain in a Loaded Truss\n\nWhen a structure carries a load, every member carries an internal force. Engineers describe it with two numbers:\n\n$$\\sigma = \\frac{F}{A} \\quad\\text{(stress)} \\qquad \\varepsilon = \\frac{\\Delta L}{L_0} \\quad\\text{(strain)}$$\n\nStress is force per area (pascals); strain is the fractional change in length (no units). For most materials,\nwhile the load is small, they are proportional, with the **Young's modulus** $E$:\n\n$$\\sigma = E\\,\\varepsilon$$\n\nSteel has $E \\approx 200\\,\\text{GPa}$, aluminium $70\\,\\text{GPa}$, wood around $10\\,\\text{GPa}$.\n\n## Tension and compression\n\n- **Tension**: the member is pulled and gets longer, $\\varepsilon > 0$ (red in the simulation).\n- **Compression**: the member is pushed and gets shorter, $\\varepsilon < 0$ (blue).\n\n## The cantilever\n\nThe truss is fixed to a wall on the left and loaded at the right tip. It bends downward, like a diving board.\nBending **stretches the top** and **squeezes the bottom**, and the effect is largest **near the wall**, where the\nlever arm of the load is longest: the bending moment there is $M = P\\,\\ell$.\n\n## Worked example\n\nA steel member with cross-section $A = 2\\,\\text{cm}^2 = 2\\times10^{-4}\\,\\text{m}^2$ carries $F = 10\\,\\text{kN}$ in tension:\n\n$$\\sigma = \\frac{10^4}{2\\times10^{-4}} = 50\\,\\text{MPa} \\qquad \\varepsilon = \\frac{\\sigma}{E} = \\frac{50\\times10^6}{200\\times10^9} = 2.5\\times10^{-4}$$\n\nThat is a stretch of $0.025\\,\\%$: real structures deform very little. The simulation exaggerates strain so you can see it.\n\n## Common mistakes\n\n> A member's stiffness depends on its geometry, not only its material: $k = EA/L_0$. A long, thin member is much softer than a short, thick one of the same steel.\n\n- Assuming every member carries the load equally: the members near the wall work hardest.\n\n## Try it\n\nTurn on **Stress** (it starts on). Increase the load $P$ and watch the colors deepen, most near the wall.\nIncrease the stiffness $k$: the same load now causes less strain and a smaller tip deflection.\n",
+  "quiz": [
+    {
+      "question": "A cantilever truss is loaded downward at its tip. Which chord is in tension?",
+      "options": [
+        "The top chord",
+        "The bottom chord",
+        "Both chords",
+        "Neither; only the diagonals carry load"
+      ],
+      "correctAnswer": 0,
+      "hint": "Which side of a bending diving board gets longer?",
+      "explanation": "Bending downward stretches the top chord (tension) and shortens the bottom chord (compression).",
+      "id": "q1"
+    },
+    {
+      "question": "A rod of original length 2.0 m stretches by 1.0 mm. What is its strain?",
+      "options": [
+        "$5\\times10^{-4}$",
+        "$2\\times10^{-3}$",
+        "$5\\times10^{-2}$",
+        "$1\\times10^{-3}$"
+      ],
+      "correctAnswer": 0,
+      "hint": "$\\varepsilon = \\Delta L / L_0$ with both in metres.",
+      "explanation": "$\\varepsilon = 0.001 / 2.0 = 5\\times10^{-4}$.",
+      "id": "q2"
+    },
+    {
+      "question": "Where are the members of the loaded cantilever most strained?",
+      "options": [
+        "Near the loaded tip",
+        "Near the wall",
+        "In the middle",
+        "Equally everywhere"
+      ],
+      "correctAnswer": 1,
+      "hint": "Where is the bending moment $M = P\\ell$ largest?",
+      "explanation": "The lever arm of the tip load is longest at the wall, so the bending moment and the chord forces are largest there.",
+      "id": "q3"
+    }
+  ],
+  "practice": [
+    {
+      "type": "numeric",
+      "prompt": "A steel bar ($E = 200\\,\\text{GPa}$) is under a stress of 100 MPa. What is its strain?",
+      "answer": 0.0005,
+      "tolerance": 0.02,
+      "unit": "",
+      "explanation": "$\\varepsilon = \\sigma/E = 100\\times10^6 / 200\\times10^9 = 5\\times10^{-4}$."
+    },
+    {
+      "type": "fill_blank",
+      "prompt": "A member that gets shorter under load is in ___.",
+      "options": [
+        "compression",
+        "tension",
+        "shear",
+        "torsion"
+      ],
+      "answer": "compression",
+      "explanation": "Shortening means negative strain: compression."
+    },
+    {
+      "type": "true_false",
+      "prompt": "Doubling a member's cross-sectional area halves its stress for the same force.",
+      "answer": true,
+      "explanation": "$\\sigma = F/A$: twice the area, half the stress."
+    }
+  ]
+}
