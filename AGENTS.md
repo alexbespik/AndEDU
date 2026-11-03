@@ -87,8 +87,21 @@ python3 scripts/agent_add_topic.py --template             # starter topic
 - Model roles: `SCIEDU_PLANNER_MODELS` (diagnostic, syllabus, answer checks) and `SCIEDU_LESSON_MODELS`
   (lessons, quizzes, practice), comma-separated, in `.env`. Both fall back to the built-in model list.
 
+## Socratic tutor (from &EDU)
+`POST /api/tutor/lesson {"topicId", "message", "history": [{role, content}], "mode": "chat"|"brief", "focus"?}`
+answers in the &EDU mentor style: short, one leading question, no spoilers for unanswered items. `mode: "brief"`
+returns Goal / Key idea / Check yourself. The spoken lecture (`/api/elevenlabs-voiceover`) sits in each topic's
+"More" menu; it uses the browser's voice unless `SCIEDU_ELEVENLABS=1`.
+
+## Spending guards
+- `SCIEDU_DAILY_MODEL_CALLS` (default 400): Gemini requests per day across all features, fallbacks included.
+- `SCIEDU_RATE_SCALE`: per-user hourly limits on generation (see `RATE_LIMITS` in server.py).
+- `AGY_DAILY_RUNS` (default 15): agy CLI runs per day, one at a time; Gemini answers when capped or busy.
+
 ## Running agy from the in-app assistant
 The companion uses Gemini tools by default and receives the course the student has open (`courseId`), so
-"make class 2 easier" calls its `adjust_class` tool. To route prompts through the Antigravity CLI instead:
+"make class 2 easier" calls its `adjust_class` tool. To route prompts through the Antigravity CLI instead (personal machine only: agy runs on your own
+Antigravity subscription, which is for your own supervised work; the server never runs it when
+`SCIEDU_AUTH=1`, and caps it with `AGY_DAILY_RUNS`):
 `AGY_CLI=1` (and only if you accept that it edits files without asking, `AGY_SKIP_PERMISSIONS=1`).
 Prompts can come from uploaded documents, so keep skip-permissions off unless you trust every input.

@@ -486,3 +486,18 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .adapted { font: 400 0.82rem/1.4 var(--font-mono); color: var(--gold-text); margin-top: var(--space-1); }
 .adjust-form { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 .adjust-form .input { flex: 1 1 240px; min-width: 0; }
+
+/* ---------- Topic "More" menu & Socratic tutor ---------- */
+.more { position: relative; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 240px; padding: var(--space-1);
+  background: var(--surface); border: 1px solid var(--rule-strong); border-radius: var(--radius); box-shadow: var(--shadow-raised);
+  display: flex; flex-direction: column; }
+.menu button { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3);
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); font: 400 0.92rem/1.3 var(--font-body);
+  text-align: left; cursor: pointer; }
+.menu button:hover:not(:disabled) { background: var(--sunk); }
+.menu button:disabled { color: var(--muted); cursor: not-allowed; }
+.tutor { display: flex; flex-direction: column; gap: var(--space-3); }
+.tutor-log { display: flex; flex-direction: column; gap: var(--space-3); max-height: 52vh; overflow-y: auto; }
+.check-row { display: flex; gap: var(--space-2); align-items: flex-start; font-size: 0.92rem; color: var(--ink); cursor: pointer; }
+.check-row input { margin-top: 3px; accent-color: var(--accent); }

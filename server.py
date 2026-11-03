@@ -121,6 +121,22 @@ MODEL_ROLES = {
 
 MODEL_COOLDOWN: Dict[str, float] = {}  # model id -> unix time it may be tried again
 
+# Spending guard: at most this many Gemini requests per day (all users, all features). On the free tier
+# Google simply refuses past quota; with billing on, this cap is what keeps costs bounded.
+DAILY_MODEL_CALLS = int(os.environ.get("SCIEDU_DAILY_MODEL_CALLS", "400"))
+_budget = {"day": "", "used": 0}
+_budget_lock = threading.Lock()
+
+def spend_model_call():
+    today = time.strftime("%Y-%m-%d")
+    with _budget_lock:
+        if _budget["day"] != today:
+            _budget.update(day=today, used=0)
+        if DAILY_MODEL_CALLS > 0 and _budget["used"] >= DAILY_MODEL_CALLS:
+            raise RuntimeError(f"Daily model budget reached ({DAILY_MODEL_CALLS} requests). It resets at midnight; "
+                               "raise SCIEDU_DAILY_MODEL_CALLS in .env to allow more.")
+        _budget["used"] += 1
+
 def models_for(role: Optional[str]) -> List[str]:
     preferred = MODEL_ROLES.get(role or "", [])
     return preferred + [m for m in CANDIDATE_MODELS if m not in preferred]
@@ -140,6 +156,7 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
     # skip models still cooling down from a quota/overload error, unless every model is
     ready = [m for m in candidates if MODEL_COOLDOWN.get(m, 0) <= now] or candidates
     for model_id in ready:
+        spend_model_call()  # every attempt counts, fallbacks included
         try:
             return client.models.generate_content(
                 model=model_id,
@@ -571,6 +588,8 @@ class BriefPayload(BaseModel):
     chapter: Optional[Dict[str, Any]] = None
     mode: Optional[str] = "code"
     level: Optional[int] = 1
+
+ELEVENLABS_ENABLED = os.environ.get("SCIEDU_ELEVENLABS") == "1"
 
 class VoiceoverPayload(BaseModel):
     chapter_title: Optional[str] = "Lecture"
@@ -2209,7 +2228,10 @@ async def elevenlabs_voiceover(payload: VoiceoverPayload):
     """
     rate_limit("chat")
     # Resolve ElevenLabs API key: passed from UI settings, or loaded from .env
-    eleven_key = (payload.api_key or "").strip() or os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY") or os.environ.get("XI_API_KEY")
+    # The server's own ElevenLabs key costs credits: used only with SCIEDU_ELEVENLABS=1. Otherwise the
+    # spoken script is returned and the browser reads it aloud for free.
+    server_key = (os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY") or os.environ.get("XI_API_KEY")) if ELEVENLABS_ENABLED else None
+    eleven_key = (payload.api_key or "").strip() or server_key
     
     # 1. Synthesize conversational spoken lecture script using Gemini in elderly professor persona
     clean_notes = (payload.content_markdown or "").strip()
@@ -2651,6 +2673,8 @@ def start_job(kind: str, label: str, work) -> Dict[str, Any]:
 
 def friendly_ai_error(e: Exception) -> str:
     text = str(e)
+    if "Daily model budget" in text:
+        return text
     if "API key" in text or "not configured" in text:
         return "No Gemini API key: add api_KEY=... to SciEdu-Studio/.env and restart the backend."
     if "429" in text or "quota" in text.lower() or "RESOURCE_EXHAUSTED" in text:
@@ -2889,6 +2913,7 @@ def require_course(course_id: str) -> Dict[str, Any]:
 class AuthRequest(BaseModel):
     name: str
     password: str
+    adult: Optional[bool] = None   # required on sign-up: the Gemini API terms require users to be 18+
 
 def _clean_name(raw: str) -> str:
     name = " ".join((raw or "").split())[:40]
@@ -2901,6 +2926,8 @@ def register(req: AuthRequest):
     if not AUTH_REQUIRED:
         raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
     name = _clean_name(req.name)
+    if req.adult is not True:
+        raise HTTPException(status_code=422, detail="This service uses the Gemini API, which is for people 18 or older. Confirm your age to continue.")
     if len(req.password) < 8:
         raise HTTPException(status_code=422, detail="Use a password of at least 8 characters.")
     existing = db.get_user_by_name(name)
@@ -3429,6 +3456,84 @@ def remove_course(course_id: str):
     return {"status": "deleted"}
 
 # ---------------------------------------------------------------------------
+# SOCRATIC LESSON TUTOR (carried over from &EDU's mentor, grounded in the class the student is reading)
+# ---------------------------------------------------------------------------
+LESSON_TUTOR_PROMPT = """
+You are a Socratic tutor sitting next to one student who is working through this lesson:
+
+{lesson}
+
+How you teach (from the &EDU mentor):
+- Lead, don't lecture: at most about 90 words, then ONE guiding question that moves them one step.
+- Start from what they just said or chose; name the specific misconception if you can see it.
+- No spoilers: do not give the final answer to a quiz or practice item they haven't answered yet. If they are
+  stuck twice in a row, give a more direct hint (a worked first step), still ending with a question.
+- When they answered wrong, help them see WHY their choice breaks the key idea, with a quick counterexample
+  or a limiting case (e.g. what if the angle were 0 or 90 degrees?).
+- Use the lesson's own notation; LaTeX in $...$. Plain, warm, specific. No headings, no bullet walls.
+{focus}
+"""
+
+BRIEF_PROMPT = """
+In at most 60 words, brief a student before they read this lesson. Exactly three lines, in this format:
+**Goal:** what they will be able to do after this class (one sentence)
+**Key idea:** the one rule or invariant everything hangs on (one sentence, LaTeX in $...$ if useful)
+**Check yourself:** one short diagnostic question to keep in mind while reading
+
+Lesson:
+{lesson}
+"""
+
+class TutorTurn(BaseModel):
+    role: str
+    content: str
+
+class LessonTutorRequest(BaseModel):
+    topicId: str
+    message: Optional[str] = ""
+    history: Optional[List[TutorTurn]] = []
+    mode: Optional[str] = "chat"            # "chat" | "brief"
+    focus: Optional[Dict[str, Any]] = None  # {question, options, selected, correctAnswer} after a quiz answer
+
+@app.post("/api/tutor/lesson")
+async def lesson_tutor(req: LessonTutorRequest):
+    rate_limit("chat")
+    topic = load_json_file(topic_path(req.topicId), None)
+    if not topic or not topic_visible(topic):
+        raise HTTPException(status_code=404, detail="Topic not found")
+    lesson = _topic_brief(topic, 7000)
+    try:
+        if req.mode == "brief":
+            response = await acall_gemini(contents=BRIEF_PROMPT.format(lesson=lesson), role="lesson",
+                                          config=types.GenerateContentConfig(temperature=0.3))
+            return {"reply": (response.text or "").strip()}
+
+        focus = ""
+        if req.focus and req.focus.get("question"):
+            f = req.focus
+            opts = f.get("options") or []
+            pick = opts[f["selected"]] if isinstance(f.get("selected"), int) and 0 <= f["selected"] < len(opts) else "nothing"
+            right = opts[f["correctAnswer"]] if isinstance(f.get("correctAnswer"), int) and 0 <= f["correctAnswer"] < len(opts) else None
+            focus = (f"\nThe student just answered this quiz question: {f['question']}\nThey chose: {pick}."
+                     + (f" The correct answer (already shown to them) is: {right}. Help them understand why." if right else ""))
+        contents = []
+        for turn in (req.history or [])[-12:]:
+            text = (turn.content or "").strip()
+            if text:
+                contents.append(types.Content(role="model" if turn.role in ("model", "assistant", "tutor") else "user",
+                                              parts=[types.Part.from_text(text=text[:2000])]))
+        message = (req.message or "").strip() or "I'm ready. Where should I start?"
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message[:2000])]))
+        response = await acall_gemini(
+            contents=contents, role="lesson",
+            config=types.GenerateContentConfig(system_instruction=LESSON_TUTOR_PROMPT.format(lesson=lesson, focus=focus),
+                                               temperature=0.4),
+        )
+        return {"reply": (response.text or "").strip() or "Tell me which step you're on, and what you expected to happen."}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=friendly_ai_error(e))
+
+# ---------------------------------------------------------------------------
 # AGY AUTONOMOUS AGENT TOOLS (LESSON GENERATION, SIMULATIONS, PAGE SWITCHING & SANDBOX)
 # ---------------------------------------------------------------------------
 agy_create_lesson_tool = types.FunctionDeclaration(
@@ -3560,9 +3665,32 @@ agy_agent_tools = types.Tool(
 AGY_BIN = os.environ.get("AGY_BIN", "/opt/homebrew/bin/agy")
 AGY_CLI_TIMEOUT = 120
 
+# agy runs on the owner's personal Antigravity subscription. Google's Antigravity terms bar third-party
+# tools from accessing the service, and a subscription is for one person's own supervised work, so:
+#  - never on a server with accounts (it would serve other people from one personal subscription)
+#  - at most AGY_DAILY_RUNS per day and one run at a time, so the plan's quota can't be drained
+#  - Gemini tools answer instead whenever agy is off, capped, busy or fails
+AGY_DAILY_RUNS = int(os.environ.get("AGY_DAILY_RUNS", "15"))
+_agy_runs = {"day": "", "used": 0}
+_agy_lock = asyncio.Lock()
+
+def agy_cli_allowed() -> bool:
+    return os.environ.get("AGY_CLI") == "1" and not AUTH_REQUIRED and Path(AGY_BIN).exists()
+
 async def run_agy_cli(prompt: str) -> str:
-    if os.environ.get("AGY_CLI") != "1" or not Path(AGY_BIN).exists():
+    if not agy_cli_allowed() or _agy_lock.locked():
         return ""
+    today = time.strftime("%Y-%m-%d")
+    if _agy_runs["day"] != today:
+        _agy_runs.update(day=today, used=0)
+    if _agy_runs["used"] >= AGY_DAILY_RUNS:
+        print(f"[AGY RUNNER] daily cap of {AGY_DAILY_RUNS} runs reached; using Gemini tools")
+        return ""
+    _agy_runs["used"] += 1
+    async with _agy_lock:
+        return await _run_agy_process(prompt)
+
+async def _run_agy_process(prompt: str) -> str:
     args = [AGY_BIN]
     if os.environ.get("AGY_SKIP_PERMISSIONS") == "1":
         args.append("--dangerously-skip-permissions")
@@ -3740,7 +3868,10 @@ def get_status():
         "status": "online",
         "topic_count": len(list(TOPICS_DIR.glob("*.json"))),
         "gemini_configured": bool(os.environ.get("api_KEY") or os.environ.get("GEMINI_API_KEY")),
-        "agy_cli_enabled": os.environ.get("AGY_CLI") == "1" and Path(AGY_BIN).exists(),
+        "agy_cli_enabled": agy_cli_allowed(),
+        "agy_runs_left_today": max(0, AGY_DAILY_RUNS - (_agy_runs["used"] if _agy_runs["day"] == time.strftime("%Y-%m-%d") else 0)),
+        "model_calls_left_today": max(0, DAILY_MODEL_CALLS - (_budget["used"] if _budget["day"] == time.strftime("%Y-%m-%d") else 0)),
+        "elevenlabs_enabled": ELEVENLABS_ENABLED,
         "active_jobs": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running")),
         "event_cursor": _event_seq,
         "auth_required": AUTH_REQUIRED,
