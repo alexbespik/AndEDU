@@ -59,6 +59,38 @@ Data only, never code: the browser evaluates expressions with its own small inte
 - Or let the server author one: `POST /api/simulations/generate {"topicId": "..."}`, or fill every topic that
   lacks one with `POST /api/simulations/backfill`.
 
+## Task for agy: build the SimSpec player (open)
+Specs are generated and validated, but nothing plays them yet, so the Simulation tab only shows the two
+built-in labs. Build the player as `src/simulations/SpecSim.jsx` (`export default function SpecSim({ spec })`).
+
+Already in place, reuse them:
+- `src/lib/expr.js`: `compile(expr)` returns `fn(scope)`; never use `eval`/`new Function`. Scope is a plain
+  object: slider params by name, `t`, and one object per body id with `x y vx vy m r speed`
+  (`{ L: 2, t: 0.4, bob: { x, y, vx, vy, m, r, speed } }`); custom forces also get the current body's
+  `x y vx vy m` at top level. `tryCompile` reports syntax errors instead of throwing.
+- `src/theme.js`: `canvasPalette()` gives resolved theme colors for canvas drawing (light and dark).
+- `simspec.py`: the exact grammar and every field. The player must accept anything that validates there.
+
+What it must do:
+- `kind: "particles"`: fixed-step integration (about 240 Hz, semi-implicit Euler) of `world.gravity` (acts on
+  -y, y points up), `forces` (spring with damping, drag `coef*|v|^(power-1)*v`, mutual `gravitation` with
+  `soften`, `custom`/`uniform` fx/fy), `links: rod` as distance constraints (fixed bodies don't move),
+  `world.ground` / `walls` with `restitution`. Bodies' initial values are expressions of params; changing a
+  slider resets the run. Draw trails, `vectors`, and a live chart of `series` over the last ~12 s.
+- `kind: "graph"`: sample each curve across `x.min..x.max` (~400 points), animate `t` when `animate`, auto-fit
+  y unless `y.min/max` are given, label axes.
+- Sliders from `params` (label, unit, min/max/step), readouts from `readouts`, play/pause/reset, and the
+  spec's `description` shown above the canvas. Controls sit outside the canvas (see the built-in labs).
+- Canvas sized to its container and `devicePixelRatio`; update React state for readouts at ~10 Hz, not per
+  frame. If values become NaN/Infinity, pause and say the setup became unstable.
+
+Wire it in:
+- `src/components/TopicViewer.jsx`: show the Simulation tab when `topic.simulation` exists and render `SpecSim`.
+- `server.py`: default `AUTHOR_SIMS` to on (classes generate specs again), re-add `agy_create_simulation_tool`
+  to `agy_agent_tools`, and restore the AGY prompt line about `create_simulation`.
+- Done when: a pendulum (rod), a spring with damping, a two-body orbit and an animated standing wave render
+  and respond to sliders in both themes, and `python -m unittest discover -s tests` still passes.
+
 ## Commands & API
 ```bash
 python3 scripts/agent_add_topic.py --file my_topic.json   # validate + save a topic
