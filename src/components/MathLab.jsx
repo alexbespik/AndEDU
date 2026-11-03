@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LineChart, NotebookPen, Sigma, Plus, X, Loader2, Crosshair } from 'lucide-react';
+import { LineChart, NotebookPen, Sigma, Plus, X, Loader2, Crosshair, BookOpen, GraduationCap, Shapes } from 'lucide-react';
 import { tryCompile, RESERVED_NAMES } from '../lib/expr';
 import { canvasPalette } from '../theme';
 import { api } from '../lib/api';
 import { reportXp } from '../lib/engage';
 import Md from './Md';
 import PracticeDeck from './PracticeDeck';
+import MathSim from '../simulations/MathSim';
 
 const TABS = [
   { id: 'graph', label: 'Graph', icon: LineChart },
@@ -496,27 +497,103 @@ function PracticeTab() {
 }
 
 /** Math workspace: graphing with sliders, a LaTeX notebook and checked practice. */
-export default function MathLab({ user }) {
-  const [tab, setTab] = useState(() => store.get('andedu_math_tab', 'graph'));
-  useEffect(() => { store.set('andedu_math_tab', tab); }, [tab]);
+// Ready-made widgets for the Sim kit tab (same format the class generator writes: SimSpec kind "math")
+const P = (name, min, max, value, label = name, step) => ({ name, label, min, max, value, step: step ?? (max - min) / 200, unit: '' });
+const KIT = [
+  { id: 'ed', name: 'ε-δ limit', spec: { widget: 'epsilon_delta', title: 'ε-δ: lim x→2 of x² = 4', description: 'Pick ε, then find a δ so every point in the green band stays inside the gold band. Shrink ε and see δ shrink with it.', f: 'x^2', a: '2', L: '4', params: [P('eps', 0.02, 2, 0.8, 'ε'), P('delta', 0.005, 1.5, 0.5, 'δ')] } },
+  { id: 'en', name: 'ε-N sequence', spec: { widget: 'epsilon_n', title: 'ε-N: aₙ = 1 + (−1)ⁿ/n → 1', description: 'For each ε there is an N after which every term stays in the band. Shrink ε and watch N grow.', term: '1 + (-1)^n / n', L: '1', nmax: 60, params: [P('eps', 0.01, 0.6, 0.25, 'ε')] } },
+  { id: 'st', name: 'Secant → tangent', spec: { widget: 'secant_tangent', title: 'From secant to tangent', description: 'Drag h toward 0: the secant slope approaches the derivative.', f: 'sin(x) + x/2', a: '1', params: [P('h', -3, 3, 2, 'h')] } },
+  { id: 'rs', name: 'Riemann sums', spec: { widget: 'riemann', title: 'Riemann sums of x² on [0, 2]', description: 'Raise n and switch rules: every sum approaches the exact area 8/3.', f: 'x^2', a: '0', b: '2', method: 'left', params: [P('n', 1, 60, 4, 'n', 1)] } },
+  { id: 'ts', name: 'Taylor: sin x', spec: { widget: 'series', title: 'Taylor polynomials of sin x', description: 'Each extra term hugs sin x over a wider interval.', term: '(-1)^k * x^(2*k+1) / fact(2*k+1)', target: 'sin(x)', params: [P('N', 0, 12, 2, 'N (terms − 1)', 1)] } },
+  { id: 'te', name: 'Taylor: eˣ', spec: { widget: 'series', title: 'Partial sums of eˣ = Σ xᵏ/k!', description: 'Hover anywhere to compare the partial sum with eˣ.', term: 'x^k / fact(k)', target: 'exp(x)', view: { xmin: -4, xmax: 4, ymin: -2, ymax: 20 }, params: [P('N', 0, 15, 2, 'N', 1)] } },
+  { id: 'uc', name: 'Unit circle', spec: { widget: 'unit_circle', title: 'Sine and cosine on the unit circle', description: 'cos θ and sin θ are the coordinates of the point; the sine graph unrolls as θ grows.', params: [P('theta', 0, 360, 45, 'θ (degrees)', 1)] } },
+  { id: 'pc', name: 'Parametric curve', spec: { widget: 'parametric', title: 'Lissajous curve x = cos 3t, y = sin 2t', description: 'Move t to trace the curve; the arrow is the velocity (dx/dt, dy/dt).', x: 'cos(3*t)', y: 'sin(2*t)', tmin: '0', tmax: '2*pi', params: [P('t', 0, 1, 0.3, 't (fraction of the way)')] } },
+  { id: 'vf', name: 'Vector field', spec: { widget: 'vector_field', title: 'F(x, y) = (−y, x − 0.3y)', description: 'Click to drop flow lines. Hover to read divergence and curl.', P: '-y', Q: 'x - 0.3*y', params: [] } },
+  { id: 'lt', name: 'Linear transform', spec: { widget: 'transform2d', title: 'A 2×2 matrix acting on the plane', description: 'The unit square maps to a parallelogram with area |det|; a red square means orientation flipped.', a: 'm11', b: 'm12', c: 'm21', d: 'm22', params: [P('m11', -3, 3, 1), P('m12', -3, 3, 0.5), P('m21', -3, 3, 0), P('m22', -3, 3, 1)] } },
+].map((k) => ({ ...k, spec: { kind: 'math', ...k.spec } }));
+
+function KitTab() {
+  const [pick, setPick] = useState(() => store.get('andedu_math_kit', 'ed'));
+  useEffect(() => { store.set('andedu_math_kit', pick); }, [pick]);
+  const item = KIT.find((k) => k.id === pick) || KIT[0];
+  return (
+    <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+      <div className="btn-row" role="group" aria-label="Widgets">
+        {KIT.map((k) => (
+          <button key={k.id} type="button" className={`btn btn-sm ${k.id === item.id ? 'btn-primary' : 'btn-quiet'}`} aria-pressed={k.id === item.id} onClick={() => setPick(k.id)}>{k.name}</button>
+        ))}
+      </div>
+      <p className="hint">Edit the functions to explore your own examples. Class simulations in math courses use these same widgets.</p>
+      <MathSim key={item.id} spec={item.spec} editable />
+    </div>
+  );
+}
+
+function CoursesTab({ topics, onOpenTopic, activeId }) {
+  const courses = [];
+  for (const t of topics) {
+    const c = courses.find((x) => x.id === t.source.courseId) || (courses.push({ id: t.source.courseId, title: t.source.courseTitle, classes: [] }), courses[courses.length - 1]);
+    c.classes.push(t);
+  }
+  if (!courses.length) {
+    return <div className="panel" style={{ marginTop: 'var(--space-4)' }}><p>No math courses yet. Start one from My courses: its classes open here, next to the math tools.</p></div>;
+  }
+  return (
+    <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+      {courses.map((c) => (
+        <section key={c.id} className="panel stack-sm">
+          <h2>{c.title}</h2>
+          <ol className="class-list">
+            {c.classes.sort((a, b) => a.source.classSeq - b.source.classSeq).map((t) => (
+              <li key={t.id}>
+                <button type="button" className="card-link" aria-current={t.id === activeId ? 'page' : undefined} onClick={() => onOpenTopic(t.id)}>
+                  <span className="class-num-sm">{String(t.source.classSeq).padStart(2, '0')}</span> {t.title.replace(/^Class \d+:\s*/, '')}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Math workspace: math course classes open here (Class tab) next to the tools a math student needs:
+ * graphing, a LaTeX notebook, checked practice and the simulation kit.
+ */
+export default function MathLab({ user, classTopic, mathTopics = [], onOpenTopic, renderClass }) {
+  const [tab, setTab] = useState(() => (classTopic ? 'class' : store.get('andedu_math_tab', 'graph')));
+  useEffect(() => { if (classTopic) setTab('class'); }, [classTopic?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab !== 'class') store.set('andedu_math_tab', tab); }, [tab]);
+  const tabs = [
+    ...(classTopic ? [{ id: 'class', label: `Class ${classTopic.source?.classSeq ?? ''}`.trim(), icon: BookOpen }] : []),
+    { id: 'courses', label: 'Courses', icon: GraduationCap },
+    ...TABS,
+    { id: 'kit', label: 'Sim kit', icon: Shapes },
+  ];
+  const current = tabs.some((t) => t.id === tab) ? tab : 'graph';
   return (
     <div className="page page-wide">
       <div className="page-head">
         <div>
           <h1>Math</h1>
-          <p>Graph functions with live sliders, write notes in LaTeX, and practise with answers that are checked by computation.</p>
+          <p>Your math classes, with graphing, a LaTeX notebook, checked practice and interactive math simulations beside them.</p>
         </div>
       </div>
       <div className="tabs" role="tablist" aria-label="Math tools">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" role="tab" id={`mt-${id}`} aria-selected={tab === id} aria-controls={`mp-${id}`}
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button key={id} type="button" role="tab" id={`mt-${id}`} aria-selected={current === id} aria-controls={`mp-${id}`}
             className="tab" onClick={() => setTab(id)}><Icon size={16} aria-hidden="true" /> {label}</button>
         ))}
       </div>
-      <section role="tabpanel" id={`mp-${tab}`} aria-labelledby={`mt-${tab}`}>
-        {tab === 'graph' && <GraphTab userId={user.id} />}
-        {tab === 'notebook' && <NotebookTab userId={user.id} />}
-        {tab === 'practice' && <PracticeTab />}
+      <section role="tabpanel" id={`mp-${current}`} aria-labelledby={`mt-${current}`}>
+        {current === 'class' && classTopic && renderClass(classTopic)}
+        {current === 'courses' && <CoursesTab topics={mathTopics} onOpenTopic={onOpenTopic} activeId={classTopic?.id} />}
+        {current === 'graph' && <GraphTab userId={user.id} />}
+        {current === 'notebook' && <NotebookTab userId={user.id} />}
+        {current === 'practice' && <PracticeTab />}
+        {current === 'kit' && <KitTab />}
       </section>
     </div>
   );

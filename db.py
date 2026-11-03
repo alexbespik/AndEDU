@@ -123,6 +123,7 @@ MIGRATIONS = [
     ("classes", "opened_at", "REAL"),              # first time the student opened the lesson
     ("courses", "mode", "TEXT NOT NULL DEFAULT 'learn'"),  # learn | test_prep
     ("courses", "exam_date", "TEXT"),
+    ("courses", "workspace", "TEXT"),              # math | code | lab: where its classes open
 ]
 
 
@@ -215,7 +216,7 @@ def get_course(course_id: str) -> Optional[Dict[str, Any]]:
 
 def list_courses(user_id: str) -> List[Dict[str, Any]]:
     rows = conn().execute("""
-        SELECT c.id, c.title, c.subject, c.goal, c.status, c.error, c.job_id, c.mode, c.exam_date, c.created_at, c.updated_at,
+        SELECT c.id, c.title, c.subject, c.goal, c.status, c.error, c.job_id, c.mode, c.exam_date, c.workspace, c.created_at, c.updated_at,
                COUNT(k.id) AS class_count,
                SUM(k.status = 'ready') AS ready_count,
                SUM(k.completed) AS completed_count,

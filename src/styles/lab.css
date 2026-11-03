@@ -658,3 +658,13 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 }
 
 .class-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
+
+.embedded-topic { margin-top: var(--space-4); }
+.class-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.class-list .card-link { display: flex; gap: var(--space-3); align-items: baseline; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); width: 100%; }
+.class-list .card-link:hover { background: var(--accent-tint); text-decoration: none; }
+.class-list .card-link[aria-current="page"] { background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--gold); font-weight: 600; }
+.class-num-sm { font: 700 0.9rem/1 var(--font-mono); color: var(--gold-text); }
+.math-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-2) var(--space-4); }
+.math-sim-canvas { height: min(62vh, 540px); }
+.math-readouts .lead { font-weight: 600; color: var(--ink); }

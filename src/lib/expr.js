@@ -12,6 +12,7 @@ const FUNCS = {
   exp: Math.exp, log: Math.log, log10: Math.log10, min: Math.min, max: Math.max, pow: Math.pow,
   floor: Math.floor, ceil: Math.ceil, round: Math.round, sign: Math.sign, hypot: Math.hypot,
   clamp: (v, lo, hi) => Math.min(Math.max(v, lo), hi),
+  fact: (n) => { n = Math.round(n); if (n < 0 || n > 170) return NaN; let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
 };
 const CONSTS = { pi: Math.PI, tau: 2 * Math.PI, E: Math.E };
 /** Names the compiler treats as functions or constants (everything else is a variable). */

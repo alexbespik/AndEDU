@@ -61,7 +61,7 @@ function LessonTab({ topic }) {
   );
 }
 
-export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse, onHome, prevClass, nextClass, onOpenClass }) {
+export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse, onHome, prevClass, nextClass, onOpenClass, embedded = false }) {
   const [tutorFocus, setTutorFocus] = useState(null);
 
   // Opening a course class tells the server, so adaptation never rewrites a lesson you're reading.
@@ -94,7 +94,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
   const src = topic.source || {};
 
   return (
-    <div className="page">
+    <div className={embedded ? 'stack embedded-topic' : 'page'}>
       <header className="topic-head">
         {src.courseId && (
           <div className="class-bar">
