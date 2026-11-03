@@ -14,6 +14,8 @@ const FUNCS = {
   clamp: (v, lo, hi) => Math.min(Math.max(v, lo), hi),
 };
 const CONSTS = { pi: Math.PI, tau: 2 * Math.PI, E: Math.E };
+/** Names the compiler treats as functions or constants (everything else is a variable). */
+export const RESERVED_NAMES = new Set([...Object.keys(FUNCS), ...Object.keys(CONSTS), 'if']);
 
 function tokenize(src) {
   const tokens = [];

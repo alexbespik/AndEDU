@@ -1,5 +1,6 @@
 import os
 import io
+import math
 import re
 import json
 import asyncio
@@ -2571,6 +2572,83 @@ def topic_opened(topic_id: str):
     klass = db.mark_class_opened(topic_id)
     return {"status": "ok", "classId": klass["id"] if klass else None}
 
+MATH_PRACTICE_PROMPT = """
+Write {count} math practice problems on: {topic}
+Level: {level}. Mix the types below; most should be "numeric".
+Return JSON only:
+{{"title": "short name for this set", "practice": [
+  {{"type": "numeric", "prompt": "problem with all given values, math in $...$", "answer": 4.5, "tolerance": 0.01, "unit": "",
+    "compute": "arithmetic expression that evaluates to the answer, e.g. sqrt(2)*3 + 1/4", "explanation": "worked solution in steps, LaTeX in $...$"}},
+  {{"type": "fill_blank", "prompt": "... ___ ...", "options": ["...","...","...","..."], "answer": "exact option text", "explanation": "..."}},
+  {{"type": "true_false", "prompt": "a statement targeting a misconception", "answer": false, "explanation": "..."}},
+  {{"type": "order_steps", "prompt": "Put the solution steps in order", "steps": ["...","...","..."], "explanation": "..."}}
+]}}
+"compute" may use numbers, + - * / ** ( ), pi, e and sqrt, sin, cos, tan, asin, acos, atan, exp, log, log10, abs, factorial.
+Use radians in trig unless the prompt says degrees. Ask for decimal answers when the exact form is irrational.
+"""
+
+_MATH_NAMES = {"pi": math.pi, "e": math.e, "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan,
+               "asin": math.asin, "acos": math.acos, "atan": math.atan, "exp": math.exp, "log": math.log,
+               "log10": math.log10, "abs": abs, "factorial": lambda n: math.factorial(int(n)) if 0 <= n <= 170 else math.inf}
+
+def safe_arith(expr: str) -> float:
+    """Evaluates a plain arithmetic expression (no names beyond _MATH_NAMES, no attributes): used to re-check answers."""
+    import ast
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool):
+            return float(n.value)  # floats overflow fast instead of building giant integers
+        if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod)):
+            a, b = ev(n.left), ev(n.right)
+            if isinstance(n.op, ast.Pow) and abs(b) > 1000:
+                raise ValueError("exponent too large")
+            return {ast.Add: a + b, ast.Sub: a - b, ast.Mult: a * b}.get(type(n.op)) if not isinstance(n.op, (ast.Div, ast.Pow, ast.Mod)) \
+                else a / b if isinstance(n.op, ast.Div) else a ** b if isinstance(n.op, ast.Pow) else a % b
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            return ev(n.operand) * (-1 if isinstance(n.op, ast.USub) else 1)
+        if isinstance(n, ast.Name) and n.id in _MATH_NAMES and not callable(_MATH_NAMES[n.id]):
+            return _MATH_NAMES[n.id]
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and callable(_MATH_NAMES.get(n.func.id)) and not n.keywords:
+            return _MATH_NAMES[n.func.id](*[ev(a) for a in n.args])
+        raise ValueError("unsupported expression")
+    if len(expr) > 300:
+        raise ValueError("too long")
+    return float(ev(ast.parse(expr.replace("^", "**"), mode="eval")))
+
+class MathPracticeRequest(BaseModel):
+    topic: str
+    level: Optional[str] = "high school"
+    count: Optional[int] = 6
+
+@app.post("/api/math/practice")
+async def math_practice(req: MathPracticeRequest):
+    """Generated math problems. Every numeric answer is recomputed from its "compute" expression; mismatches are dropped."""
+    rate_limit("class")
+    topic = (req.topic or "").strip()[:300]
+    if len(topic) < 3:
+        raise HTTPException(status_code=422, detail="Say what to practise, e.g. 'derivatives of products'.")
+    count = min(max(req.count or 6, 3), 10)
+    data = await gemini_json(MATH_PRACTICE_PROMPT.format(count=count, topic=topic, level=(req.level or "high school")[:60]), role="lesson")
+    raw = data.get("practice") if isinstance(data, dict) else None
+    checked, dropped = [], 0
+    for p in raw if isinstance(raw, list) else []:
+        if isinstance(p, dict) and p.get("type") == "numeric":
+            try:
+                value, stated = safe_arith(str(p.get("compute") or "")), float(p.get("answer"))
+                if not math.isfinite(value) or abs(value - stated) > max(1e-9, 0.005 * abs(value)):
+                    dropped += 1
+                    continue
+                p["answer"] = round(value, 6)
+            except (ValueError, TypeError, ZeroDivisionError, OverflowError, SyntaxError):
+                dropped += 1
+                continue
+        checked.append(p)
+    items = normalize_practice(checked)
+    if not items:
+        raise HTTPException(status_code=502, detail="No problems passed the answer check. Try again or rephrase the topic.")
+    return {"title": (data.get("title") if isinstance(data, dict) else None) or topic, "items": items, "dropped": dropped}
+
 @app.post("/api/simulations/validate")
 def validate_simulation(spec: Dict[str, Any]):
     """Lets agents check a SimSpec before saving it; returns the cleaned spec and every error found."""
@@ -2905,6 +2983,14 @@ class CourseRequest(BaseModel):
     filenames: Optional[List[str]] = []
     num_questions: Optional[int] = 8
     class_count: Optional[int] = None
+    mode: Optional[str] = "learn"          # learn | test_prep
+    exam_date: Optional[str] = None        # YYYY-MM-DD, test prep only
+
+class ExtendRequest(BaseModel):
+    goal: Optional[str] = ""
+    materials_text: Optional[str] = ""
+    filenames: Optional[List[str]] = []
+    class_count: Optional[int] = None
 
 class DiagnosticAnswers(BaseModel):
     answers: Dict[str, int]
@@ -3030,7 +3116,7 @@ Return JSON only:
 Rules:
 - {count} classes, ordered so every class builds only on earlier ones (prerequisites first).
 - Every concept id appears in at least one class. Use only the ids listed above.
-- 2-4 concrete, checkable objectives per class.
+- 2-4 concrete, checkable objectives per class.{mode_rules}
 
 STUDENT GOAL: {goal}
 
@@ -3074,6 +3160,53 @@ If the course involves programming (Python, algorithms, data), add 1-2 items of 
     Python only, standard library only, tests are plain assert lines covering normal and edge cases.
 Every variable, formula, exponent and unit with a power (e.g. $v_0$, $9.80\\,\\text{{m/s}}^2$) is LaTeX inside $...$, including inside
 options, steps, hints and answers; never write bare x^2 or v_0.
+"""
+
+TEST_PREP_SYLLABUS = """
+- This is TEST PREPARATION{exam}. Order classes by how much each topic is likely to count on the exam and by
+  the student's gaps; each class is a focused review, not a first introduction.
+- The LAST class is a full mock exam covering the whole course: title it "Mock exam: <subject>".
+"""
+
+TEST_PREP_CLASS = (
+    "TEST PREP: the student is preparing for an exam{exam}. Keep the lesson tight (400-700 words): an exam-focused "
+    "summary, the formulas to memorise, one worked exam-style problem, and the traps examiners set. Write 8 exam-style "
+    "quiz questions instead of 5, and practice items at exam difficulty.{mock}"
+)
+
+def mode_rules(course: Dict[str, Any]) -> str:
+    if course.get("mode") != "test_prep":
+        return ""
+    exam = f" (exam on {course['exam_date']})" if course.get("exam_date") else ""
+    return "\n" + TEST_PREP_SYLLABUS.format(exam=exam).strip("\n")
+
+def mode_adjustment(course: Dict[str, Any], klass: Dict[str, Any]) -> str:
+    if course.get("mode") != "test_prep":
+        return ""
+    exam = f" on {course['exam_date']}" if course.get("exam_date") else ""
+    mock = (" THIS CLASS IS THE MOCK EXAM: write 10 mixed questions across every earlier class, at full exam "
+            "difficulty, and make the lesson a short exam-strategy briefing.") if klass["title"].lower().startswith("mock exam") else ""
+    return "\n" + TEST_PREP_CLASS.format(exam=exam, mock=mock)
+
+EXTEND_PROMPT = """
+You are continuing an existing course with new material the student just added.
+Course: "{title}" ({mode})
+Concepts already in the course: {concepts}
+Classes the student already has:
+{classes}
+
+Plan {count} NEW classes that continue the course: cover what the new materials add, build on the earlier
+classes, and do not repeat them.{mode_rules}
+
+Return JSON only:
+{{"concepts": [{{"id": "kebab-id", "name": "Concept name", "summary": "one line"}}],
+  "classes": [{{"title": "Class title", "concepts": ["<concept id>", ...], "objectives": ["By the end the student can ...", "..."]}}]}}
+"concepts" lists only NEW concepts; classes may use those and the existing ids above.
+
+WHAT THE STUDENT WANTS NOW: {goal}
+
+NEW MATERIALS:
+{materials}
 """
 
 def grade_diagnostic(questions: List[Dict[str, Any]], answers: Dict[str, int], concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -3123,7 +3256,8 @@ async def plan_course(course_id: str, job, n_questions: int, class_count: Option
     _job_update(job, step="Planning the sequence of classes", progress=0.55)
     count = class_count or min(max(len(concepts) + 1, 4), 8)
     plan = await gemini_json(role="planner", prompt=SYLLABUS_PROMPT.format(
-        concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts), count=count, goal=goal, materials=materials[:40000]))
+        concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts), count=count, goal=goal,
+        materials=materials[:40000], mode_rules=mode_rules(course)))
     outline = []
     for item in (plan.get("classes") or [])[:12]:
         if isinstance(item, dict) and item.get("title"):
@@ -3170,7 +3304,8 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
         previous="\n".join(previous) or "- this is the first class",
         difficulty=difficulty, subject=course.get("subject") or "Science",
         materials=(course.get("materials_text") or "")[:30000],
-        adjustment=f"\nIMPORTANT ADJUSTMENT FOR THIS STUDENT: {klass['instruction']}" if klass.get("instruction") else "",
+        adjustment=mode_adjustment(course, klass)
+                   + (f"\nIMPORTANT ADJUSTMENT FOR THIS STUDENT: {klass['instruction']}" if klass.get("instruction") else ""),
     )
     data = await gemini_json(prompt, role="lesson")
     if not isinstance(data, dict):
@@ -3402,7 +3537,10 @@ def create_course(req: CourseRequest):
         raise HTTPException(status_code=422, detail="Add study materials or describe what you want to learn (at least a sentence).")
     n = min(max(req.num_questions or 8, 4), 15)
     count = min(max(req.class_count, 2), 12) if req.class_count else None
-    course = db.create_course(req.userId, goal[:80] or (req.filenames or ["New course"])[0], goal, materials[:200000], req.filenames or [])
+    mode = "test_prep" if req.mode == "test_prep" else "learn"
+    exam_date = (req.exam_date or "")[:10] if mode == "test_prep" and re.fullmatch(r"\d{4}-\d{2}-\d{2}", req.exam_date or "") else None
+    course = db.create_course(req.userId, goal[:80] or (req.filenames or ["New course"])[0], goal, materials[:200000],
+                              req.filenames or [], mode, exam_date)
     db.update_course(course["id"], plan_questions=n, plan_classes=count)
     job = start_plan_job(course["id"], n, count)
     return {"course": public_course(db.get_course(course["id"])), "job": job}
@@ -3419,6 +3557,66 @@ def start_plan_job(course_id: str, n_questions: int, class_count: Optional[int])
     job = start_job("plan", "Diagnostic & syllabus", work)
     db.update_course(course_id, job_id=job["id"])
     return job
+
+@app.post("/api/courses/{course_id}/extend")
+def extend_course(course_id: str, req: ExtendRequest):
+    """Continue a course: new materials become new classes after the existing ones, then they are written."""
+    rate_limit("course")
+    course = require_course(course_id)
+    if course["status"] in ("planning", "diagnostic_ready") or not course.get("concepts"):
+        raise HTTPException(status_code=409, detail="Finish setting up this course (its diagnostic) before adding to it.")
+    running = ACTIVE_COURSE_JOBS.get(course_id)
+    if running and JOBS.get(running, {}).get("status") in ("queued", "running"):
+        raise HTTPException(status_code=409, detail="This course is still writing classes. Add more when it finishes.")
+    materials = (req.materials_text or "").strip()
+    goal = (req.goal or "").strip()
+    if len(materials) + len(goal) < 20:
+        raise HTTPException(status_code=422, detail="Add materials or say what to cover next (at least a sentence).")
+    count = min(max(req.class_count, 1), 8) if req.class_count else None
+
+    async def work(job):
+        try:
+            _job_update(job, step="Planning the next classes from your new materials", progress=0.1)
+            classes = db.list_classes(course_id)
+            concepts = course.get("concepts") or []
+            plan = await gemini_json(role="planner", prompt=EXTEND_PROMPT.format(
+                title=course["title"], mode="test preparation" if course.get("mode") == "test_prep" else "learning",
+                concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts) or "none",
+                classes="\n".join(f"{k['seq']}. {k['title']}" for k in classes) or "- none",
+                count=count or "2-5", goal=goal or "Continue the course with these materials",
+                materials=materials[:40000] or "(no files: plan from the request)",
+                mode_rules=mode_rules(course)))
+            known = {c["id"] for c in concepts}
+            new_concepts = []
+            for i, c in enumerate(plan.get("concepts") or []):
+                if isinstance(c, dict):
+                    cid = slugify(c.get("id") or c.get("name", ""), f"added-{i}")
+                    if cid not in known:
+                        known.add(cid)
+                        new_concepts.append({"id": cid, "name": c.get("name") or cid, "summary": c.get("summary", "")})
+            outline = [{"title": str(item["title"])[:120],
+                        "concepts": [c for c in (item.get("concepts") or []) if c in known],
+                        "objectives": [str(o) for o in (item.get("objectives") or [])][:5]}
+                       for item in (plan.get("classes") or [])[:8] if isinstance(item, dict) and item.get("title")]
+            if not outline:
+                raise RuntimeError("The plan for the new classes came back empty. Try adding more material.")
+            # new material goes first: class prompts read the start of the materials
+            added = f"--- Added {time.strftime('%Y-%m-%d')}: {', '.join(req.filenames or []) or 'notes'} ---\n{materials}\n\n" if materials else ""
+            db.update_course(course_id, concepts=concepts + new_concepts, status="generating", error=None,
+                             materials_text=(added + (course.get("materials_text") or ""))[:200000],
+                             filenames=(course.get("filenames") or []) + (req.filenames or []))
+            first = db.append_classes(course_id, outline)
+            course_event(course_id)
+            queue_course_generation(course_id)
+            return {"courseId": course_id, "added": len(outline), "firstSeq": first}
+        except Exception as e:
+            db.update_course(course_id, error=friendly_ai_error(e))
+            course_event(course_id)
+            raise
+
+    job = start_job("plan", "Continue course", work)
+    db.update_course(course_id, job_id=job["id"])
+    return {"course": public_course(db.get_course(course_id)), "job": job}
 
 @app.get("/api/courses/{course_id}")
 def get_course(course_id: str):

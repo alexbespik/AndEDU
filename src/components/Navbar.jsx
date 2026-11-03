@@ -1,12 +1,12 @@
 import React from 'react';
-import { GraduationCap, BookOpen, Code2, Sigma, MessageSquare, LogOut, Menu } from 'lucide-react';
+import { GraduationCap, FlaskConical, Code2, Sigma, MessageSquare, LogOut, Menu } from 'lucide-react';
 import ThemeSwitch from './ThemeSwitch';
 
 const MODES = [
   { id: 'home', label: 'My courses', icon: GraduationCap },
-  { id: 'physics', label: 'Studio', icon: BookOpen },
-  { id: 'code', label: 'Code', icon: Code2 },
-  { id: 'math', label: 'Math', icon: Sigma },
+  { id: 'physics', label: 'Lab', icon: FlaskConical, title: 'Physics and chemistry lessons and simulations' },
+  { id: 'code', label: 'IDE', icon: Code2, title: 'Write and run code' },
+  { id: 'math', label: 'Math', icon: Sigma, title: 'Graphing, LaTeX notes and practice' },
 ];
 
 /** W&M masthead: brand, mode switch, connection, AGY toggle and profile. Every row wraps; nothing overlaps. */
@@ -24,8 +24,8 @@ export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut
             <Menu size={16} aria-hidden="true" /> Topics
           </button>
         )}
-        {MODES.map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" className="mode" aria-pressed={studioMode === id} onClick={() => onSwitchStudioMode(id)}>
+        {MODES.map(({ id, label, icon: Icon, title }) => (
+          <button key={id} type="button" className="mode" aria-pressed={studioMode === id} title={title} onClick={() => onSwitchStudioMode(id)}>
             <Icon size={16} aria-hidden="true" /> {label}
           </button>
         ))}

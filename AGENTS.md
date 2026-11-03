@@ -5,6 +5,11 @@ generated classes (lesson, simulation, quiz, practice puzzles), each shaped by h
 Autonomous agents (agy, Claude Code, background loops) can add lessons and simulations without touching
 frontend code.
 
+## Workspaces
+My courses (one place to add materials: learn, test prep, or continue a course) · **Lab** (physics and
+chemistry lessons and simulations; internal mode id `physics`) · **IDE** (code, `EduStudioIDE.jsx`) ·
+**Math** (`MathLab.jsx`: graphing with sliders, LaTeX notebook, checked practice).
+
 ## Architecture
 - **Frontend:** React 19 + Vite (`src/`). Styling lives in `src/styles/lab.css` (light, dark and system
   themes from one token set); `src/theme.js` maps inline styles to the same CSS variables.
@@ -83,6 +88,9 @@ python3 scripts/agent_add_topic.py --template             # starter topic
 | `POST /api/courses`, `GET /api/courses/{id}` | create a course (diagnostic + syllabus job) / read it |
 | `POST /api/courses/{id}/diagnostic` · `skip-diagnostic` · `resume` | start or resume class generation |
 | `POST /api/courses/{id}/classes/{seq}/regenerate {"instruction": "..."}` | rewrite one class with guidance |
+| `POST /api/courses` with `"mode": "test_prep"`, `"exam_date"` | exam review classes, 8-question exam-style quizzes, final mock exam |
+| `POST /api/courses/{id}/extend {"materials_text", "goal", "class_count"}` | continue a course: new materials become the next classes |
+| `POST /api/math/practice {"topic", "level", "count"}` | math problems; numeric answers recomputed from a `compute` expression, mismatches dropped |
 | `DELETE /api/courses/{id}` | delete a course and its classes |
 | `POST /api/quiz/submit` | record an answer (updates the class score) |
 | `GET /api/agy/events?since=<cursor>` | UI events; first call with no `since` returns only the cursor |

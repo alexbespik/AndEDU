@@ -11,8 +11,9 @@ import lagrangianTopic from '../content/topics/lagrangian-mechanics.json';
 import billiardTopic from '../content/topics/billiard-ball-collisions.json';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
 
-// The IDE is large and only used in Code/Math mode, so it loads on demand
+// The IDE and the math workspace load on demand
 const EduStudioIDE = lazy(() => import('./components/EduStudioIDE'));
+const MathLab = lazy(() => import('./components/MathLab'));
 
 const FALLBACK_TOPICS = [rollingTopic, billiardTopic, lagrangianTopic];
 
@@ -130,7 +131,7 @@ export default function App() {
 
   const activeTopic = topics.find((t) => t.id === selectedTopicId) || topics[0];
   const showSidebar = mode === 'physics';
-  const ideMode = mode === 'code' || mode === 'math';
+  const ideMode = mode === 'code';
   const navMode = mode === 'course' ? 'home' : mode;
 
   return (
@@ -164,7 +165,12 @@ export default function App() {
           )}
           {ideMode && (
             <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
-              <EduStudioIDE initialMode={mode} onSwitchToPhysics={() => setMode('physics')} />
+              <EduStudioIDE initialMode="code" onSwitchToPhysics={() => setMode('physics')} />
+            </Suspense>
+          )}
+          {mode === 'math' && (
+            <Suspense fallback={<div className="page"><p className="hint">Loading Math…</p></div>}>
+              <MathLab user={user} />
             </Suspense>
           )}
         </main>
