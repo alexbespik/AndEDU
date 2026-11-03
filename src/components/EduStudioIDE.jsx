@@ -21,6 +21,7 @@ const STORAGE_KEY = 'andedu_studio_v5';
 // Shared &.edu LAB (William & Mary) palette
 import { theme } from '../theme';
 import { authFetch } from '../lib/api';
+import { runPython } from '../lib/pyodide';
 
 // ---------------------------------------------------------------------------
 // LINUX TUX PENGUIN SHADOW WATERMARK (Centered Linux Emblem)
@@ -834,7 +835,6 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const [problemStates, setProblemStates] = useState({});
 
   // Pyodide WebAssembly Kernel State
-  const pyodideRef = useRef(null);
   const [kernelStatus, setKernelStatus] = useState("loading");
   const [executingCode, setExecutingCode] = useState(false);
 
@@ -920,60 +920,10 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   // ---------------------------------------------------------------------------
   // 1. INITIALIZE CLIENT-SIDE PYODIDE WEBASSEMBLY KERNEL
   // ---------------------------------------------------------------------------
+  // Python runs in a Web Worker (src/lib/pyodide.js) that loads on the first run, so the IDE no longer
+  // downloads a second copy of Pyodide on the main thread when it opens.
   useEffect(() => {
-    let isMounted = true;
-
-    const initPyodide = async () => {
-      try {
-        if (window.loadPyodide) {
-          const py = await window.loadPyodide({
-            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
-          });
-          if (isMounted) {
-            pyodideRef.current = py;
-            setKernelStatus("ready");
-            setTerminalOutput(prev => [
-              ...prev,
-              "[PYODIDE KERNEL] Client-side WebAssembly Python 3.12 Kernel ready!",
-              "[RUNNER] In-browser execution enabled (0ms latency, zero server load)."
-            ]);
-          }
-          return;
-        }
-
-        const script = document.createElement("script");
-        script.src = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js";
-        script.onload = async () => {
-          try {
-            const py = await window.loadPyodide({
-              indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
-            });
-            if (isMounted) {
-              pyodideRef.current = py;
-              setKernelStatus("ready");
-              setTerminalOutput(prev => [
-                ...prev,
-                "[PYODIDE KERNEL] Client-side WebAssembly Python 3.12 Kernel ready!",
-                "[RUNNER] In-browser execution enabled (0ms latency, zero server load)."
-              ]);
-            }
-          } catch (e) {
-            console.warn("Pyodide init error", e);
-            if (isMounted) setKernelStatus("fallback");
-          }
-        };
-        script.onerror = () => {
-          if (isMounted) setKernelStatus("fallback");
-        };
-        document.body.appendChild(script);
-      } catch (err) {
-        console.warn("Failed to load Pyodide", err);
-        if (isMounted) setKernelStatus("fallback");
-      }
-    };
-
-    initPyodide();
-    return () => { isMounted = false; };
+    setKernelStatus("ready");
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -1919,110 +1869,36 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const handleRunInPyodideKernel = async (testMode = false) => {
     const code = activeState.writtenCode || currentProblem?.starter_code || "";
     const testCode = testMode ? (currentProblem?.test_code || "") : "";
+    const marker = "__ALL_TESTS_PASSED__";
 
     setExecutingCode(true);
+    setTerminalOutput(prev => [...prev, "[RUN] Python in your browser (separate worker, fresh interpreter)..."]);
+
+    // Same runner as course exercises: never on the server, stopped after a few seconds if stuck,
+    // and a crash can't leave the interpreter in a broken state for the next run.
+    const script = testCode ? `${code}\n\n${testCode}\nprint("${marker}")` : code;
+    const res = await runPython(script);
+    const output = (res.output || "").replace(`${marker}\n`, "").trim();
+    const testsPassed = Boolean(testCode) && res.ok && (res.output || "").includes(marker);
+
+    if (testsPassed && testMode) {
+      if (!completedProblems[activeProblemIndex]) {
+        setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
+        setTotalXp(prev => prev + 100);
+      }
+      updateActiveState({ evaluation: 'correct' });
+    }
+
+    const errorTail = res.error ? res.error.split("\n").filter(Boolean).slice(-3).join("\n") : "";
     setTerminalOutput(prev => [
       ...prev,
-      `[KERNEL EXECUTE] Running in Client-Side WebAssembly Python 3.12 Kernel...`
-    ]);
-
-    if (pyodideRef.current && kernelStatus === "ready") {
-      try {
-        pyodideRef.current.runPython(`
-import sys
-import io
-_sys_out = sys.stdout
-_sys_err = sys.stderr
-sys.stdout = io.StringIO()
-sys.stderr = io.StringIO()
-`);
-        pyodideRef.current.runPython(code);
-
-        let testsPassed = true;
-        if (testCode) {
-          try {
-            pyodideRef.current.runPython(testCode);
-            pyodideRef.current.runPython('print("\\n[TEST_REPORT] All assertions passed in WebAssembly kernel!")');
-          } catch (assertErr) {
-            testsPassed = false;
-            pyodideRef.current.runPython(`print("\\n[ASSERTION_ERROR] ${assertErr.message}")`);
-          }
-        }
-
-        const stdout = pyodideRef.current.runPython("sys.stdout.getvalue()");
-        const stderr = pyodideRef.current.runPython("sys.stderr.getvalue()");
-        pyodideRef.current.runPython(`
-sys.stdout = _sys_out
-sys.stderr = _sys_err
-`);
-
-        if (testsPassed && testMode) {
-          const alreadySolved = completedProblems[activeProblemIndex];
-          if (!alreadySolved) {
-            setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
-            setTotalXp(prev => prev + 100);
-          }
-          updateActiveState({ evaluation: 'correct' });
-        }
-
-        setTerminalOutput(prev => [
-          ...prev,
-          stdout ? `[STDOUT]\n${stdout.trim()}` : "[STDOUT] (No output printed)",
-          stderr ? `[STDERR]\n${stderr.trim()}` : "",
-          testMode 
-            ? (testsPassed ? "[TEST REPORT] Verified in WebAssembly Kernel! (+100 XP)" : "[TEST REPORT] Test assertion failed.") 
-            : "[STATUS] Execution finished with exit code 0."
-        ]);
-      } catch (runErr) {
-        setTerminalOutput(prev => [
-          ...prev,
-          `[KERNEL RUNTIME ERROR]\n${runErr.message}`
-        ]);
-      } finally {
-        setExecutingCode(false);
-      }
-    } else {
-      try {
-        let res;
-        const execBody = JSON.stringify({ code, test_code: testCode });
-        try {
-          res = await authFetch("/api/execute-code", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: execBody
-          });
-        } catch (e1) {
-          res = await authFetch("/api/execute-code", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: execBody
-          });
-        }
-        const data = await res.json();
-
-        if (data.tests_passed && testMode) {
-          const alreadySolved = completedProblems[activeProblemIndex];
-          if (!alreadySolved) {
-            setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
-            setTotalXp(prev => prev + 100);
-          }
-          updateActiveState({ evaluation: 'correct' });
-        }
-
-        setTerminalOutput(prev => [
-          ...prev,
-          data.stdout ? `[STDOUT]\n${data.stdout.trim()}` : "[STDOUT] (No output printed)",
-          data.stderr ? `[STDERR]\n${data.stderr.trim()}` : "",
-          testMode 
-            ? (data.tests_passed ? "[TEST REPORT] Verified! All assertions passed! (+100 XP)" : "[TEST REPORT] Test assertion failed.") 
-            : "[STATUS] Execution finished."
-        ]);
-      } catch (err) {
-        setTerminalOutput(prev => [...prev, `[ERROR] Execution failed: ${err.message}`]);
-      } finally {
-        setExecutingCode(false);
-      }
-    }
+      output ? `[STDOUT]\n${output}` : "[STDOUT] (No output printed)",
+      res.timedOut ? `[STOPPED] ${res.error}` : errorTail ? `[ERROR]\n${errorTail}` : "",
+      testMode
+        ? (testsPassed ? "[TEST REPORT] All assertions passed (+100 XP)" : "[TEST REPORT] A test failed or the code raised an error.")
+        : (res.ok ? "[STATUS] Finished." : "[STATUS] Finished with an error.")
+    ].filter(Boolean));
+    setExecutingCode(false);
   };
 
   // ---------------------------------------------------------------------------
