@@ -69,4 +69,14 @@ Files: `src/components/EduStudioIDE.jsx` and one line in `src/App.jsx` (describe
 5. Done when a code-course class opens in the IDE with its exercises, tests run in the browser, and
    `npx vite build` passes.
 
+## Part C: author math simulations through the MCP tools (after A and B)
+Register `mcp_server.py` as an MCP server (config in AGENTS.md, "MCP tools") and use the tools, not file edits.
+1. `list_topics`, then for every topic with `workspace: "math"` whose simulation is missing or not `math/...`:
+   read it with `get_topic`, design the widget that shows its key idea (`simulation_guide` lists 9 widgets),
+   `validate_simulation`, then `attach_simulation`. For epsilon-delta proofs always include the `delta_rule`
+   the lesson's proof uses, and set `view` so the interesting region fills the plot.
+2. Add 2 `numeric` practice items per math class with `add_practice_items` that use the widget's numbers
+   (e.g. "for eps = 0.1, what is the largest delta?"), with worked explanations.
+3. Do not call `generate_simulation` or `regenerate_class` (they spend Gemini quota); write specs yourself.
+
 When finished, append a short "What I changed" section to this file and leave the changes uncommitted.

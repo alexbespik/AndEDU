@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// &.edu LAB client API: JSON helpers, ONE shared event poller, profile storage.
+// &.edu client API: JSON helpers, ONE shared event poller, profile storage.
 // ---------------------------------------------------------------------------
 import { useEffect, useRef } from 'react';
 

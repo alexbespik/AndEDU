@@ -1,6 +1,6 @@
-# AGENTS.md — working on &.edu LAB
+# AGENTS.md — working on &.edu
 
-&.edu LAB turns a student's materials into an adaptive course: a diagnostic quiz, then a sequence of
+&.edu turns a student's materials into an adaptive course: a diagnostic quiz, then a sequence of
 generated classes (lesson, simulation, quiz, practice puzzles), each shaped by how the student did so far.
 Autonomous agents (agy, Claude Code, background loops) can add lessons and simulations without touching
 frontend code.
@@ -78,6 +78,25 @@ Data only, never code: the browser evaluates expressions with its own small inte
 - All 24 unit tests pass cleanly.
 - Done when: a pendulum (rod), a spring with damping, a two-body orbit and an animated standing wave render
   and respond to sliders in both themes, and `python -m unittest discover -s tests` still passes.
+
+## MCP tools (preferred for agents)
+`mcp_server.py` is a dependency-free MCP server (stdio) over the running backend, so every change is validated
+and shows up live in the UI. 16 tools: `simulation_guide`, `list_topics`, `get_topic`, `save_topic`,
+`validate_simulation`, `attach_simulation`, `generate_simulation` (kind auto | math | physics),
+`add_quiz_questions`, `add_practice_items`, `list_profiles`, `list_courses`, `get_course`, `regenerate_class`,
+`show_on_graph`, `preview_math_simulation`, `open_topic`.
+Register it with your client (the backend must be running on 127.0.0.1:8090):
+```json
+{"mcpServers": {"andedu": {"command": "python3", "args": ["mcp_server.py"]}}}
+```
+Claude Code: `claude mcp add andedu -- python3 mcp_server.py`.
+Accounts mode: set `ANDEDU_TOKEN` to a session token; another host: `ANDEDU_API`.
+
+### Writing precise math simulations
+Call `simulation_guide`, write a `kind: "math"` spec, `validate_simulation`, then `attach_simulation`.
+For proofs give the exact rule the lesson uses, e.g. epsilon-delta for f(x) = 2x - 1 at 3:
+`{"kind":"math","widget":"epsilon_delta","f":"2*x - 1","a":3,"L":5,"delta_rule":"eps/2"}`; for x^2 at 2:
+`"delta_rule":"min(1, eps/5)"`. The player checks the rule for every eps and plots the largest working delta.
 
 ## Commands & API
 ```bash

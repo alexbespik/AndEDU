@@ -114,9 +114,13 @@ function niceStep(span) {
   return [1, 2, 5, 10].map((k) => k * p).find((s) => s >= raw) || p * 10;
 }
 
-function GraphTab({ userId }) {
+function GraphTab({ userId, incoming }) {
   const key = `andedu_math_graph_${userId}`;
   const [rows, setRows] = useState(() => store.get(key, { list: ['sin(x)', 'a*x^2 + b'], params: {} }));
+  useEffect(() => {  // functions sent by the assistant replace the current list
+    if (!incoming?.functions?.length) return;
+    setRows((r) => ({ list: incoming.functions, params: { ...r.params, ...Object.fromEntries(Object.entries(incoming.params || {}).map(([k, v]) => [k, { value: v, min: Math.min(-5, v * 2), max: Math.max(5, v * 2) }])) } }));
+  }, [incoming]);
   const [view, setView] = useState({ cx: 0, cy: 0, scale: 50 }); // px per unit
   const [hover, setHover] = useState(null);
   const [size, setSize] = useState({ W: 800, H: 600 });
@@ -500,7 +504,7 @@ function PracticeTab() {
 // Ready-made widgets for the Sim kit tab (same format the class generator writes: SimSpec kind "math")
 const P = (name, min, max, value, label = name, step) => ({ name, label, min, max, value, step: step ?? (max - min) / 200, unit: '' });
 const KIT = [
-  { id: 'ed', name: 'ε-δ limit', spec: { widget: 'epsilon_delta', title: 'ε-δ: lim x→2 of x² = 4', description: 'Pick ε, then find a δ so every point in the green band stays inside the gold band. Shrink ε and see δ shrink with it.', f: 'x^2', a: '2', L: '4', params: [P('eps', 0.02, 2, 0.8, 'ε'), P('delta', 0.005, 1.5, 0.5, 'δ')] } },
+  { id: 'ed', name: 'ε-δ limit', spec: { widget: 'epsilon_delta', title: 'ε-δ: lim x→2 of x² = 4', description: 'The proof picks δ = min(1, ε/5): press Animate to shrink ε and watch δ follow, always inside the largest δ that works (inset). Untick the link to hunt for δ by hand.', f: 'x^2', a: '2', L: '4', delta_rule: 'min(1, eps/5)', params: [P('eps', 0.02, 2, 0.8, 'ε'), P('delta', 0.005, 1.5, 0.5, 'δ')] } },
   { id: 'en', name: 'ε-N sequence', spec: { widget: 'epsilon_n', title: 'ε-N: aₙ = 1 + (−1)ⁿ/n → 1', description: 'For each ε there is an N after which every term stays in the band. Shrink ε and watch N grow.', term: '1 + (-1)^n / n', L: '1', nmax: 60, params: [P('eps', 0.01, 0.6, 0.25, 'ε')] } },
   { id: 'st', name: 'Secant → tangent', spec: { widget: 'secant_tangent', title: 'From secant to tangent', description: 'Drag h toward 0: the secant slope approaches the derivative.', f: 'sin(x) + x/2', a: '1', params: [P('h', -3, 3, 2, 'h')] } },
   { id: 'rs', name: 'Riemann sums', spec: { widget: 'riemann', title: 'Riemann sums of x² on [0, 2]', description: 'Raise n and switch rules: every sum approaches the exact area 8/3.', f: 'x^2', a: '0', b: '2', method: 'left', params: [P('n', 1, 60, 4, 'n', 1)] } },
@@ -512,14 +516,16 @@ const KIT = [
   { id: 'lt', name: 'Linear transform', spec: { widget: 'transform2d', title: 'A 2×2 matrix acting on the plane', description: 'The unit square maps to a parallelogram with area |det|; a red square means orientation flipped.', a: 'm11', b: 'm12', c: 'm21', d: 'm22', params: [P('m11', -3, 3, 1), P('m12', -3, 3, 0.5), P('m21', -3, 3, 0), P('m22', -3, 3, 1)] } },
 ].map((k) => ({ ...k, spec: { kind: 'math', ...k.spec } }));
 
-function KitTab() {
-  const [pick, setPick] = useState(() => store.get('andedu_math_kit', 'ed'));
-  useEffect(() => { store.set('andedu_math_kit', pick); }, [pick]);
-  const item = KIT.find((k) => k.id === pick) || KIT[0];
+function KitTab({ preview }) {
+  const [pick, setPick] = useState(() => (preview ? 'preview' : store.get('andedu_math_kit', 'ed')));
+  useEffect(() => { if (pick !== 'preview') store.set('andedu_math_kit', pick); }, [pick]);
+  useEffect(() => { if (preview) setPick('preview'); }, [preview]);
+  const kit = preview ? [{ id: 'preview', name: 'From the assistant', spec: preview }, ...KIT] : KIT;
+  const item = kit.find((k) => k.id === pick) || KIT[0];
   return (
     <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
       <div className="btn-row" role="group" aria-label="Widgets">
-        {KIT.map((k) => (
+        {kit.map((k) => (
           <button key={k.id} type="button" className={`btn btn-sm ${k.id === item.id ? 'btn-primary' : 'btn-quiet'}`} aria-pressed={k.id === item.id} onClick={() => setPick(k.id)}>{k.name}</button>
         ))}
       </div>
@@ -562,10 +568,11 @@ function CoursesTab({ topics, onOpenTopic, activeId }) {
  * Math workspace: math course classes open here (Class tab) next to the tools a math student needs:
  * graphing, a LaTeX notebook, checked practice and the simulation kit.
  */
-export default function MathLab({ user, classTopic, mathTopics = [], onOpenTopic, renderClass }) {
+export default function MathLab({ user, classTopic, mathTopics = [], onOpenTopic, renderClass, push }) {
   const [tab, setTab] = useState(() => (classTopic ? 'class' : store.get('andedu_math_tab', 'graph')));
   useEffect(() => { if (classTopic) setTab('class'); }, [classTopic?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab !== 'class') store.set('andedu_math_tab', tab); }, [tab]);
+  useEffect(() => { if (push?.graph) setTab('graph'); else if (push?.spec) setTab('kit'); }, [push?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   const tabs = [
     ...(classTopic ? [{ id: 'class', label: `Class ${classTopic.source?.classSeq ?? ''}`.trim(), icon: BookOpen }] : []),
     { id: 'courses', label: 'Courses', icon: GraduationCap },
@@ -590,10 +597,10 @@ export default function MathLab({ user, classTopic, mathTopics = [], onOpenTopic
       <section role="tabpanel" id={`mp-${current}`} aria-labelledby={`mt-${current}`}>
         {current === 'class' && classTopic && renderClass(classTopic)}
         {current === 'courses' && <CoursesTab topics={mathTopics} onOpenTopic={onOpenTopic} activeId={classTopic?.id} />}
-        {current === 'graph' && <GraphTab userId={user.id} />}
+        {current === 'graph' && <GraphTab userId={user.id} incoming={push?.graph} />}
         {current === 'notebook' && <NotebookTab userId={user.id} />}
         {current === 'practice' && <PracticeTab />}
-        {current === 'kit' && <KitTab />}
+        {current === 'kit' && <KitTab preview={push?.spec} />}
       </section>
     </div>
   );

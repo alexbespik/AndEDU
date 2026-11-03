@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// &.edu LAB theme bridge for inline styles (IDE, simulation chrome).
+// &.edu theme bridge for inline styles (IDE, simulation chrome).
 // Every value is a CSS custom property defined in src/styles/lab.css, so inline
 // styles follow light/dark mode automatically. Canvas code can't read var(),
 // so it uses canvasPalette(), which resolves the same tokens once per frame.
