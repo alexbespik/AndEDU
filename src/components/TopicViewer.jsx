@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
+import SpecSim from '../simulations/SpecSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
 import MermaidViewer from './MermaidViewer';
@@ -16,7 +17,9 @@ const BUILTIN = {
 };
 
 function SimulationTab({ topic, liveSimConfig }) {
-  // Only the built-in labs can be played; the tab is hidden for every other topic.
+  if (topic.simulation) {
+    return <SpecSim spec={topic.simulation} />;
+  }
   return BUILTIN[topic.simulationType] ? BUILTIN[topic.simulationType](liveSimConfig) : null;
 }
 
@@ -69,7 +72,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     return <div className="page"><p className="hint">Pick a topic from the list to start.</p></div>;
   }
 
-  const hasSim = Boolean(BUILTIN[topic.simulationType]);
+  const hasSim = Boolean(topic.simulation || BUILTIN[topic.simulationType]);
   const tabs = [
     { id: 'theory', label: 'Lesson', icon: BookOpen },
     ...(hasSim ? [{ id: 'simulation', label: 'Simulation', icon: Compass }] : []),
