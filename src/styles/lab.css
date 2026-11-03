@@ -11,50 +11,50 @@
 :root {
   color-scheme: light;
   /* frame */
-  --brand: #0b0f0d;
-  --brand-strong: #000000;
+  --brand: #115740;
+  --brand-strong: #0c4231;
   --brand-ink: #ffffff;
-  --brand-ink-soft: #c4ccc7;
-  --brand-hover: rgba(255, 255, 255, 0.08);
-  --brand-line: rgba(201, 162, 74, 0.45);
-  --side-bg: #0b3b2c;
+  --brand-ink-soft: #d3e3da;
+  --brand-hover: rgba(255, 255, 255, 0.1);
+  --brand-line: rgba(214, 186, 125, 0.65);
+  --side-bg: #17644a;
   --side-ink: #ffffff;
-  --side-muted: #b3c9bd;
-  --side-hover: rgba(255, 255, 255, 0.08);
-  --side-active: #155540;
-  --side-field: rgba(243, 241, 234, 0.08);
-  --side-field-line: rgba(243, 241, 234, 0.24);
+  --side-muted: #cfe2d7;
+  --side-hover: rgba(255, 255, 255, 0.09);
+  --side-active: #21775a;
+  --side-field: rgba(255, 255, 255, 0.1);
+  --side-field-line: rgba(255, 255, 255, 0.3);
 
   /* interactive green */
-  --accent: #0e4a37;
-  --accent-hover: #093526;
-  --accent-press: #062519;
-  --accent-tint: #e2ebe5;
-  --accent-tint-2: #c6d8cd;
+  --accent: #115740;
+  --accent-hover: #0c4231;
+  --accent-press: #093426;
+  --accent-tint: #e3eee8;
+  --accent-tint-2: #c4dccf;
   --on-accent: #ffffff;
 
   /* gold */
-  --gold: #c9a24a;
-  --gold-text: #6f5114;
-  --gold-tint: #f7eed6;
-  --gold-rule: #d9bf7c;
-  --on-gold: #0b0f0d;
+  --gold: #b9975b;
+  --gold-text: #755a25;
+  --gold-tint: #f7f0e1;
+  --gold-rule: #d9c394;
+  --on-gold: #10241b;
 
   /* stone neutrals */
-  --paper: #f1f0ea;
+  --paper: #f5f3ed;
   --surface: #ffffff;
-  --sunk: #e9e7df;
+  --sunk: #ebe8df;
   --code-bg: #f4f3ee;
-  --ink: #0b0f0d;
-  --ink-soft: #2b3430;
+  --ink: #13201a;
+  --ink-soft: #2c3a33;
   --muted: #4f5953;
   --rule: #cbc7b9;
   --rule-strong: #8f8a7c;
 
   /* status */
-  --ok: #0e4a37;
-  --ok-tint: #e2ebe5;
-  --ok-ink: #082f22;
+  --ok: #115740;
+  --ok-tint: #e3eee8;
+  --ok-ink: #0a3527;
   --bad: #9a2b2b;
   --bad-tint: #f6e6e3;
   --bad-ink: #6b1b1b;
@@ -73,7 +73,7 @@
   --font-body: "IBM Plex Sans", "Segoe UI", -apple-system, Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --font-ui: var(--font-mono);
-  --grid: rgba(11, 15, 13, 0.045);
+  --grid: rgba(17, 87, 64, 0.05);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -96,32 +96,32 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --brand: #000000; --brand-strong: #000000; --brand-ink: #ffffff; --brand-ink-soft: #b9c2bd;
-    --brand-hover: rgba(230, 235, 231, 0.07); --brand-line: rgba(224, 187, 98, 0.4);
-    --side-bg: #07140f; --side-ink: #f2f5f3; --side-muted: #8ea49a; --side-hover: rgba(230, 235, 231, 0.05);
-    --side-active: #163428; --side-field: rgba(230, 235, 231, 0.06); --side-field-line: rgba(230, 235, 231, 0.18);
-    --accent: #5aae8b; --accent-hover: #6fbf9c; --accent-press: #4a9a79; --accent-tint: #142a21; --accent-tint-2: #1f3d30; --on-accent: #06140e;
-    --gold: #e0bb62; --gold-text: #e8c877; --gold-tint: #2a2416; --gold-rule: #5b4b2b; --on-gold: #17110a;
-    --paper: #050806; --surface: #0e1411; --sunk: #090e0b; --code-bg: #0b110e;
-    --ink: #f4f7f5; --ink-soft: #cfd9d3; --muted: #9eada5; --rule: #2b3b34; --rule-strong: #4a5f55;
-    --ok: #5fb390; --ok-tint: #142a21; --ok-ink: #bfe3d2; --bad: #e27f72; --bad-tint: #2c1714; --bad-ink: #f3bdb4; --bad-rule: #5a2b25;
-    --info: #7fb0d1; --info-tint: #13212a; --notice-ink: #e6d1a3; --rust: #d39258; --plum: #b4a2d6;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.55); --scrim: rgba(0, 0, 0, 0.6); --grid: rgba(230, 235, 231, 0.035);
+    --brand: #154e3b; --brand-strong: #0f3d2e; --brand-ink: #ffffff; --brand-ink-soft: #c9dbd1;
+    --brand-hover: rgba(255, 255, 255, 0.08); --brand-line: rgba(214, 186, 125, 0.55);
+    --side-bg: #163f31; --side-ink: #f3f7f4; --side-muted: #a9c4b6; --side-hover: rgba(255, 255, 255, 0.06);
+    --side-active: #1f5843; --side-field: rgba(255, 255, 255, 0.07); --side-field-line: rgba(255, 255, 255, 0.2);
+    --accent: #6cc29e; --accent-hover: #82d0ae; --accent-press: #5aae8b; --accent-tint: #1f3d31; --accent-tint-2: #29503f; --on-accent: #0b1f17;
+    --gold: #d6b56e; --gold-text: #e4c886; --gold-tint: #33301f; --gold-rule: #6b5a35; --on-gold: #1a1408;
+    --paper: #14251e; --surface: #1b3028; --sunk: #11211a; --code-bg: #172a22;
+    --ink: #f3f7f4; --ink-soft: #d2ddd6; --muted: #a4b5ac; --rule: #30483e; --rule-strong: #527063;
+    --ok: #6cc29e; --ok-tint: #1f3d31; --ok-ink: #c4e6d6; --bad: #e27f72; --bad-tint: #3a2220; --bad-ink: #f3bdb4; --bad-rule: #5a2b25;
+    --info: #7fb0d1; --info-tint: #1a2d38; --notice-ink: #e6d1a3; --rust: #d39258; --plum: #b4a2d6;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.55); --scrim: rgba(0, 0, 0, 0.6); --grid: rgba(230, 240, 234, 0.04);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --brand: #000000; --brand-strong: #000000; --brand-ink: #ffffff; --brand-ink-soft: #b9c2bd;
-  --brand-hover: rgba(230, 235, 231, 0.07); --brand-line: rgba(224, 187, 98, 0.4);
-  --side-bg: #07140f; --side-ink: #f2f5f3; --side-muted: #8ea49a; --side-hover: rgba(230, 235, 231, 0.05);
-  --side-active: #163428; --side-field: rgba(230, 235, 231, 0.06); --side-field-line: rgba(230, 235, 231, 0.18);
-  --accent: #5aae8b; --accent-hover: #6fbf9c; --accent-press: #4a9a79; --accent-tint: #142a21; --accent-tint-2: #1f3d30; --on-accent: #06140e;
-  --gold: #e0bb62; --gold-text: #e8c877; --gold-tint: #2a2416; --gold-rule: #5b4b2b; --on-gold: #17110a;
-  --paper: #050806; --surface: #0e1411; --sunk: #090e0b; --code-bg: #0b110e;
-  --ink: #f4f7f5; --ink-soft: #cfd9d3; --muted: #9eada5; --rule: #2b3b34; --rule-strong: #4a5f55;
-  --ok: #5fb390; --ok-tint: #142a21; --ok-ink: #bfe3d2; --bad: #e27f72; --bad-tint: #2c1714; --bad-ink: #f3bdb4; --bad-rule: #5a2b25;
-  --info: #7fb0d1; --info-tint: #13212a; --notice-ink: #e6d1a3; --rust: #d39258; --plum: #b4a2d6;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.55); --scrim: rgba(0, 0, 0, 0.6); --grid: rgba(230, 235, 231, 0.035);
+  --brand: #154e3b; --brand-strong: #0f3d2e; --brand-ink: #ffffff; --brand-ink-soft: #c9dbd1;
+  --brand-hover: rgba(255, 255, 255, 0.08); --brand-line: rgba(214, 186, 125, 0.55);
+  --side-bg: #163f31; --side-ink: #f3f7f4; --side-muted: #a9c4b6; --side-hover: rgba(255, 255, 255, 0.06);
+  --side-active: #1f5843; --side-field: rgba(255, 255, 255, 0.07); --side-field-line: rgba(255, 255, 255, 0.2);
+  --accent: #6cc29e; --accent-hover: #82d0ae; --accent-press: #5aae8b; --accent-tint: #1f3d31; --accent-tint-2: #29503f; --on-accent: #0b1f17;
+  --gold: #d6b56e; --gold-text: #e4c886; --gold-tint: #33301f; --gold-rule: #6b5a35; --on-gold: #1a1408;
+  --paper: #14251e; --surface: #1b3028; --sunk: #11211a; --code-bg: #172a22;
+  --ink: #f3f7f4; --ink-soft: #d2ddd6; --muted: #a4b5ac; --rule: #30483e; --rule-strong: #527063;
+  --ok: #6cc29e; --ok-tint: #1f3d31; --ok-ink: #c4e6d6; --bad: #e27f72; --bad-tint: #3a2220; --bad-ink: #f3bdb4; --bad-rule: #5a2b25;
+  --info: #7fb0d1; --info-tint: #1a2d38; --notice-ink: #e6d1a3; --rust: #d39258; --plum: #b4a2d6;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-raised: 0 10px 28px rgba(0, 0, 0, 0.55); --scrim: rgba(0, 0, 0, 0.6); --grid: rgba(230, 240, 234, 0.04);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -548,6 +548,13 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .slider input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 /* ---------- Math workspace ---------- */
+.math-tools { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+.math-tools .check-row { align-items: center; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: var(--space-2) var(--space-5); margin: 0; }
+.facts dt { font-size: 0.8rem; color: var(--muted); }
+.facts dd { margin: 0; font-size: 0.9rem; color: var(--ink); overflow-wrap: anywhere; }
+.calc-out { font-family: var(--font-mono); color: var(--gold-text); font-size: 1.05rem; }
+.hint.err, .err { color: var(--bad-ink); }
 .math-graph { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: var(--space-5); align-items: start; margin-top: var(--space-4); }
 .math-canvas { width: 100%; height: min(70vh, 620px); border: 1px solid var(--rule-strong); border-radius: var(--radius); background: var(--surface); touch-action: none; cursor: crosshair; }
 .formula-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); align-items: center; }
