@@ -3189,6 +3189,7 @@ def add_timeline_events(topic_id: str, body: ItemsBody):
 
 # ---------------------------------------------------------------- course advisor (advisor.py)
 class CatalogImport(BaseModel):
+    year: Optional[str] = ""     # catalog year, e.g. "2016-2017"; read from the text when missing
     text: Optional[str] = ""
     rows: Optional[List[Dict[str, Any]]] = None
     source: Optional[str] = "import"
@@ -3233,8 +3234,10 @@ async def catalog_import(body: CatalogImport):
             for chunk in [text[i:i + 30000] for i in range(0, min(len(text), 120000), 30000)]:
                 data = await gemini_json(CATALOG_EXTRACT_PROMPT.format(text=chunk), role="lesson")
                 rows += [r for r in (data.get("courses") or []) if isinstance(r, dict)] if isinstance(data, dict) else []
-    n = advisor.upsert_courses(rows, body.source or "import")
-    return {"imported": n, "stats": advisor.stats()}
+    year = (body.year or advisor.catalog_year(text) or "").strip()[:9]
+    source = f"{body.source or 'import'}{f' {year} catalog' if year else ''}"
+    n = advisor.upsert_courses(rows, source)
+    return {"imported": n, "year": year or None, "stats": advisor.stats()}
 
 @app.get("/api/advisor/{user_id}/completed")
 def completed_list(user_id: str):
