@@ -6,6 +6,11 @@ Autonomous agents (agy, Claude Code, background loops) can add lessons and simul
 frontend code.
 
 ## Workspaces
+Seven tabs: My courses, Lab, IDE, Math, **History** (timeline, all flashcards), **Languages** (flashcards read aloud,
+pronunciation, IPA), **Advisor** (course record, catalog, readiness). Course `workspace` values: math | code | lab | history | language.
+Lesson activities (any subject): Flashcards (`flashcards`), Speed round (Kahoot-style, from `quiz`), Timeline (`timeline`,
+with an ordering challenge), practice type `match_pairs`. Course advisor data: `advisor.py` (catalog_courses,
+completed_courses); catalog.wm.edu blocks scripts, so catalogs are imported from text/PDF/JSON.
 My courses (one place to add materials: learn, test prep, continue a course, coding practice) ·
 **Lab** (physics and chemistry library and lab-course classes; internal mode id `physics`) ·
 **IDE** (code, `EduStudioIDE.jsx`) · **Math** (`MathLab.jsx`: Class, Courses, Graph, Notebook, Practice, Sim kit).
@@ -81,10 +86,12 @@ Data only, never code: the browser evaluates expressions with its own small inte
 
 ## MCP tools (preferred for agents)
 `mcp_server.py` is a dependency-free MCP server (stdio) over the running backend, so every change is validated
-and shows up live in the UI. 16 tools: `simulation_guide`, `list_topics`, `get_topic`, `save_topic`,
+and shows up live in the UI. 28 tools, including: `simulation_guide`, `list_topics`, `get_topic`, `save_topic`,
 `validate_simulation`, `attach_simulation`, `generate_simulation` (kind auto | math | physics),
 `add_quiz_questions`, `add_practice_items`, `list_profiles`, `list_courses`, `get_course`, `regenerate_class`,
-`show_on_graph`, `preview_math_simulation`, `open_topic`.
+`show_on_graph`, `preview_math_simulation`, `open_topic`; activities `add_flashcards`, `add_timeline_events`,
+`add_match_pairs`, `start_speed_round`, `start_flashcards`; advisor `catalog_search`, `catalog_import`, `student_record`,
+`add_completed_courses`, `recommend_courses`, `check_readiness`, `create_readiness_course`.
 Register it with your client (the backend must be running on 127.0.0.1:8090):
 ```json
 {"mcpServers": {"andedu": {"command": "python3", "args": ["mcp_server.py"]}}}

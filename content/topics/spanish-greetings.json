@@ -1,0 +1,111 @@
+{
+  "id": "spanish-greetings",
+  "title": "Spanish: Greetings and Introductions",
+  "category": "Spanish",
+  "difficulty": "Beginner",
+  "summary": "Say hello, introduce yourself and ask how someone is, with pronunciation you can hear.",
+  "simulationType": null,
+  "simulation": null,
+  "cheatSheet": [],
+  "mermaid": null,
+  "markdownContent": "# Greetings in Spanish\n\n| Spanish | English | IPA |\n| --- | --- | --- |\n| Hola | Hello | /ˈo.la/ |\n| Buenos días | Good morning | /ˈbwe.nos ˈði.as/ |\n| ¿Cómo estás? | How are you? (informal) | /ˈko.mo esˈtas/ |\n| Me llamo… | My name is… | /me ˈʝa.mo/ |\n| Mucho gusto | Nice to meet you | /ˈmu.tʃo ˈɣus.to/ |\n\nNote the silent **h** in *hola* and the soft **d** /ð/ between vowels in *días*.",
+  "quiz": [
+    {
+      "question": "How do you say 'Nice to meet you'?",
+      "options": [
+        "Buenas noches",
+        "Mucho gusto",
+        "Hasta luego",
+        "De nada"
+      ],
+      "correctAnswer": 1,
+      "id": "q1"
+    },
+    {
+      "question": "Which greeting is informal?",
+      "options": [
+        "¿Cómo está usted?",
+        "¿Cómo estás?",
+        "Buenos días, señor",
+        "Encantado de conocerle"
+      ],
+      "correctAnswer": 1,
+      "id": "q2"
+    },
+    {
+      "question": "In 'hola', the letter h is…",
+      "options": [
+        "pronounced like English h",
+        "silent",
+        "pronounced like j",
+        "pronounced like ch"
+      ],
+      "correctAnswer": 1,
+      "id": "q3"
+    }
+  ],
+  "practice": [
+    {
+      "type": "match_pairs",
+      "prompt": "Match the Spanish to the English",
+      "pairs": [
+        [
+          "Hola",
+          "Hello"
+        ],
+        [
+          "Adiós",
+          "Goodbye"
+        ],
+        [
+          "Gracias",
+          "Thank you"
+        ],
+        [
+          "Por favor",
+          "Please"
+        ]
+      ]
+    },
+    {
+      "type": "fill_blank",
+      "prompt": "Me ___ Ana. (My name is Ana.)",
+      "options": [
+        "llamo",
+        "llama",
+        "llamas",
+        "llaman"
+      ],
+      "answer": "llamo",
+      "explanation": "First person singular of llamarse: (yo) me llamo."
+    }
+  ],
+  "workspace": "language",
+  "flashcards": [
+    {
+      "front": "Hola",
+      "back": "Hello /ˈo.la/",
+      "lang": "es"
+    },
+    {
+      "front": "Buenos días",
+      "back": "Good morning /ˈbwe.nos ˈði.as/",
+      "lang": "es"
+    },
+    {
+      "front": "¿Cómo estás?",
+      "back": "How are you? (informal)",
+      "lang": "es"
+    },
+    {
+      "front": "Me llamo Ana",
+      "back": "My name is Ana",
+      "lang": "es"
+    },
+    {
+      "front": "Mucho gusto",
+      "back": "Nice to meet you",
+      "lang": "es"
+    }
+  ]
+}

@@ -79,4 +79,11 @@ Register `mcp_server.py` as an MCP server (config in AGENTS.md, "MCP tools") and
    (e.g. "for eps = 0.1, what is the largest delta?"), with worked explanations.
 3. Do not call `generate_simulation` or `regenerate_class` (they spend Gemini quota); write specs yourself.
 
+## Part D: content for the new sections through MCP tools (after C)
+1. History and Languages: for every topic in those workspaces, make sure it has 8+ flashcards (`add_flashcards`,
+   with `lang` on target-language fronts), a timeline for history (`add_timeline_events`), one `add_match_pairs`
+   challenge, and at least 5 quiz questions so its Speed round is worth playing (`add_quiz_questions`).
+2. Course advisor: if the student gives you catalog pages or PDFs, import them with `catalog_import` (rows you
+   extract yourself, faithfully; never invent courses). Never fill the catalog from memory.
+
 When finished, append a short "What I changed" section to this file and leave the changes uncommitted.

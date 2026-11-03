@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { ArrowUp, ArrowDown, RotateCcw, Play, Loader2 } from 'lucide-react';
 import { runPython } from '../lib/pyodide';
 import Md, { MdInline } from './Md';
+import { MatchPairs } from './Activities';
 
 const TYPE_LABEL = {
   fill_blank: 'Fill in the blank',
@@ -9,6 +10,7 @@ const TYPE_LABEL = {
   numeric: 'Calculate',
   true_false: 'True or false',
   code: 'Write the code',
+  match_pairs: 'Match the pairs',
 };
 
 function seededShuffle(items, seed) {
@@ -217,12 +219,18 @@ function CodeExercise({ item }) {
   );
 }
 
+function MatchBody({ item }) {
+  const [ok, setOk] = useState(false);
+  useReportSolved(ok, item);
+  return <MatchPairs item={item} onSolved={() => setOk(true)} />;
+}
+
 function SolvedReporter({ ok, item }) {
   useReportSolved(ok, item);
   return null;
 }
 
-const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise };
+const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise, match_pairs: MatchBody };
 
 export default function PracticeDeck({ items = [], onSolved }) {
   const usable = items.filter((p) => RENDER[p.type]);

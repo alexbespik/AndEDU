@@ -669,3 +669,56 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .math-sim-canvas { height: min(50vh, 440px); }
 .math-readouts { min-height: 3.2em; }
 .math-readouts .lead { font-weight: 600; color: var(--ink); }
+
+/* ---------- Activities: flashcards, speed round, timeline, match pairs ---------- */
+.flashcard {
+  display: flex; flex-direction: column; justify-content: center; gap: var(--space-3); min-height: 260px; width: 100%;
+  padding: var(--space-6); border: 1px solid var(--rule-strong); border-radius: var(--radius); background: var(--surface);
+  box-shadow: var(--shadow); cursor: pointer; text-align: center; font: inherit; color: var(--ink); transition: transform 180ms var(--ease);
+}
+.flashcard[data-flipped="true"] { background: var(--accent-tint); border-color: var(--accent); }
+.flashcard:hover { transform: translateY(-2px); }
+.flash-side { font: 600 0.75rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--gold-text); }
+.flash-text { font-size: 1.35rem; line-height: 1.45; }
+.speed-top { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.speed-timer { flex: 1; min-width: 120px; height: 10px; }
+.speed-timer > span { background: var(--gold); transition: width 100ms linear; }
+.speed-score { font-size: 1.3rem; font-weight: 700; color: var(--gold-text); }
+.speed-q { font-size: 1.3rem; text-align: center; padding: var(--space-4) 0; }
+.speed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.speed-tile {
+  min-height: 92px; padding: var(--space-4); border: 0; border-radius: var(--radius); background: var(--tile); color: #fff;
+  font: 600 1.05rem/1.35 var(--font-body); cursor: pointer; box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.18); transition: transform 120ms var(--ease), opacity 160ms;
+}
+.speed-tile:hover:not(:disabled) { transform: translateY(-2px); }
+.speed-tile[data-state="dim"] { opacity: 0.3; }
+.speed-tile[data-state="wrong"] { opacity: 0.55; outline: 3px solid var(--ink); }
+.speed-tile[data-state="right"] { outline: 4px solid var(--gold); }
+.speed-gain { font: 700 1.1rem/1 var(--font-mono); color: var(--ok); }
+@media (max-width: 640px) { .speed-grid { grid-template-columns: minmax(0, 1fr); } }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 var(--space-5); border-left: 3px solid var(--gold); display: flex; flex-direction: column; gap: var(--space-4); }
+.timeline li { position: relative; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--space-3); }
+.timeline li::before { content: ""; position: absolute; left: calc(-1 * var(--space-5) - 8px); top: 5px; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); }
+.tl-year { font-weight: 700; color: var(--gold-text); }
+.order-item[data-result="correct"] { border-color: var(--ok); background: var(--ok-tint); }
+.order-item[data-result="wrong"] { border-color: var(--bad); background: var(--bad-tint); }
+.match-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.match-item { grid-template-columns: 0 minmax(0, 1fr) 0; }
+
+.advisor-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: var(--radius); }
+.advisor-row + .advisor-row { border-top: 1px solid var(--rule); }
+.advisor-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); width: 100%; padding: var(--space-3) var(--space-4); }
+.advisor-head:hover { background: var(--accent-tint); text-decoration: none; }
+.advisor-code { font-weight: 700; color: var(--gold-text); min-width: 84px; }
+.advisor-head .status { margin-left: auto; }
+.advisor-detail { padding: 0 var(--space-4) var(--space-4); }
+.ipa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: var(--space-2); }
+.ipa-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: var(--space-2); border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--surface); }
+.ipa-sym { font: 600 1.5rem/1.2 "Charis SIL", "Doulos SIL", "Gentium Plus", serif; color: var(--accent); }
+/* seven workspaces: keep the masthead on one row on laptop widths */
+@media (max-width: 1560px) {
+  .masthead .conn { display: none; }
+  .mode { padding: 0 var(--space-2); }
+  .masthead { gap: var(--space-2) var(--space-3); }
+}
+.timeline li { grid-template-columns: 170px minmax(0, 1fr); }

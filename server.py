@@ -28,6 +28,7 @@ import nbformat
 from simspec import validate_spec, SPEC_GUIDE, MATH_GUIDE
 import db
 import engage
+import advisor
 
 ENV_FILE = Path(__file__).parent / ".env"
 if ENV_FILE.exists():
@@ -2378,7 +2379,7 @@ TOPIC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 MAX_EVENTS = 200
 MAX_MESSAGES = 500
 MAX_INBOX_BYTES = 16_000
-PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false", "code"}
+PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false", "code", "match_pairs"}
 
 _file_lock = threading.Lock()
 _events_lock = threading.Lock()
@@ -2481,7 +2482,39 @@ def normalize_topic(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
             topic["simulation"] = spec
     practice = [p for p in (topic.get("practice") or []) if isinstance(p, dict) and p.get("type") in PRACTICE_TYPES]
     topic["practice"] = practice
+    if "flashcards" in topic:
+        topic["flashcards"] = normalize_flashcards(topic.get("flashcards"))
+    if "timeline" in topic:
+        topic["timeline"] = normalize_timeline(topic.get("timeline"))
     return topic, warnings
+
+def normalize_flashcards(items: Any) -> List[Dict[str, Any]]:
+    """{front, back, optional hint, optional lang (BCP-47, read aloud in the browser)}; at most 80."""
+    out = []
+    for c in items if isinstance(items, list) else []:
+        if isinstance(c, dict) and str(c.get("front", "")).strip() and str(c.get("back", "")).strip():
+            card = {"front": str(c["front"])[:300], "back": str(c["back"])[:600]}
+            if c.get("hint"):
+                card["hint"] = str(c["hint"])[:200]
+            if re.fullmatch(r"[a-z]{2,3}(-[A-Za-z]{2,4})?", str(c.get("lang") or "")):
+                card["lang"] = c["lang"]
+            out.append(card)
+    return out[:80]
+
+def normalize_timeline(items: Any) -> List[Dict[str, Any]]:
+    """{year (number, negative for BCE), title, optional date label and detail}, sorted by year; at most 60."""
+    out = []
+    for e in items if isinstance(items, list) else []:
+        if not isinstance(e, dict) or not str(e.get("title", "")).strip():
+            continue
+        try:
+            year = float(e.get("year"))
+        except (TypeError, ValueError):
+            continue
+        out.append({"year": year, "title": str(e["title"])[:160], "date": str(e.get("date") or "")[:40] or None,
+                    "detail": str(e.get("detail") or "")[:600]})
+    out.sort(key=lambda e: e["year"])
+    return out[:60]
 
 def save_topic(data: Dict[str, Any], event_type: str = "TOPIC_UPDATED", auto_select: bool = True,
                course_id: Optional[str] = None) -> Tuple[Dict[str, Any], List[str]]:
@@ -3023,6 +3056,10 @@ def normalize_practice(items: Any) -> List[Dict[str, Any]]:
             tol = p.get("tolerance", 0.02)
             clean.append({**base, "answer": ans, "tolerance": float(tol) if isinstance(tol, (int, float)) else 0.02,
                           "unit": str(p.get("unit") or "")})
+        elif t == "match_pairs":
+            pairs = [[str(a)[:160], str(b)[:160]] for a, b in (pp for pp in (p.get("pairs") or []) if isinstance(pp, (list, tuple)) and len(pp) == 2)]
+            if 3 <= len(pairs) <= 8 and len({a for a, _ in pairs}) == len(pairs) and len({b for _, b in pairs}) == len(pairs):
+                clean.append({**base, "pairs": pairs})
         elif t == "true_false" and isinstance(p.get("answer"), bool):
             clean.append({**base, "answer": p["answer"]})
         elif t == "code":
@@ -3132,6 +3169,127 @@ def preview_math_sim(body: SpecBody):
         raise HTTPException(status_code=422, detail=errors)
     emit_event("MATH_PREVIEW", {"spec": spec})
     return {"status": "shown", "spec": spec}
+
+
+@app.post("/api/topics/{topic_id}/flashcards")
+def add_flashcards(topic_id: str, body: ItemsBody):
+    topic = _load_topic_or_404(topic_id)
+    new = normalize_flashcards(body.items)
+    topic["flashcards"] = (topic.get("flashcards") or []) + new
+    save_topic(topic, auto_select=False)
+    return {"added": len(new), "rejected": len(body.items) - len(new), "total": len(topic["flashcards"])}
+
+@app.post("/api/topics/{topic_id}/timeline")
+def add_timeline_events(topic_id: str, body: ItemsBody):
+    topic = _load_topic_or_404(topic_id)
+    new = normalize_timeline(body.items)
+    topic["timeline"] = normalize_timeline((topic.get("timeline") or []) + new)
+    save_topic(topic, auto_select=False)
+    return {"added": len(new), "rejected": len(body.items) - len(new), "total": len(topic["timeline"])}
+
+# ---------------------------------------------------------------- course advisor (advisor.py)
+class CatalogImport(BaseModel):
+    text: Optional[str] = ""
+    rows: Optional[List[Dict[str, Any]]] = None
+    source: Optional[str] = "import"
+    useModel: Optional[bool] = False
+
+class CompletedImport(BaseModel):
+    text: Optional[str] = ""
+    rows: Optional[List[Dict[str, Any]]] = None
+    source: Optional[str] = "manual"
+
+CATALOG_EXTRACT_PROMPT = """
+Extract every course from this catalog text. Return JSON only:
+{{"courses": [{{"code": "CSCI 141", "title": "...", "credits": "4", "description": "...", "prereqs": "catalog wording or empty",
+"attributes": ["COLL 150", "NQR"]}}]}}
+Copy wording faithfully; do not invent courses.
+
+TEXT:
+{text}
+"""
+
+@app.get("/api/advisor/catalog")
+def catalog_search(q: str = "", dept: str = "", limit: int = 40):
+    return {"stats": advisor.stats(), "courses": advisor.search(q, dept, limit)}
+
+@app.get("/api/advisor/catalog/{code}")
+def catalog_course(code: str):
+    c = advisor.get_course(code)
+    if not c:
+        raise HTTPException(status_code=404, detail="That course isn't in the imported catalog.")
+    return c
+
+@app.post("/api/advisor/catalog/import")
+async def catalog_import(body: CatalogImport):
+    """Rows as JSON, or catalog text (a PDF or page the student's browser could open); optionally the model reads
+    text the parser can't."""
+    rate_limit("upload")
+    rows = list(body.rows or [])
+    text = (body.text or "")[:400000]
+    if text:
+        rows += advisor.parse_catalog_text(text)
+        if not rows and body.useModel:
+            for chunk in [text[i:i + 30000] for i in range(0, min(len(text), 120000), 30000)]:
+                data = await gemini_json(CATALOG_EXTRACT_PROMPT.format(text=chunk), role="lesson")
+                rows += [r for r in (data.get("courses") or []) if isinstance(r, dict)] if isinstance(data, dict) else []
+    n = advisor.upsert_courses(rows, body.source or "import")
+    return {"imported": n, "stats": advisor.stats()}
+
+@app.get("/api/advisor/{user_id}/completed")
+def completed_list(user_id: str):
+    require_user(user_id)
+    return {"completed": advisor.completed(user_id)}
+
+@app.post("/api/advisor/{user_id}/completed")
+def completed_import(user_id: str, body: CompletedImport):
+    """A transcript, degree audit, screenshot text (from /api/upload-multimodal) or typed list of course codes."""
+    require_user(user_id)
+    rows = list(body.rows or []) + advisor.transcript_rows(body.text or "")
+    for r in rows:  # fill titles from the catalog where the transcript had none
+        c = advisor.get_course(str(r.get("code", "")))
+        if c and not r.get("title"):
+            r["title"] = c["title"]
+    n = advisor.add_completed(user_id, rows, body.source or "manual")
+    return {"added": n, "completed": advisor.completed(user_id)}
+
+@app.delete("/api/advisor/{user_id}/completed/{code}")
+def completed_remove(user_id: str, code: str):
+    require_user(user_id)
+    advisor.remove_completed(user_id, code)
+    return {"completed": advisor.completed(user_id)}
+
+@app.get("/api/advisor/{user_id}/recommend")
+def advisor_recommend(user_id: str, interests: str = "", limit: int = 12):
+    require_user(user_id)
+    return {"courses": advisor.recommend(user_id, interests, min(max(limit, 1), 40)), "stats": advisor.stats()}
+
+@app.get("/api/advisor/{user_id}/readiness/{code}")
+def advisor_readiness(user_id: str, code: str):
+    require_user(user_id)
+    return advisor.readiness(user_id, code)
+
+class ReadinessRequest(BaseModel):
+    code: str
+
+@app.post("/api/advisor/{user_id}/readiness-course")
+def advisor_readiness_course(user_id: str, body: ReadinessRequest):
+    """Builds a readiness course: a diagnostic on what the target course assumes, then bridge classes for gaps."""
+    rate_limit("course")
+    require_user(user_id)
+    target = advisor.get_course(body.code)
+    if not target:
+        raise HTTPException(status_code=404, detail="Import the catalog entry for that course first.")
+    pre = [advisor.get_course(c) for c in target["prereq_codes"]]
+    materials = "\n\n".join([f"TARGET COURSE {target['code']}: {target['title']}\n{target['description']}\nPrerequisites: {target['prereqs'] or 'none listed'}"]
+                             + [f"PREREQUISITE {p['code']}: {p['title']}\n{p['description']}" for p in pre if p])
+    done = ", ".join(f"{r['code']} ({r['grade'] or 'no grade'})" for r in advisor.completed(user_id)) or "none recorded"
+    goal = f"Am I ready for {target['code']} {target['title']}? Test the prerequisite knowledge and fill my gaps. Courses I have done: {done}"
+    title = f"Ready for {target['code']}?"
+    course = db.create_course(user_id, title, goal, materials[:200000], [], "readiness", None)
+    db.update_course(course["id"], plan_questions=10, plan_classes=3)
+    job = start_plan_job(course["id"], 10, 3)
+    return {"course": public_course(db.get_course(course["id"])), "job": job}
 
 
 class SimulationRequest(BaseModel):
@@ -3295,7 +3453,7 @@ that reveals which concepts they have and haven't mastered.
 Return JSON only:
 {{"title": "short course title",
   "subject": "e.g. Physics / Calculus / Chemistry / Python",
-  "workspace": "math | code | lab   (math: any mathematics; code: programming; lab: physics, chemistry, other sciences)",
+  "workspace": "math | code | lab | history | language   (math: mathematics; code: programming; history: history and historical studies; language: languages and linguistics; lab: physics, chemistry, other sciences)",
   "concepts": [{{"id": "kebab-case-id", "name": "Concept name", "summary": "one sentence"}}],
   "questions": [{{"id": "q1", "concept": "<concept id>", "difficulty": "Recall|Apply|Analyze",
                  "question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": 0,
@@ -3364,6 +3522,7 @@ Return JSON only:
     {{"type": "true_false", "prompt": "a statement targeting a misconception", "answer": false, "explanation": "..."}}
   ]}}
 Write 5 quiz questions that check the objectives (vary the correctAnswer position) and 4-6 practice items using all four types.
+Also add "flashcards": 8-12 cards [{{"front": "term or question", "back": "definition or answer", "hint": "optional"}}] for spaced recall.{extras}
 If the course involves programming (Python, algorithms, data), add 1-2 items of type "code":
     {{"type": "code", "prompt": "what to implement", "starter": "def f(x):\\n    # TODO\\n    pass", "tests": "assert f(2) == 4\\nassert f(0) == 0", "solution": "def f(x):\\n    return x * 2", "explanation": "..."}}
     Python only, standard library only, tests are plain assert lines covering normal and edge cases.
@@ -3383,7 +3542,26 @@ TEST_PREP_CLASS = (
     "quiz questions instead of 5, and practice items at exam difficulty.{mock}"
 )
 
+WORKSPACE_EXTRAS = {
+    "history": '''
+HISTORY CLASS: add "timeline": 6-12 events [{"year": 1789, "date": "14 July 1789", "title": "Storming of the Bastille", "detail": "why it matters"}]
+(year is a number, negative for BCE) covering the class; flashcards for people, terms and dates; one practice item of type
+"match_pairs" pairing people or events with what they did, e.g. {"type": "match_pairs", "prompt": "Match each figure to their role", "pairs": [["Robespierre", "Leader of the Committee of Public Safety"], ...]} (4-6 pairs);
+quiz questions that ask about causes, consequences and sources, not only dates.''',
+    "language": '''
+LANGUAGE/LINGUISTICS CLASS: flashcards carry "lang" (BCP-47 such as "es", "fr", "de", "ja") when the front is in the target
+language so the app can read it aloud; include IPA in the back where pronunciation matters. Add one "match_pairs" practice item
+(word to meaning, term to example, or sound to IPA symbol), and fill_blank items for grammar (conjugation, agreement, word order).''',
+}
+
+READINESS_SYLLABUS = """
+- This is a READINESS course for {target}. The diagnostic must test exactly the prerequisite knowledge that course
+  assumes. Plan only bridge classes for gaps (2-4 classes), each ending with what the target course will build on.
+"""
+
 def mode_rules(course: Dict[str, Any]) -> str:
+    if course.get("mode") == "readiness":
+        return "\n" + READINESS_SYLLABUS.format(target=course.get("title", "the target course")).strip("\n")
     if course.get("mode") != "test_prep":
         return ""
     exam = f" (exam on {course['exam_date']})" if course.get("exam_date") else ""
@@ -3437,15 +3615,23 @@ def effective_mastery(course: Dict[str, Any], classes: List[Dict[str, Any]]) -> 
                 scores[cid] = k["score"]
     return scores
 
-WORKSPACES = ("math", "code", "lab")
+WORKSPACES = ("math", "code", "lab", "history", "language")
 _CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure|javascript|typescript|\bjava\b|c\+\+|\brust\b|software|computer science|sql\b", re.I)
 _MATH_RE = re.compile(r"math|calculus|algebra|geometry|trigonometr|statistic|probabilit|\blimits?\b|epsilon|delta|derivative|integra|proof|number theory|"
                       r"differential equation|real analysis|topology|combinatoric|precalc|matri|vector space|sequence|series", re.I)
 
+_LANG_RE = re.compile(r"linguistic|language|spanish|french|german|italian|chinese|mandarin|japanese|korean|arabic|russian|latin|greek|"
+                      r"grammar|phonetic|phonolog|morpholog|semantics|vocabulary|conjugat|pronunciation", re.I)
+_HIST_RE = re.compile(r"histor|civilization|\bwar\b|revolution|ancient|medieval|empire|dynasty|century|colonial|renaissance|reformation", re.I)
+
 def guess_workspace(*texts: str) -> str:
-    """Fallback when the planner gave none: code beats math (a 'Python for statistics' course is code), math beats lab."""
+    """Fallback when the planner gave none: code beats math (a 'Python for statistics' course is code),
+    then math, languages, history; everything else (physics, chemistry, biology...) is Lab."""
     blob = " ".join(t or "" for t in texts)
-    return "code" if _CODE_RE.search(blob) else "math" if _MATH_RE.search(blob) else "lab"
+    for ws, rx in (("code", _CODE_RE), ("math", _MATH_RE), ("language", _LANG_RE), ("history", _HIST_RE)):
+        if rx.search(blob):
+            return ws
+    return "lab"
 
 def course_workspace(course: Dict[str, Any]) -> str:
     ws = course.get("workspace")
@@ -3543,6 +3729,7 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
         previous="\n".join(previous) or "- this is the first class",
         difficulty=difficulty, subject=course.get("subject") or "Science",
         materials=(course.get("materials_text") or "")[:30000],
+        extras=WORKSPACE_EXTRAS.get(course_workspace(course), ""),
         adjustment=mode_adjustment(course, klass)
                    + (f"\nIMPORTANT ADJUSTMENT FOR THIS STUDENT: {klass['instruction']}" if klass.get("instruction") else ""),
     )
@@ -3553,6 +3740,8 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
         **{k: data.get(k) for k in ("title", "category", "difficulty", "summary", "markdownContent", "cheatSheet", "mermaid", "quiz")},
         "id": slugify(f"{course['id']}-{klass['seq']:02d}-{klass['title']}")[:80].strip("-"),
         "icon": "BookOpen",
+        "flashcards": data.get("flashcards"),
+        **({"timeline": data.get("timeline")} if data.get("timeline") else {}),
         "practice": normalize_practice(data.get("practice")),
         "source": {"kind": "course", "courseId": course["id"], "courseTitle": course["title"],
                    "classSeq": klass["seq"], "classTotal": len(classes), "workspace": course_workspace(course)},
@@ -3735,6 +3924,7 @@ async def resume_course_generation():
     MAIN_LOOP = asyncio.get_running_loop()
     db.init_db()
     engage.init()
+    advisor.init()
     db.reset_stuck_classes()
     for course in db.interrupted_planning():  # planning jobs die with the process: redo them from stored materials
         start_plan_job(course["id"], course.get("plan_questions") or 8, course.get("plan_classes"))
@@ -3778,7 +3968,7 @@ def create_course(req: CourseRequest):
         raise HTTPException(status_code=422, detail="Add study materials or describe what you want to learn (at least a sentence).")
     n = min(max(req.num_questions or 8, 4), 15)
     count = min(max(req.class_count, 2), 12) if req.class_count else None
-    mode = "test_prep" if req.mode == "test_prep" else "learn"
+    mode = req.mode if req.mode in ("test_prep", "readiness") else "learn"
     exam_date = (req.exam_date or "")[:10] if mode == "test_prep" and re.fullmatch(r"\d{4}-\d{2}-\d{2}", req.exam_date or "") else None
     course = db.create_course(req.userId, goal[:80] or (req.filenames or ["New course"])[0], goal, materials[:200000],
                               req.filenames or [], mode, exam_date)
