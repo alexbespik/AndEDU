@@ -136,7 +136,7 @@ export default function CoursesHome({ user, onOpenCourse }) {
           <p>Each course remembers your diagnostic, your quiz scores and every class written for you.</p>
         </div>
         {!creating && (
-          <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+          <button type="button" className="btn btn-gold" onClick={() => setCreating(true)}>
             <Plus size={16} aria-hidden="true" /> New course
           </button>
         )}
