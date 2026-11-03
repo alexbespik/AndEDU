@@ -159,6 +159,20 @@ class Api(unittest.TestCase):
         self.assertEqual(k2["status"], "pending")
         self.assertIn("Slow down", k2["instruction"])
 
+    def test_generation_is_rate_limited(self):
+        server.RATE_SCALE = 0.1  # simulation limit 20 -> 2 per hour
+        try:
+            codes = [self.c.post("/api/simulations/generate", json={"topicId": "no-such-topic"}).status_code for _ in range(3)]
+        finally:
+            server.RATE_SCALE = 1.0
+            server._rate_hits.clear()
+        self.assertEqual(codes, [404, 404, 429])
+
+    def test_interrupted_planning_is_found_for_resume(self):
+        user = db.get_or_create_user("Planner Tester")
+        course = db.create_course(user["id"], "Interrupted", "goal", "materials", [])
+        self.assertIn(course["id"], [c["id"] for c in db.interrupted_planning()])
+
     def test_accounts_keep_courses_private(self):
         server.AUTH_REQUIRED = True
         self.assertEqual(self.c.get("/api/topics").status_code, 401)

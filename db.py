@@ -118,6 +118,8 @@ MIGRATIONS = [
     ("classes", "instruction", "TEXT"),
     ("classes", "adapted_from", "REAL"),
     ("users", "password_hash", "TEXT"),            # "scrypt$<salt hex>$<hash hex>"; NULL = local name-only profile
+    ("courses", "plan_questions", "INTEGER"),      # remembered so interrupted planning can be redone
+    ("courses", "plan_classes", "INTEGER"),
 ]
 
 
@@ -261,11 +263,9 @@ def reset_stuck_classes():
     conn().commit()
 
 
-def fail_interrupted_planning():
-    """Planning jobs don't survive a restart; surface them as errors instead of 'planning' forever."""
-    conn().execute("UPDATE courses SET status = 'error', error = 'Planning was interrupted by a restart. Delete this course and create it again.' "
-                   "WHERE status = 'planning'")
-    conn().commit()
+def interrupted_planning() -> List[Dict[str, Any]]:
+    """Courses whose planning job died with the process; their materials are stored, so they can be re-planned."""
+    return [_row(r) for r in conn().execute("SELECT * FROM courses WHERE status = 'planning'").fetchall()]
 
 
 def courses_with_pending_classes() -> List[str]:

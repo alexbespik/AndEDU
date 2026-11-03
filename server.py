@@ -51,6 +51,28 @@ ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"} | {
 AUTH_REQUIRED = os.environ.get("SCIEDU_AUTH") == "1"
 PUBLIC_API = {"/api/status", "/api/auth/login", "/api/auth/register"}
 CURRENT_USER: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("current_user", default=None)
+CLIENT_KEY: "contextvars.ContextVar[str]" = contextvars.ContextVar("client_key", default="local")
+
+# Requests that spend model quota, per signed-in user (or per client address without accounts), per hour.
+# SCIEDU_RATE_SCALE multiplies every limit; 0 turns limiting off.
+RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload": 30, "ide": 120, "chat": 240}
+RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
+_rate_hits: Dict[Tuple[str, str], List[float]] = {}
+_rate_lock = threading.Lock()
+
+def rate_limit(bucket: str, window: float = 3600.0):
+    limit = int(RATE_LIMITS[bucket] * RATE_SCALE)
+    if RATE_SCALE <= 0:
+        return
+    key, now = (bucket, CLIENT_KEY.get()), time.time()
+    with _rate_lock:
+        hits = [t for t in _rate_hits.get(key, []) if t > now - window]
+        if len(hits) >= limit:
+            wait = int((hits[0] + window - now) // 60) + 1
+            _rate_hits[key] = hits
+            raise HTTPException(status_code=429, detail=f"Limit reached: {limit} of these per hour. Try again in about {wait} min.")
+        hits.append(now)
+        _rate_hits[key] = hits
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,6 +95,7 @@ async def reject_foreign_hosts(request, call_next):
         if not user:
             return JSONResponse({"detail": "Sign in to continue."}, status_code=401)
         CURRENT_USER.set(user)
+    CLIENT_KEY.set(CURRENT_USER.get()["id"] if CURRENT_USER.get() else (request.client.host if request.client else "local"))
     return await call_next(request)
 
 # Models in order of quota resilience & latency
@@ -1454,6 +1477,7 @@ async def generate_curriculum(payload: GeneratePayload):
     Generates a multi-chapter course plan with multiple diverse problems in each chapter.
     Dynamically supports MATH MODE (LaTeX equations & derivations) or CODE MODE (any language).
     """
+    rate_limit("ide")
     doc_context = payload.document_text.strip() if payload.document_text else "No uploaded document."
     user_req = payload.user_instruction.strip() if payload.user_instruction else "General concepts"
     level = payload.level or 1
@@ -1725,6 +1749,7 @@ async def upload_multimodal(
     file: Optional[UploadFile] = File(None)
 ):
     """Extracts text/notes from any amount of uploaded documents or images without auto-generating."""
+    rate_limit("upload")
     target_files = []
     if files:
         target_files.extend(files)
@@ -1780,6 +1805,7 @@ async def upload_multimodal(
 
 @app.post("/api/tutor-chat")
 async def tutor_chat(payload: ChatPayload):
+    rate_limit("chat")
     p_ctx = payload.puzzle_context or {}
     prob = p_ctx.get("problem") or {}
     ch = p_ctx.get("chapter") or {}
@@ -1975,6 +2001,7 @@ async def generate_chapter(payload: GenerateChapterPayload):
     Generates a single comprehensive new chapter with rich study guide notes and multiple interactive problems.
     Can auto-sequence the next logical concept or target a specific user-requested topic.
     """
+    rate_limit("ide")
     mode = (payload.mode or "code").lower()
     is_math = mode == "math"
     existing_chs = payload.existing_chapters or []
@@ -2102,6 +2129,7 @@ async def generate_problem(payload: GenerateProblemPayload):
     """
     Generates a single interactive problem tailored to a specific chapter.
     """
+    rate_limit("ide")
     mode = (payload.mode or "code").lower()
     is_math = mode == "math"
     cid = payload.chapter_id
@@ -2179,6 +2207,7 @@ async def elevenlabs_voiceover(payload: VoiceoverPayload):
     Reads ELEVENLABS_API_KEY from environment variables.
     Falls back gracefully to browser SpeechSynthesis if API key is not configured or on network error.
     """
+    rate_limit("chat")
     # Resolve ElevenLabs API key: passed from UI settings, or loaded from .env
     eleven_key = (payload.api_key or "").strip() or os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY") or os.environ.get("XI_API_KEY")
     
@@ -2805,11 +2834,13 @@ def queue_simulation_job(topic_id: str, focus: str = "") -> Dict[str, Any]:
 
 @app.post("/api/simulations/generate")
 def generate_simulation(req: SimulationRequest):
+    rate_limit("simulation")
     return queue_simulation_job(req.topicId, req.focus or "")
 
 @app.post("/api/simulations/backfill")
 def backfill_simulations():
     """Queues a simulation for every topic that has neither a built-in nor a generated one."""
+    rate_limit("simulation")
     jobs = []
     for path in sorted(TOPICS_DIR.glob("*.json")):
         topic = load_json_file(path, {})
@@ -3274,7 +3305,8 @@ async def resume_course_generation():
     MAIN_LOOP = asyncio.get_running_loop()
     db.init_db()
     db.reset_stuck_classes()
-    db.fail_interrupted_planning()
+    for course in db.interrupted_planning():  # planning jobs die with the process: redo them from stored materials
+        start_plan_job(course["id"], course.get("plan_questions") or 8, course.get("plan_classes"))
     import_topic_files_into_db()
     for course_id in db.courses_with_pending_classes():
         queue_course_generation(course_id)
@@ -3305,6 +3337,7 @@ def list_user_courses(user_id: str):
 
 @app.post("/api/courses")
 def create_course(req: CourseRequest):
+    rate_limit("course")
     if AUTH_REQUIRED:
         req.userId = CURRENT_USER.get()["id"]
     require_user(req.userId)
@@ -3315,18 +3348,22 @@ def create_course(req: CourseRequest):
     n = min(max(req.num_questions or 8, 4), 15)
     count = min(max(req.class_count, 2), 12) if req.class_count else None
     course = db.create_course(req.userId, goal[:80] or (req.filenames or ["New course"])[0], goal, materials[:200000], req.filenames or [])
+    db.update_course(course["id"], plan_questions=n, plan_classes=count)
+    job = start_plan_job(course["id"], n, count)
+    return {"course": public_course(db.get_course(course["id"])), "job": job}
 
+def start_plan_job(course_id: str, n_questions: int, class_count: Optional[int]) -> Dict[str, Any]:
     async def work(job):
         try:
-            return await plan_course(course["id"], job, n, count)
+            return await plan_course(course_id, job, n_questions, class_count)
         except Exception as e:
-            db.update_course(course["id"], status="error", error=friendly_ai_error(e))
-            course_event(course["id"])
+            db.update_course(course_id, status="error", error=friendly_ai_error(e))
+            course_event(course_id)
             raise
 
     job = start_job("plan", "Diagnostic & syllabus", work)
-    db.update_course(course["id"], job_id=job["id"])
-    return {"course": public_course(db.get_course(course["id"])), "job": job}
+    db.update_course(course_id, job_id=job["id"])
+    return job
 
 @app.get("/api/courses/{course_id}")
 def get_course(course_id: str):
@@ -3334,6 +3371,7 @@ def get_course(course_id: str):
 
 @app.post("/api/courses/{course_id}/diagnostic")
 def submit_diagnostic(course_id: str, body: DiagnosticAnswers):
+    rate_limit("class")
     course = require_course(course_id)
     if course["status"] != "diagnostic_ready":
         raise HTTPException(status_code=409, detail=f"This course is '{course['status']}', not waiting for the diagnostic.")
@@ -3357,6 +3395,7 @@ def skip_diagnostic(course_id: str):
 
 @app.post("/api/courses/{course_id}/resume")
 def resume_course(course_id: str):
+    rate_limit("class")
     course = require_course(course_id)
     if not course.get("diagnostic"):
         raise HTTPException(status_code=409, detail="Planning didn't finish; create the course again.")
@@ -3368,6 +3407,7 @@ class RegenerateRequest(BaseModel):
 
 @app.post("/api/courses/{course_id}/classes/{seq}/regenerate")
 def regenerate_class(course_id: str, seq: int, body: Optional[RegenerateRequest] = None):
+    rate_limit("class")
     require_course(course_id)
     klass = next((k for k in db.list_classes(course_id) if k["seq"] == seq), None)
     if not klass:
@@ -3562,6 +3602,7 @@ def course_context(course_id: Optional[str]) -> str:
 
 @app.post("/api/agy/prompt")
 async def post_user_prompt(data: AgyPromptModel):
+    rate_limit("agy")
     if data.courseId:
         try:
             require_course(data.courseId)  # AGY may only see and change the caller's own course
