@@ -1,14 +1,19 @@
 import os
 import io
+import re
 import json
+import asyncio
+import threading
+import contextvars
 import sys
 import base64
+import copy
 import subprocess
 import httpx
-from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from typing import List, Dict, Any, Optional, Tuple
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
 import time
 import glob
@@ -19,6 +24,8 @@ from google.genai.errors import ClientError
 from pypdf import PdfReader
 import docx
 import nbformat
+from simspec import validate_spec, SPEC_GUIDE
+import db
 
 ENV_FILE = Path(__file__).parent / ".env"
 if ENV_FILE.exists():
@@ -29,14 +36,44 @@ else:
 api_key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
 client = genai.Client(api_key=api_key) if api_key else None
 
-app = FastAPI(title="&edu Educational Studio Backend")
+app = FastAPI(title="&.edu LAB Backend")
+
+# Local-only service: the Vite dev server proxies /api, so only its origin needs CORS.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "SCIEDU_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",") if o.strip()]
+ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"} | {
+    h.strip().lower() for h in os.environ.get("SCIEDU_ALLOWED_HOSTS", "").split(",") if h.strip()}
+
+# Plan 4/D, 5/E: real accounts for hosting on a shared/university server. Off by default on a personal
+# machine (name-only profiles). SCIEDU_AUTH=1 requires a login for every API call and scopes courses to
+# their owner; the server refuses to listen beyond localhost without it.
+AUTH_REQUIRED = os.environ.get("SCIEDU_AUTH") == "1"
+PUBLIC_API = {"/api/status", "/api/auth/login", "/api/auth/register"}
+CURRENT_USER: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("current_user", default=None)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
+
+@app.middleware("http")
+async def reject_foreign_hosts(request, call_next):
+    """Blocks DNS-rebinding: a hostile page can't reach us under its own hostname."""
+    from fastapi.responses import JSONResponse
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
+    if host not in ALLOWED_HOSTS:
+        return JSONResponse({"detail": "Forbidden host"}, status_code=403)
+    if AUTH_REQUIRED and request.url.path.startswith("/api/") and request.url.path not in PUBLIC_API:
+        auth = request.headers.get("authorization") or ""
+        user = db.user_for_token(auth[7:].strip()) if auth.lower().startswith("bearer ") else None
+        if not user:
+            return JSONResponse({"detail": "Sign in to continue."}, status_code=401)
+        CURRENT_USER.set(user)
+    return await call_next(request)
 
 # Models in order of quota resilience & latency
 CANDIDATE_MODELS = [
@@ -48,7 +85,24 @@ CANDIDATE_MODELS = [
     "gemini-3.7-flash"
 ]
 
-def call_gemini(contents, **kwargs):
+def _env_models(name: str) -> List[str]:
+    return [m.strip() for m in os.environ.get(name, "").split(",") if m.strip()]
+
+# Plan section 4: "A bigger AI model will create the plan, and a smaller one will create new lessons and tests."
+# Set SCIEDU_PLANNER_MODELS / SCIEDU_LESSON_MODELS (comma-separated) to the models your key can use;
+# each role falls back to CANDIDATE_MODELS, so an unavailable name just costs one 404.
+MODEL_ROLES = {
+    "planner": _env_models("SCIEDU_PLANNER_MODELS"),
+    "lesson": _env_models("SCIEDU_LESSON_MODELS"),
+}
+
+MODEL_COOLDOWN: Dict[str, float] = {}  # model id -> unix time it may be tried again
+
+def models_for(role: Optional[str]) -> List[str]:
+    preferred = MODEL_ROLES.get(role or "", [])
+    return preferred + [m for m in CANDIDATE_MODELS if m not in preferred]
+
+def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = True, **kwargs):
     """Invokes Gemini with automatic model fallback for 429 quota, 503 load, and 404 deprecations."""
     global client
     if client is None:
@@ -58,7 +112,11 @@ def call_gemini(contents, **kwargs):
         else:
             raise RuntimeError("Gemini API key is not configured in .env")
     last_err = None
-    for model_id in CANDIDATE_MODELS:
+    now = time.time()
+    candidates = models_for(role)
+    # skip models still cooling down from a quota/overload error, unless every model is
+    ready = [m for m in candidates if MODEL_COOLDOWN.get(m, 0) <= now] or candidates
+    for model_id in ready:
         try:
             return client.models.generate_content(
                 model=model_id,
@@ -69,7 +127,17 @@ def call_gemini(contents, **kwargs):
             last_err = e
             err_str = str(e).lower()
             if getattr(e, "code", None) in [429, 404, 500, 503] or "quota" in err_str or "resource_exhausted" in err_str:
-                print(f"[MODEL FALLBACK] Model {model_id} returned code {getattr(e, 'code', 'unknown')}, attempting fallback...")
+                code = getattr(e, "code", None)
+                if not track_cooldown:
+                    pass  # e.g. a search-grounding quota: says nothing about plain generation on this model
+                elif code == 429 or "quota" in err_str:
+                    delay = re.search(r"retrydelay'?:\s*'?(\d+)", err_str)
+                    MODEL_COOLDOWN[model_id] = time.time() + min(float(delay.group(1)) if delay else 60.0, 6 * 3600)
+                elif code == 404:
+                    MODEL_COOLDOWN[model_id] = time.time() + 24 * 3600
+                elif code == 503:
+                    MODEL_COOLDOWN[model_id] = time.time() + 30
+                print(f"[MODEL FALLBACK] Model {model_id} returned code {code or 'unknown'}, attempting fallback...")
                 continue
             raise e
         except Exception as e:
@@ -83,6 +151,12 @@ def call_gemini(contents, **kwargs):
     if last_err:
         raise last_err
     raise RuntimeError("No candidate models succeeded.")
+
+async def acall_gemini(contents, role: Optional[str] = None, **kwargs):
+    """The genai client is blocking; run it off the event loop so polling endpoints stay responsive."""
+    return await asyncio.to_thread(call_gemini, contents, role, **kwargs)
+
+GROUNDING_PAUSED_UNTIL = 0.0  # after a grounding quota error, skip search for a while instead of failing every check
 
 # ---------------------------------------------------------------------------
 # MCP TOOLS DECLARATIONS
@@ -756,6 +830,31 @@ By subtracting the actual sum of the array from the expected sum, the remaining 
     ]
 }
 
+def resolve_answer_alias(correct_ans: str, options: List[str]) -> str:
+    """Maps "2" / "C" style answers to option text, but only when the answer isn't itself an option
+    (a math answer of "2" among ["1","2","3","4"] must stay "2", not become options[2])."""
+    if not options or correct_ans in options:
+        return correct_ans
+    if correct_ans.isdigit() and 0 <= int(correct_ans) < len(options):
+        return options[int(correct_ans)]
+    if len(correct_ans) == 1 and correct_ans.upper() in "ABCD":
+        idx = ord(correct_ans.upper()) - 65
+        if idx < len(options):
+            return options[idx]
+    return correct_ans
+
+def finalize_choices(options: List[str], correct_ans: str, size: int = 4) -> List[str]:
+    """Returns exactly `size` choices that always contain the answer, at a stable but answer-dependent slot."""
+    if correct_ans in options[:size]:
+        choices = list(options[:size])
+    else:
+        distractors = [o for o in options if o != correct_ans][:size - 1]
+        slot = sum(map(ord, correct_ans)) % (len(distractors) + 1)
+        choices = distractors[:slot] + [correct_ans] + distractors[slot:]
+    while len(choices) < size:
+        choices.append(f"option_{len(choices) + 1}")
+    return choices
+
 def normalize_curriculum_data(data: Dict[str, Any], default_level: int = 1) -> Dict[str, Any]:
     """
     Ensures consistent chapters hierarchy, flattened problems list, robust answers,
@@ -780,7 +879,7 @@ def normalize_curriculum_data(data: Dict[str, Any], default_level: int = 1) -> D
 
     # Ensure chapters exist
     if not chapters:
-        chapters = DEFAULT_MULTI_CHAPTER_CURRICULUM["chapters"]
+        chapters = copy.deepcopy(DEFAULT_MULTI_CHAPTER_CURRICULUM["chapters"])
 
     flat_problems = []
     global_id = 1
@@ -836,14 +935,7 @@ def normalize_curriculum_data(data: Dict[str, Any], default_level: int = 1) -> D
 
             # 3. Handle slot_plugin / syntax_problem / logic_problem / question
             if ptype in ["slot_plugin", "syntax_problem", "logic_problem", "question"]:
-                # If correct_answer is an index (e.g. "0", "1") and options exist:
-                if correct_ans.isdigit() and options and 0 <= int(correct_ans) < len(options):
-                    correct_ans = options[int(correct_ans)]
-                # If correct_answer is a letter (e.g. "A", "B", "C", "D") and options exist:
-                elif correct_ans.upper() in ["A", "B", "C", "D"] and options:
-                    letter_idx = ord(correct_ans.upper()) - 65
-                    if letter_idx < len(options):
-                        correct_ans = options[letter_idx]
+                correct_ans = resolve_answer_alias(correct_ans, options)
 
                 expl = (p.get("explanation") or "").lower()
                 # If correct_ans is empty, try to deduce from explanation or pick first option
@@ -874,14 +966,7 @@ def normalize_curriculum_data(data: Dict[str, Any], default_level: int = 1) -> D
                         found = True
                         break
                 
-                if not found:
-                    options.insert(0, correct_ans)
-
-                # Ensure 4 options
-                while len(options) < 4:
-                    options.append(f"option_{len(options)+1}")
-
-                p["options"] = options[:4]
+                p["options"] = finalize_choices(options, correct_ans)
                 p["correct_answer"] = correct_ans
 
                 # Ensure prefix and suffix exist for slot types
@@ -930,7 +1015,7 @@ def normalize_curriculum_data(data: Dict[str, Any], default_level: int = 1) -> D
                 p["blocks_pool"] = shuffled_pool
 
             # 5. Handle code_write
-            elif ptype == "code_write":
+            elif ptype in ["code_write", "code_blank", "code_partial", "freeform"]:
                 p["starter_code"] = p.get("starter_code") or p.get("starterCode") or "def solve(data):\n    # TODO: Implement solution\n    pass\n"
                 p["solution_code"] = p.get("solution_code") or p.get("solutionCode") or p["starter_code"]
                 p["test_code"] = p.get("test_code") or p.get("testCode") or "# Test assertions\nassert True\n"
@@ -997,12 +1082,7 @@ def normalize_single_problem(p: Dict[str, Any], chapter_id: int, chapter_title: 
     options = [str(opt).strip() for opt in raw_options if str(opt).strip()]
 
     if ptype in ["slot_plugin", "syntax_problem", "logic_problem", "question"]:
-        if correct_ans.isdigit() and options and 0 <= int(correct_ans) < len(options):
-            correct_ans = options[int(correct_ans)]
-        elif correct_ans.upper() in ["A", "B", "C", "D"] and options:
-            idx = ord(correct_ans.upper()) - 65
-            if idx < len(options):
-                correct_ans = options[idx]
+        correct_ans = resolve_answer_alias(correct_ans, options)
         if not correct_ans and options:
             correct_ans = options[0]
         if len(options) < 2:
@@ -1011,9 +1091,7 @@ def normalize_single_problem(p: Dict[str, Any], chapter_id: int, chapter_title: 
             else:
                 correct_ans = "valid_term"
                 options = ["valid_term", "invalid_term", "0", "1"]
-        if correct_ans not in options:
-            options.insert(0, correct_ans)
-        p["options"] = options[:4]
+        p["options"] = finalize_choices(options, correct_ans)
         p["correct_answer"] = correct_ans
 
         if ptype in ["slot_plugin", "syntax_problem", "logic_problem"]:
@@ -1038,8 +1116,11 @@ def normalize_single_problem(p: Dict[str, Any], chapter_id: int, chapter_title: 
                 pool.append(b)
         if len(pool) == len(c_blocks):
             pool.append("\\text{Distractor: incorrect step}" if mode == "math" else "# Distractor line")
+        import random
+        pool = [str(b) for b in pool]
+        random.Random(str(p.get("id"))).shuffle(pool)
         p["correct_blocks"] = [str(b) for b in c_blocks]
-        p["blocks_pool"] = [str(b) for b in pool]
+        p["blocks_pool"] = pool
 
     elif ptype in ["code_write", "code_blank", "code_partial", "freeform"]:
         if ptype == "code_blank":
@@ -1091,7 +1172,7 @@ def normalize_chapter_data(ch: Dict[str, Any], next_chapter_id: int, start_globa
             "code_prefix": "\\text{Apply invariant: } " if mode == "math" else "def solve():\n    return ",
             "code_suffix": "",
             "options": ["f'(x)", "f(x)", "0", "\\infty"] if mode == "math" else ["x * 2", "x + 1", "None", "0"],
-            "correct_answer": "f'(x)'" if mode == "math" else "x * 2",
+            "correct_answer": "f'(x)" if mode == "math" else "x * 2",
             "test_cases": ["[VERIFIED] Chapter invariant holds true."]
         }
         normalized_problems.append(normalize_single_problem(fallback_p, ch["id"], ch["title"], curr_g_idx, mode))
@@ -1499,7 +1580,7 @@ async def generate_curriculum(payload: GeneratePayload):
         """
 
     try:
-        response = call_gemini(
+        response = await acall_gemini(
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[curriculum_tools_wrapper],
@@ -1507,18 +1588,17 @@ async def generate_curriculum(payload: GeneratePayload):
             )
         )
 
-        for call in response.function_calls:
+        for call in (response.function_calls or []):
             if call.name == "build_curriculum":
                 data = dict(call.args)
                 return normalize_curriculum_data(data, default_level=level)
 
         print("[WARNING generate_curriculum]: Gemini did not invoke build_curriculum, using fallback.")
-        fallback = DEFAULT_MATH_CURRICULUM if is_math else DEFAULT_MULTI_CHAPTER_CURRICULUM
+        fallback = copy.deepcopy(DEFAULT_MATH_CURRICULUM if is_math else DEFAULT_MULTI_CHAPTER_CURRICULUM)
         return normalize_curriculum_data(fallback, default_level=level)
     except Exception as e:
         print("[ERROR generate_curriculum, returning robust default curriculum]:", e)
-        fallback = DEFAULT_MATH_CURRICULUM if is_math else DEFAULT_MULTI_CHAPTER_CURRICULUM
-        fallback_data = dict(fallback)
+        fallback_data = copy.deepcopy(DEFAULT_MATH_CURRICULUM if is_math else DEFAULT_MULTI_CHAPTER_CURRICULUM)
         fallback_data["course_title"] = f"{user_req.title()[:40]} Master Track"
         fallback_data["level_num"] = level
         return normalize_curriculum_data(fallback_data, default_level=level)
@@ -1546,26 +1626,32 @@ async def make_harder(payload: MakeHarderPayload):
         mode=payload.mode
     ))
 
-@app.post("/api/execute-code")
-async def execute_code(payload: ExecuteCodePayload):
+SANDBOX_OUTPUT_LIMIT = 64_000
+
+def _limit_child_resources():
+    """Runs in the child before exec: caps CPU seconds, file writes and memory where the OS supports it."""
+    import resource
+    for limit, value in [
+        (resource.RLIMIT_CPU, (5, 5)),
+        (resource.RLIMIT_FSIZE, (10_000_000, 10_000_000)),
+        (getattr(resource, "RLIMIT_AS", None), (1_000_000_000, 1_000_000_000)),
+    ]:
+        if limit is None:
+            continue
+        try:
+            resource.setrlimit(limit, value)
+        except (ValueError, OSError):
+            pass  # macOS rejects RLIMIT_AS; the wall-clock timeout still applies
+
+def run_python_sandboxed(code: str, test_code: str = "") -> Dict[str, Any]:
     """
-    Executes student Python code in an isolated subprocess with a 5-second timeout.
-    Appends test assertions if provided and captures stdout / stderr / assertion failures.
+    Runs student Python in a separate interpreter. This is NOT a security boundary against
+    hostile code (it runs as the local user); the server is bound to localhost for that reason.
+    It does keep API keys out of the child's environment, isolates cwd, and caps time/output.
     """
-    user_code = payload.code.strip()
-    test_code = (payload.test_code or "").strip()
-    
-    # Block dangerous system calls
-    dangerous_keywords = ["import os", "import subprocess", "import shutil", "import sys", "__import__", "eval(", "exec("]
-    for kw in dangerous_keywords:
-        if kw in user_code:
-            return {
-                "success": False,
-                "stdout": "",
-                "stderr": f"Security restriction: '{kw}' is disabled in the student sandbox.",
-                "tests_passed": False,
-                "message": "Security error"
-            }
+    import tempfile
+    user_code = (code or "").strip()
+    test_code = (test_code or "").strip()
 
     script_parts = [user_code]
     if test_code:
@@ -1576,14 +1662,18 @@ async def execute_code(payload: ExecuteCodePayload):
     combined_script = "\n".join(script_parts)
 
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", combined_script],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        stdout = proc.stdout
-        stderr = proc.stderr
+        with tempfile.TemporaryDirectory(prefix="sciedu-run-") as work_dir:
+            proc = subprocess.run(
+                [sys.executable, "-I", "-c", combined_script],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=work_dir,
+                env={"PATH": "/usr/bin:/bin", "HOME": work_dir, "PYTHONDONTWRITEBYTECODE": "1"},
+                preexec_fn=_limit_child_resources,
+            )
+        stdout = proc.stdout[:SANDBOX_OUTPUT_LIMIT]
+        stderr = proc.stderr[:SANDBOX_OUTPUT_LIMIT]
         success = (proc.returncode == 0)
         tests_passed = success and ("[TEST_REPORT]" in stdout or not test_code)
 
@@ -1610,6 +1700,11 @@ async def execute_code(payload: ExecuteCodePayload):
             "tests_passed": False,
             "message": "Execution failure"
         }
+
+@app.post("/api/execute-code")
+def execute_code(payload: ExecuteCodePayload):
+    """Sync handler on purpose: FastAPI runs it in a worker thread so the event loop stays free."""
+    return run_python_sandboxed(payload.code, payload.test_code or "")
 
 @app.post("/api/generate-puzzle")
 async def generate_puzzle(payload: GeneratePayload):
@@ -1653,13 +1748,22 @@ async def upload_multimodal(
                 img_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
                 prompt = "Carefully transcribe and describe all text, equations, math formulas, code snippets, diagrams, and educational concepts in this image."
                 try:
-                    response = call_gemini(contents=[img_part, prompt])
+                    response = await acall_gemini(contents=[img_part, prompt])
                     text_content = response.text or ""
                 except Exception as e:
                     print(f"[ERROR upload_multimodal image {filename}]:", e)
                     text_content = f"[Image uploaded: {filename}]"
             else:
                 text_content = extract_text_from_file(file_bytes, filename)
+                if ext == "pdf" and len(text_content.strip()) < 200 * max(1, len(PdfReader(io.BytesIO(file_bytes)).pages)) // 4:
+                    # Scanned or handwritten PDF (little or no text layer): let Gemini read the pages (OCR).
+                    try:
+                        pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+                        response = await acall_gemini(contents=[pdf_part, "Transcribe every page of this document: all text, "
+                            "equations in LaTeX ($...$), tables as Markdown, and describe each diagram in one sentence."])
+                        text_content = (response.text or "").strip() or text_content
+                    except Exception as e:
+                        print(f"[OCR fallback failed for {filename}]:", e)
 
             extracted_parts.append(f"=== DOCUMENT: {filename} ===\n{text_content}\n=== END DOCUMENT ===")
             processed_names.append(filename)
@@ -1705,7 +1809,7 @@ async def tutor_chat(payload: ChatPayload):
         contents = [types.Content(role="user", parts=[types.Part.from_text(text="I am ready to learn.")])]
 
     try:
-        response = call_gemini(
+        response = await acall_gemini(
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=system_text,
@@ -1760,7 +1864,7 @@ async def tutor_chat(payload: ChatPayload):
                 else:
                     wrapper = types.Tool(function_declarations=[slot_puzzle_tool])
 
-                mut_resp = call_gemini(
+                mut_resp = await acall_gemini(
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         tools=[wrapper],
@@ -1847,7 +1951,7 @@ async def tutor_brief(payload: BriefPayload):
     """
 
     try:
-        response = call_gemini(contents=prompt)
+        response = await acall_gemini(contents=prompt)
         text = (response.text or "").strip()
         if not text:
             raise ValueError("Empty briefing from model")
@@ -1940,14 +2044,14 @@ async def generate_chapter(payload: GenerateChapterPayload):
         """
 
     try:
-        response = call_gemini(
+        response = await acall_gemini(
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[chapter_tools_wrapper],
                 tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY"))
             )
         )
-        for call in response.function_calls:
+        for call in (response.function_calls or []):
             if call.name == "build_single_chapter":
                 ch_data = dict(call.args)
                 return normalize_chapter_data(ch_data, next_id, start_global_idx, mode)
@@ -1986,7 +2090,7 @@ Review the core definitions and examine how boundary values behave under perturb
                 "code_prefix": "\\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} = " if is_math else "def compute(x):\n    return ",
                 "code_suffix": "",
                 "options": ["f'(x)", "f(x)", "0", "\\infty"] if is_math else ["x * 2", "x + 1", "None", "0"],
-                "correct_answer": "f'(x)'" if is_math else "x * 2",
+                "correct_answer": "f'(x)" if is_math else "x * 2",
                 "test_cases": ["[VERIFIED] Definition identity holds."]
             }
         ]
@@ -2035,14 +2139,14 @@ async def generate_problem(payload: GenerateProblemPayload):
     """
     
     try:
-        response = call_gemini(
+        response = await acall_gemini(
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[problem_tools_wrapper],
                 tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY"))
             )
         )
-        for call in response.function_calls:
+        for call in (response.function_calls or []):
             if call.name == "build_single_problem":
                 p_data = dict(call.args)
                 return normalize_single_problem(p_data, cid, ctitle, 999, mode)
@@ -2110,7 +2214,7 @@ async def elevenlabs_voiceover(payload: VoiceoverPayload):
 
     spoken_script = ""
     try:
-        resp = call_gemini(contents=script_prompt)
+        resp = await acall_gemini(contents=script_prompt)
         spoken_script = resp.text.strip()
     except Exception as e:
         print("[ERROR generating professor lecture script]:", e)
@@ -2205,16 +2309,50 @@ async def elevenlabs_voiceover(payload: VoiceoverPayload):
 # ---------------------------------------------------------------------------
 # SCIEDU STUDIO TOPICS, ASSESSMENT QUIZ & AGY LIVE BRIDGE
 # ---------------------------------------------------------------------------
-TOPICS_DIR = Path(__file__).parent / "content" / "topics"
-RESULTS_FILE = Path(__file__).parent / "content" / "quiz_results.json"
-EVENTS_FILE = Path(__file__).parent / "content" / "agy_events.json"
-MESSAGES_FILE = Path(__file__).parent / "content" / "agy_messages.json"
-INBOX_FILE = Path(__file__).parent / "content" / "agy_inbox.jsonl"
+CONTENT_DIR = Path(os.environ.get("SCIEDU_CONTENT_DIR") or Path(__file__).parent / "content")
+TOPICS_DIR = CONTENT_DIR / "topics"
+NOTES_DIR = CONTENT_DIR / "notes"
+RESULTS_FILE = CONTENT_DIR / "quiz_results.jsonl"
+MESSAGES_FILE = CONTENT_DIR / "agy_messages.json"
+INBOX_FILE = CONTENT_DIR / "agy_inbox.jsonl"
 
-TOPICS_DIR.mkdir(parents=True, exist_ok=True)
-Path(__file__).parent.joinpath("content").mkdir(parents=True, exist_ok=True)
+for _d in (TOPICS_DIR, NOTES_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
 
+TOPIC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
+MAX_EVENTS = 200
+MAX_MESSAGES = 500
+MAX_INBOX_BYTES = 16_000
+PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false"}
+
+_file_lock = threading.Lock()
+_events_lock = threading.Lock()
 ui_events_queue: List[Dict[str, Any]] = []
+_event_seq = 0
+
+def slugify(text: str, fallback: str = "topic") -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:80].strip("-")
+    return slug or fallback
+
+def require_topic_id(topic_id: str) -> str:
+    """Topic ids become file names, so anything outside [a-z0-9-] is rejected (no ../ escapes)."""
+    if not isinstance(topic_id, str) or not TOPIC_ID_RE.match(topic_id):
+        raise HTTPException(status_code=422, detail="Topic id must be kebab-case: lowercase letters, digits and '-' only.")
+    return topic_id
+
+def topic_path(topic_id: str) -> Path:
+    return TOPICS_DIR / f"{require_topic_id(topic_id)}.json"
+
+def emit_event(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Appends a UI event with a strictly increasing sequence number (clients poll with ?since=<seq>)."""
+    global _event_seq
+    with _events_lock:
+        _event_seq += 1
+        event = {"id": f"evt-{_event_seq}", "seq": _event_seq, "type": event_type,
+                 "payload": payload, "timestamp": time.time()}
+        ui_events_queue.append(event)
+        del ui_events_queue[:-MAX_EVENTS]
+    return event
 
 def load_json_file(path: Path, default: Any):
     if path.exists():
@@ -2226,34 +2364,126 @@ def load_json_file(path: Path, default: Any):
     return default
 
 def save_json_file(path: Path, data: Any):
-    with open(path, "w", encoding="utf-8") as f:
+    """Write-then-rename so a reader polling mid-write never sees half a file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+def append_messages(*new_messages: Dict[str, Any]):
+    """Read-modify-write under a lock, so concurrent prompts can't overwrite each other's history."""
+    with _file_lock:
+        messages = load_json_file(MESSAGES_FILE, [])
+        messages.extend(new_messages)
+        save_json_file(MESSAGES_FILE, messages[-MAX_MESSAGES:])
+
+def normalize_quiz_item(q: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+    """Accepts both the documented `correctAnswer` and the older agy `correct` key."""
+    options = [str(o) for o in (q.get("options") or []) if str(o).strip()]
+    question = q.get("question") or q.get("question_text")
+    if not question or len(options) < 2:
+        return None
+    answer = q.get("correctAnswer", q.get("correct"))
+    if isinstance(answer, str) and not answer.strip().isdigit():
+        answer = options.index(answer) if answer in options else None
+    try:
+        answer = int(answer)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= answer < len(options):
+        return None
+    item = {k: v for k, v in q.items() if k not in ("correct", "question_text")}
+    item.update(id=q.get("id") or f"q{idx + 1}", question=question, options=options, correctAnswer=answer)
+    return item
+
+def normalize_topic(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Brings a topic from any author (UI, agy CLI, Gemini tools) to the schema the frontend reads."""
+    warnings: List[str] = []
+    topic = dict(data)
+    topic["id"] = require_topic_id(topic.get("id") or slugify(topic.get("title", "")))
+    topic.setdefault("difficulty", "Undergraduate")
+    topic.setdefault("summary", "")
+    cheat = []
+    for item in topic.get("cheatSheet") or []:
+        if isinstance(item, dict) and item.get("formula"):
+            cheat.append({"label": item.get("label") or item.get("name") or "", "formula": item["formula"],
+                          **({"desc": item["desc"]} if item.get("desc") else {})})
+    topic["cheatSheet"] = cheat
+    quiz = []
+    for i, q in enumerate(topic.get("quiz") or []):
+        nq = normalize_quiz_item(q, i) if isinstance(q, dict) else None
+        if nq:
+            quiz.append(nq)
+        else:
+            warnings.append(f"quiz[{i}] dropped: needs question, 2+ options and a valid correctAnswer index")
+    topic["quiz"] = quiz
+    if topic.get("simulation"):
+        spec, errs = validate_spec(topic["simulation"])
+        if errs:
+            warnings.extend(f"simulation: {e}" for e in errs)
+            topic.pop("simulation")
+        else:
+            topic["simulation"] = spec
+    practice = [p for p in (topic.get("practice") or []) if isinstance(p, dict) and p.get("type") in PRACTICE_TYPES]
+    topic["practice"] = practice
+    return topic, warnings
+
+def save_topic(data: Dict[str, Any], event_type: str = "TOPIC_UPDATED", auto_select: bool = True,
+               course_id: Optional[str] = None) -> Tuple[Dict[str, Any], List[str]]:
+    topic, warnings = normalize_topic(data)
+    save_json_file(topic_path(topic["id"]), topic)
+    db.upsert_lesson(topic, course_id)
+    emit_event(event_type, {"topicId": topic["id"], "title": topic.get("title"), "autoSelect": auto_select})
+    return topic, warnings
 
 class TopicModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
     id: str
     title: str
     category: str
     difficulty: Optional[str] = "Undergraduate"
     summary: Optional[str] = ""
     simulationType: Optional[str] = None
-    cheatSheet: Optional[List[Dict[str, str]]] = []
+    simulation: Optional[Dict[str, Any]] = None
+    cheatSheet: Optional[List[Dict[str, Any]]] = []
     mermaid: Optional[str] = None
     markdownContent: str
     quiz: Optional[List[Dict[str, Any]]] = []
+    practice: Optional[List[Dict[str, Any]]] = []
 
 class QuizSubmission(BaseModel):
+    userId: Optional[str] = None
     topicId: str
     questionId: Any
     selected: int
     isCorrect: bool
 
 class AgyEventModel(BaseModel):
-    type: str  # SWITCH_TAB, SET_SIM_PRESET, ADD_QUIZ_QUESTION, SHOW_TOAST, HIGHLIGHT_FORMULA
+    type: str  # SWITCH_TAB, SWITCH_TOPIC, SET_SIM_CONFIG, SWITCH_STUDIO_MODE, TOPIC_UPDATED
     payload: Dict[str, Any]
 
 class AgyPromptModel(BaseModel):
     prompt: str
     topicId: Optional[str] = "rolling-without-slipping"
+    courseId: Optional[str] = None
+
+def topic_visible(topic: Dict[str, Any]) -> bool:
+    """With accounts on, a lesson generated for someone's course is visible only to that person;
+    library topics (no course) stay shared."""
+    cid = (topic.get("source") or {}).get("courseId")
+    if not AUTH_REQUIRED or not cid:
+        return True
+    course, me = db.get_course(cid), CURRENT_USER.get()
+    return bool(course and me and course["user_id"] == me["id"])
+
+def _topics_version() -> str:
+    stamp = "|".join(f"{p.name}:{p.stat().st_mtime_ns}" for p in sorted(TOPICS_DIR.glob("*.json")))
+    return f"{len(stamp)}-{hash(stamp) & 0xFFFFFFFF:08x}"
+
+@app.get("/api/topics/version")
+def get_topics_version():
+    """Cheap change-detector: the UI polls this and refetches /api/topics only when it changes."""
+    return {"version": _topics_version()}
 
 @app.get("/api/topics")
 def get_topics():
@@ -2261,78 +2491,909 @@ def get_topics():
     for file_path in sorted(TOPICS_DIR.glob("*.json")):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                topics.append(json.load(f))
+                topic = json.load(f)
+            if topic_visible(topic):
+                topics.append(topic)
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
     return topics
 
 @app.get("/api/topics/{topic_id}")
 def get_topic(topic_id: str):
-    file_path = TOPICS_DIR / f"{topic_id}.json"
-    if not file_path.exists():
+    file_path = topic_path(topic_id)
+    topic = load_json_file(file_path, None) if file_path.exists() else None
+    if not topic or not topic_visible(topic):
         raise HTTPException(status_code=404, detail="Topic not found")
-    with open(file_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return topic
 
 @app.post("/api/topics")
 def create_or_update_topic(topic: TopicModel):
-    file_path = TOPICS_DIR / f"{topic.id}.json"
-    save_json_file(file_path, topic.dict())
-    ui_events_queue.append({
-        "id": f"evt-{int(time.time()*1000)}",
-        "type": "TOPIC_UPDATED",
-        "payload": {"topicId": topic.id, "title": topic.title}
-    })
-    return {"status": "success", "id": topic.id, "path": str(file_path)}
+    saved, warnings = save_topic(topic.model_dump())
+    return {"status": "success", "id": saved["id"], "path": str(topic_path(saved["id"])), "warnings": warnings}
+
+@app.post("/api/simulations/validate")
+def validate_simulation(spec: Dict[str, Any]):
+    """Lets agents check a SimSpec before saving it; returns the cleaned spec and every error found."""
+    clean, errors = validate_spec(spec)
+    return {"valid": not errors, "errors": errors, "spec": clean if not errors else None}
+
+@app.get("/api/simulations/guide")
+def simulation_guide():
+    return {"guide": SPEC_GUIDE}
 
 @app.post("/api/quiz/submit")
 def submit_quiz_answer(sub: QuizSubmission):
-    results = load_json_file(RESULTS_FILE, [])
-    record = sub.dict()
+    if AUTH_REQUIRED:
+        sub.userId = CURRENT_USER.get()["id"]
+    record = sub.model_dump()
     record["timestamp"] = time.time()
-    results.append(record)
-    save_json_file(RESULTS_FILE, results)
+    with _file_lock, open(RESULTS_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+    class_progress = db.record_attempt(sub.userId, sub.topicId, sub.questionId, sub.selected, sub.isCorrect)
+    if class_progress:
+        if class_progress.get("justCompleted"):
+            class_progress["adapted"] = adapt_next_class(class_progress)
+        course_event(class_progress["courseId"])
 
     status_msg = "Correct answer recorded!" if sub.isCorrect else "Answer incorrect — review recommended."
-    ui_events_queue.append({
-        "id": f"evt-{int(time.time()*1000)}",
-        "type": "QUIZ_SUBMITTED",
-        "payload": {
-            "topicId": sub.topicId,
-            "isCorrect": sub.isCorrect,
-            "statusMessage": status_msg
-        }
-    })
-    return {"status": "recorded", "isCorrect": sub.isCorrect}
+    emit_event("QUIZ_SUBMITTED", {"topicId": sub.topicId, "isCorrect": sub.isCorrect, "statusMessage": status_msg})
+    return {"status": "recorded", "isCorrect": sub.isCorrect, "classProgress": class_progress}
+
+ADAPT_LOW, ADAPT_HIGH = 0.5, 0.9
+
+def adapt_next_class(progress: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Plan section 5: rewrite the next class the student hasn't started when they struggled (< 50%) or
+    breezed through (>= 90%), so the course doesn't overwhelm or bore them."""
+    score = progress["score"]
+    if ADAPT_LOW <= score < ADAPT_HIGH:
+        return None
+    nxt = db.next_unstarted_class(progress["courseId"], progress["seq"])
+    if not nxt or nxt["status"] == "generating":
+        return None
+    pct = round(score * 100)
+    if score < ADAPT_LOW:
+        instruction = (f"The student scored only {pct}% on the previous class's quiz. Slow down: open by re-teaching its key "
+                       "idea from a different angle, use more worked examples with every step shown, and make the first "
+                       "practice items easier before building up.")
+    else:
+        instruction = (f"The student scored {pct}% on the previous class's quiz. Do not re-explain basics they have shown they "
+                       "know: move faster, go deeper, and make the quiz and practice items harder (multi-step, less familiar setups).")
+    db.update_class(nxt["id"], status="pending", instruction=instruction, adapted_from=score)
+    queue_course_generation(progress["courseId"])
+    emit_event("CLASS_ADAPTED", {"courseId": progress["courseId"], "seq": nxt["seq"], "title": nxt["title"],
+                                 "direction": "easier" if score < ADAPT_LOW else "harder", "score": score})
+    return {"seq": nxt["seq"], "direction": "easier" if score < ADAPT_LOW else "harder"}
 
 @app.get("/api/agy/events")
-def get_agy_events(since: Optional[float] = 0):
-    events = list(ui_events_queue)
-    return {"events": events, "timestamp": time.time()}
+def get_agy_events(since: int = -1):
+    """since=-1 (first poll) returns no backlog, only the cursor, so a page reload never replays old events."""
+    with _events_lock:
+        cursor = _event_seq
+        events = [] if since < 0 else [e for e in ui_events_queue if e["seq"] > since]
+    return {"events": events, "cursor": cursor, "timestamp": time.time()}
 
 @app.post("/api/agy/events")
 def push_agy_event(event: AgyEventModel):
-    event_dict = {
-        "id": f"evt-{int(time.time()*1000)}",
-        "type": event.type,
-        "payload": event.payload,
-        "timestamp": time.time()
-    }
-    ui_events_queue.append(event_dict)
-    if len(ui_events_queue) > 50:
-        ui_events_queue.pop(0)
-    return {"status": "event_pushed", "event": event_dict}
+    return {"status": "event_pushed", "event": emit_event(event.type, event.payload)}
 
 @app.get("/api/agy/messages")
 def get_messages():
     return load_json_file(MESSAGES_FILE, [])
 
 # ---------------------------------------------------------------------------
-# AGY AUTONOMOUS AGENT TOOLS (LESSON GENERATION, PAGE SWITCHING & SANDBOX)
+# BACKGROUND JOBS (simulation authoring, study packs) — run off the request path
+# ---------------------------------------------------------------------------
+JOBS: Dict[str, Dict[str, Any]] = {}
+MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
+MAX_JOBS = 100
+_background_tasks: set = set()
+
+def _job_update(job: Dict[str, Any], **changes):
+    job.update(changes, updated=time.time())
+    emit_event("JOB_UPDATE", {k: job[k] for k in ("id", "kind", "status", "step", "progress", "error", "result") if k in job})
+
+def start_job(kind: str, label: str, work) -> Dict[str, Any]:
+    """Schedules `work(job)` (an async function) and returns the job record immediately."""
+    job = {"id": f"job-{int(time.time() * 1000)}-{len(JOBS)}", "kind": kind, "label": label,
+           "status": "queued", "step": "Queued", "progress": 0.0, "created": time.time()}
+    JOBS[job["id"]] = job
+    for old in sorted(JOBS, key=lambda k: JOBS[k]["created"])[:-MAX_JOBS]:
+        JOBS.pop(old, None)
+
+    async def runner():
+        _job_update(job, status="running", step="Starting")
+        try:
+            result = await work(job)
+            _job_update(job, status="done", step="Done", progress=1.0, result=result)
+        except Exception as e:
+            print(f"[JOB {job['id']} {kind} failed]:", e)
+            _job_update(job, status="error", step="Failed", error=friendly_ai_error(e))
+
+    # Sync handlers run in FastAPI's thread pool, which has no event loop: hand the job to the main loop.
+    try:
+        task = asyncio.get_running_loop().create_task(runner())
+    except RuntimeError:
+        if MAIN_LOOP is None:
+            raise RuntimeError("Background jobs need the server's event loop; start the app with uvicorn.")
+        task = asyncio.run_coroutine_threadsafe(runner(), MAIN_LOOP)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return job
+
+def friendly_ai_error(e: Exception) -> str:
+    text = str(e)
+    if "API key" in text or "not configured" in text:
+        return "No Gemini API key: add api_KEY=... to SciEdu-Studio/.env and restart the backend."
+    if "429" in text or "quota" in text.lower() or "RESOURCE_EXHAUSTED" in text:
+        return "Gemini quota exhausted for every fallback model. Try again in a minute."
+    return text[:300]
+
+@app.get("/api/jobs")
+def list_jobs():
+    return {"jobs": sorted(JOBS.values(), key=lambda j: j["created"], reverse=True)[:30]}
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JOBS[job_id]
+
+# LaTeX commands whose first letter is also a JSON escape (\b \f \n \r \t \u). If a model writes them
+# with one backslash, json.loads either fails or silently turns "\theta" into TAB + "heta".
+_LATEX_ESCAPE_CLASH = re.compile(
+    r"(?<!\\)\\(?=(?:beta|bar|bf|binom|bigg?|Bigg?|bmod|boldsymbol|bot|bullet|backslash|begin|boxed|"
+    r"frac|forall|flat|frown|fbox|nu|nabla|neq|ne|not|neg|ni|newline|nolimits|notin|nleq|ngeq|nparallel|"
+    r"rho|right|rangle|rceil|rfloor|rm|rvert|rVert|Rightarrow|theta|text|textbf|textit|textrm|times|tan|tanh|"
+    r"tau|to|top|tilde|triangle|therefore|tfrac|tt|underline|upsilon|uparrow|underbrace|updownarrow)(?![A-Za-z]))"
+)
+
+def repair_json_escapes(text: str) -> str:
+    """Makes model JSON containing raw LaTeX parseable without corrupting it."""
+    text = _LATEX_ESCAPE_CLASH.sub(r"\\\\", text)
+    out, i = [], 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and i + 1 < len(text):
+            n = text[i + 1]
+            if n in '"\\/bfnrt':
+                out.append(c + n)
+                i += 2
+                continue
+            if n == "u" and re.match(r"[0-9a-fA-F]{4}", text[i + 2:i + 6]):
+                out.append(text[i:i + 6])
+                i += 6
+                continue
+            out.append("\\\\")  # stray backslash (e.g. \alpha, \sin): keep it literally
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+def _parse_json_reply(text: str) -> Any:
+    text = (text or "").strip()
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)
+    if fence:
+        text = fence.group(1)
+    return json.loads(repair_json_escapes(text))
+
+async def gemini_json(prompt: str, temperature: float = 0.4, role: Optional[str] = None) -> Any:
+    response = await acall_gemini(
+        contents=prompt,
+        role=role,
+        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature),
+    )
+    return _parse_json_reply(response.text)
+
+def _topic_brief(topic: Dict[str, Any], limit: int = 5000) -> str:
+    cheat = "; ".join(f"{c.get('label')}: {c.get('formula')}" for c in topic.get("cheatSheet") or [])
+    return (f"Title: {topic.get('title')}\nCategory: {topic.get('category')}\nSummary: {topic.get('summary')}\n"
+            f"Key formulas: {cheat}\nNotes:\n{(topic.get('markdownContent') or '')[:limit]}")
+
+async def author_simulation(context: str, focus: str = "", attempts: int = 3) -> Dict[str, Any]:
+    """Asks Gemini for a SimSpec and feeds validator errors back until it passes."""
+    prompt = f"""
+You design interactive teaching simulations for &.edu LAB. Output ONE JSON object in the SimSpec v1
+format below and nothing else. Choose "particles" for anything that moves (mechanics, orbits, charges in
+fields, oscillators, collisions, fluids as particles) and "graph" for relationships and fields (waves,
+interference, gas laws, distributions, circuits over time, any y=f(x,t)). Give 2-5 sliders for the
+quantities a student should experiment with, use realistic SI values, keep the world box sized so motion
+stays visible, and add readouts/series that expose the key invariant (energy, momentum, period...).
+The description must tell the student what to try with the sliders and what to notice.
+
+{SPEC_GUIDE}
+
+TOPIC CONTEXT:
+{context[:6000]}
+
+FOCUS FOR THIS SIMULATION: {focus or 'the central concept of the topic'}
+"""
+    last_errors: List[str] = []
+    for _ in range(attempts):
+        attempt_prompt = prompt if not last_errors else (
+            prompt + "\nYour previous JSON failed validation with these errors. Fix ALL of them and return the full corrected JSON:\n- "
+            + "\n- ".join(last_errors[:20]))
+        try:
+            raw = await gemini_json(attempt_prompt, temperature=0.3)
+        except json.JSONDecodeError as e:
+            last_errors = [f"response was not valid JSON ({e.msg})"]
+            continue
+        spec, errors = validate_spec(raw)
+        if not errors:
+            return spec
+        last_errors = errors
+    raise RuntimeError("Could not produce a valid simulation: " + "; ".join(last_errors[:5]))
+
+def normalize_practice(items: Any) -> List[Dict[str, Any]]:
+    """Keeps only practice puzzles the UI can grade unambiguously."""
+    clean = []
+    for i, p in enumerate(items if isinstance(items, list) else []):
+        if not isinstance(p, dict) or not p.get("prompt"):
+            continue
+        base = {"id": p.get("id") or f"p{i + 1}", "type": p.get("type"), "prompt": str(p["prompt"]),
+                "explanation": str(p.get("explanation") or ""), "concept": p.get("concept")}
+        t = p.get("type")
+        if t == "fill_blank":
+            opts = [str(o) for o in p.get("options") or [] if str(o).strip()]
+            ans = str(p.get("answer", ""))
+            if ans and ans in opts and len(opts) >= 2:
+                clean.append({**base, "options": finalize_choices(opts, ans), "answer": ans})
+        elif t == "order_steps":
+            steps = [str(s) for s in p.get("steps") or [] if str(s).strip()]
+            if 3 <= len(steps) <= 8 and len(set(steps)) == len(steps):
+                clean.append({**base, "steps": steps})
+        elif t == "numeric":
+            try:
+                ans = float(p.get("answer"))
+            except (TypeError, ValueError):
+                continue
+            tol = p.get("tolerance", 0.02)
+            clean.append({**base, "answer": ans, "tolerance": float(tol) if isinstance(tol, (int, float)) else 0.02,
+                          "unit": str(p.get("unit") or "")})
+        elif t == "true_false" and isinstance(p.get("answer"), bool):
+            clean.append({**base, "answer": p["answer"]})
+    return clean
+
+def write_notes_file(topic: Dict[str, Any]) -> str:
+    """Saves the lesson as a standalone Markdown file students can keep (content/notes/<id>.md)."""
+    lines = [f"# {topic['title']}", "", f"_{topic.get('category', '')} · {topic.get('difficulty', '')}_", "",
+             topic.get("summary", ""), ""]
+    if topic.get("cheatSheet"):
+        lines += ["## Key formulas", ""] + [f"- **{c['label']}**: ${c['formula']}$" for c in topic["cheatSheet"]] + [""]
+    lines += [topic.get("markdownContent", ""), ""]
+    if topic.get("quiz"):
+        lines += ["## Self-test", ""]
+        for i, q in enumerate(topic["quiz"], 1):
+            lines.append(f"{i}. {q['question']}")
+            lines += [f"   - {'ABCD'[j] if j < 4 else j + 1}) {o}" for j, o in enumerate(q["options"])]
+        lines += ["", "<details><summary>Answers</summary>", ""]
+        lines += [f"{i}. {'ABCD'[q['correctAnswer']] if q['correctAnswer'] < 4 else q['correctAnswer'] + 1} — {q.get('explanation', '')}"
+                  for i, q in enumerate(topic["quiz"], 1)]
+        lines += ["", "</details>", ""]
+    path = NOTES_DIR / f"{topic['id']}.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path.name
+
+@app.get("/api/notes/{topic_id}.md")
+def get_notes_file(topic_id: str):
+    from fastapi.responses import FileResponse
+    path = NOTES_DIR / f"{require_topic_id(topic_id)}.md"
+    topic = load_json_file(topic_path(topic_id), None)
+    if not path.exists() or (topic and not topic_visible(topic)):
+        raise HTTPException(status_code=404, detail="No notes file for this topic")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=path.name)
+
+class SimulationRequest(BaseModel):
+    topicId: str
+    focus: Optional[str] = ""
+
+def queue_simulation_job(topic_id: str, focus: str = "") -> Dict[str, Any]:
+    path = topic_path(topic_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    async def work(job):
+        topic = load_json_file(path, {})
+        _job_update(job, step=f"Designing a simulation for {topic.get('title', topic_id)}", progress=0.2)
+        spec = await author_simulation(_topic_brief(topic), focus)
+        topic = load_json_file(path, topic)  # re-read: the topic may have been edited meanwhile
+        topic["simulation"] = spec
+        save_topic(topic, auto_select=False)
+        return {"topicId": topic_id, "title": spec["title"]}
+
+    return start_job("simulation", f"Simulation: {topic_id}", work)
+
+@app.post("/api/simulations/generate")
+def generate_simulation(req: SimulationRequest):
+    return queue_simulation_job(req.topicId, req.focus or "")
+
+@app.post("/api/simulations/backfill")
+def backfill_simulations():
+    """Queues a simulation for every topic that has neither a built-in nor a generated one."""
+    jobs = []
+    for path in sorted(TOPICS_DIR.glob("*.json")):
+        topic = load_json_file(path, {})
+        if topic.get("id") and not topic.get("simulation") and topic.get("simulationType") not in BUILTIN_SIMULATIONS:
+            jobs.append(queue_simulation_job(topic["id"]))
+    return {"queued": len(jobs), "jobs": jobs}
+
+BUILTIN_SIMULATIONS = {"rolling_without_slipping", "billiard_collisions"}
+
+# ---------------------------------------------------------------------------
+# COURSES: materials -> syllabus + diagnostic -> classes generated in sequence, adapting to results
+# ---------------------------------------------------------------------------
+class UserRequest(BaseModel):
+    name: str
+
+class CourseRequest(BaseModel):
+    userId: str
+    goal: Optional[str] = ""
+    materials_text: Optional[str] = ""
+    filenames: Optional[List[str]] = []
+    num_questions: Optional[int] = 8
+    class_count: Optional[int] = None
+
+class DiagnosticAnswers(BaseModel):
+    answers: Dict[str, int]
+
+ACTIVE_COURSE_JOBS: Dict[str, str] = {}
+
+def require_user(user_id: str) -> Dict[str, Any]:
+    me = CURRENT_USER.get()
+    if AUTH_REQUIRED and (not me or me["id"] != user_id):
+        raise HTTPException(status_code=403, detail="You can only open your own courses.")
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Profile not found. Sign in again.")
+    return user
+
+def require_course(course_id: str) -> Dict[str, Any]:
+    course = db.get_course(course_id)
+    me = CURRENT_USER.get()
+    # with accounts on, someone else's course is reported as missing rather than forbidden (no id probing)
+    if not course or (AUTH_REQUIRED and (not me or course["user_id"] != me["id"])):
+        raise HTTPException(status_code=404, detail="Course not found")
+    return course
+
+class AuthRequest(BaseModel):
+    name: str
+    password: str
+
+def _clean_name(raw: str) -> str:
+    name = " ".join((raw or "").split())[:40]
+    if len(name) < 2:
+        raise HTTPException(status_code=422, detail="Use a name with at least 2 characters.")
+    return name
+
+@app.post("/api/auth/register")
+def register(req: AuthRequest):
+    if not AUTH_REQUIRED:
+        raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
+    name = _clean_name(req.name)
+    if len(req.password) < 8:
+        raise HTTPException(status_code=422, detail="Use a password of at least 8 characters.")
+    existing = db.get_user_by_name(name)
+    if existing and existing.get("password_hash"):
+        raise HTTPException(status_code=409, detail="That name is taken. Sign in instead.")
+    if existing:  # a name-only profile from local use claims its password on first sign-up
+        db.set_password(existing["id"], req.password)
+        user = {"id": existing["id"], "name": existing["name"]}
+    else:
+        user = db.create_account(name, req.password)
+    return {"token": db.create_session(user["id"]), "user": user}
+
+@app.post("/api/auth/login")
+def login(req: AuthRequest):
+    if not AUTH_REQUIRED:
+        raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
+    user = db.get_user_by_name(_clean_name(req.name))
+    if not user or not db.check_password(req.password, user.get("password_hash")):
+        raise HTTPException(status_code=401, detail="Wrong name or password.")
+    return {"token": db.create_session(user["id"]), "user": {"id": user["id"], "name": user["name"]}}
+
+@app.post("/api/auth/logout")
+def logout(request: Request):
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        db.end_session(auth[7:].strip())
+    return {"status": "signed_out"}
+
+@app.get("/api/auth/me")
+def me():
+    return {"user": CURRENT_USER.get(), "authRequired": AUTH_REQUIRED}
+
+def public_course(course: Dict[str, Any]) -> Dict[str, Any]:
+    """Course + classes for the UI. Diagnostic answer keys stay hidden until the student submits."""
+    out = {k: v for k, v in course.items() if k != "materials_text"}
+    if course["status"] in ("planning", "diagnostic_ready"):
+        out["diagnostic"] = [{k: v for k, v in q.items() if k not in ("correctAnswer", "explanation")}
+                             for q in course.get("diagnostic") or []]
+    out["classes"] = db.list_classes(course["id"])
+    job = JOBS.get(course.get("job_id") or "")
+    out["job"] = job and {k: job.get(k) for k in ("id", "status", "step", "progress", "error")}
+    return out
+
+def course_event(course_id: str):
+    course = db.get_course(course_id)
+    if course:
+        emit_event("COURSE_UPDATED", {"courseId": course_id, "status": course["status"]})
+
+DIAGNOSTIC_PROMPT = """
+You are an expert assessment designer. From the student's study materials and goal, build a DIAGNOSTIC quiz
+that reveals which concepts they have and haven't mastered.
+
+Return JSON only:
+{{"title": "short course title",
+  "subject": "e.g. Physics / Calculus / Chemistry / Python",
+  "concepts": [{{"id": "kebab-case-id", "name": "Concept name", "summary": "one sentence"}}],
+  "questions": [{{"id": "q1", "concept": "<concept id>", "difficulty": "Recall|Apply|Analyze",
+                 "question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": 0,
+                 "explanation": "why the answer is right and the most tempting wrong option is wrong"}}]}}
+
+Rules:
+- 3 to 8 concepts that together cover the materials; every concept gets at least 1 question.
+- Exactly {n} questions, mixing recall, application (numbers with units) and conceptual traps.
+- correctAnswer is the 0-based index into options. Vary its position.
+- Use LaTeX inside $...$ for every formula and variable.
+- Stay faithful to the materials; do not test things they don't cover.
+
+STUDENT GOAL: {goal}
+
+MATERIALS:
+{materials}
+"""
+
+SYLLABUS_PROMPT = """
+You are planning a course as an ordered sequence of classes (lessons), like a semester syllabus.
+Concepts identified in the materials: {concepts}
+
+Return JSON only:
+{{"classes": [{{"title": "Class title", "concepts": ["<concept id>", ...],
+               "objectives": ["By the end the student can ...", "..."]}}]}}
+
+Rules:
+- {count} classes, ordered so every class builds only on earlier ones (prerequisites first).
+- Every concept id appears in at least one class. Use only the ids listed above.
+- 2-4 concrete, checkable objectives per class.
+
+STUDENT GOAL: {goal}
+
+MATERIALS:
+{materials}
+"""
+
+CLASS_PROMPT = """
+You are a master teacher writing Class {seq} of {total} in the course "{course_title}" for one student.
+This class: "{title}"
+Objectives: {objectives}
+Concepts covered: {concepts}
+
+What the student knows so far (from the diagnostic and their quizzes on earlier classes):
+{mastery_line}
+Diagnostic questions they missed on these concepts (chosen option -> correct option):
+{misses}
+Earlier classes they've already had (do not repeat them; build on them and refer back):
+{previous}
+
+Pitch the class at: {difficulty}.{adjustment}
+Course materials are the source of truth:
+{materials}
+
+Return JSON only:
+{{"title": "{title}", "category": "{subject}", "difficulty": "{difficulty}",
+  "summary": "1-2 sentences addressed to the student: what this class gives them and which earlier gap it fixes",
+  "markdownContent": "Full Markdown lesson: recap link to the previous class, intuition first, then step-by-step explanation/derivation with LaTeX ($...$ and $$...$$), one fully worked example with numbers and units, a common-mistakes section aimed at the misses above, and a short summary. 600-1200 words.",
+  "cheatSheet": [{{"label": "...", "formula": "LaTeX without $"}}],
+  "mermaid": "graph TD; ... concept map with quoted labels like A[\\"label\\"], or empty string",
+  "quiz": [{{"id": "q1", "question": "...", "options": ["a","b","c","d"], "correctAnswer": 0, "hint": "...", "explanation": "..."}}],
+  "practice": [
+    {{"type": "fill_blank", "prompt": "sentence or equation with ___", "options": ["...","...","...","..."], "answer": "exact option text", "explanation": "..."}},
+    {{"type": "order_steps", "prompt": "Put the steps in order", "steps": ["step 1", "step 2", "step 3", "step 4"], "explanation": "..."}},
+    {{"type": "numeric", "prompt": "a calculation with given values", "answer": 4.2, "tolerance": 0.02, "unit": "m/s", "explanation": "worked solution"}},
+    {{"type": "true_false", "prompt": "a statement targeting a misconception", "answer": false, "explanation": "..."}}
+  ]}}
+Write 5 quiz questions that check the objectives (vary the correctAnswer position) and 4-6 practice items using all four types.
+Every variable, formula, exponent and unit with a power (e.g. $v_0$, $9.80\\,\\text{{m/s}}^2$) is LaTeX inside $...$, including inside
+options, steps, hints and answers; never write bare x^2 or v_0.
+"""
+
+def grade_diagnostic(questions: List[Dict[str, Any]], answers: Dict[str, int], concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    mastery: Dict[str, Dict[str, Any]] = {c["id"]: {"correct": 0, "total": 0} for c in concepts}
+    for q in questions:
+        m = mastery.setdefault(q.get("concept"), {"correct": 0, "total": 0})
+        m["total"] += 1
+        m["correct"] += int(answers.get(q["id"]) == q["correctAnswer"])
+    for m in mastery.values():
+        m["score"] = m["correct"] / m["total"] if m["total"] else None
+    return mastery
+
+def effective_mastery(course: Dict[str, Any], classes: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Diagnostic score per concept, overridden by the latest quiz score of any class teaching it."""
+    scores = {cid: m.get("score") for cid, m in (course.get("mastery") or {}).items()}
+    for k in classes:
+        if k.get("score") is not None:
+            for cid in k.get("concepts") or []:
+                scores[cid] = k["score"]
+    return scores
+
+async def plan_course(course_id: str, job, n_questions: int, class_count: Optional[int]):
+    course = db.get_course(course_id)
+    materials = course["materials_text"][:120000] or "(no files: plan from the goal)"
+    goal = course["goal"] or "Master these materials"
+    _job_update(job, step="Reading your materials and writing a diagnostic quiz", progress=0.1)
+    data = await gemini_json(DIAGNOSTIC_PROMPT.format(n=n_questions, goal=goal, materials=materials), role="planner")
+
+    concepts = [{"id": slugify(c.get("id") or c.get("name", ""), f"c{i}"), "name": c.get("name") or f"Concept {i + 1}",
+                 "summary": c.get("summary", "")} for i, c in enumerate(data.get("concepts") or []) if isinstance(c, dict)]
+    if not concepts:
+        concepts = [{"id": "core", "name": data.get("title") or "Core concepts", "summary": ""}]
+    concept_ids = {c["id"] for c in concepts}
+    questions = []
+    for i, q in enumerate(data.get("questions") or []):
+        nq = normalize_quiz_item(q, i) if isinstance(q, dict) else None
+        if nq:
+            nq["id"] = f"q{len(questions) + 1}"
+            cid = slugify(q.get("concept", ""), "")
+            nq["concept"] = cid if cid in concept_ids else concepts[0]["id"]
+            questions.append(nq)
+    if not questions:
+        raise RuntimeError("The diagnostic came back empty. Add more material or a clearer goal and try again.")
+    _job_update(job, step="Double-checking the diagnostic answer keys with a second model", progress=0.4)
+    questions = await verify_questions(questions, materials[:12000] + "\nGoal: " + goal, keep_min=max(3, n_questions // 2))
+
+    _job_update(job, step="Planning the sequence of classes", progress=0.55)
+    count = class_count or min(max(len(concepts) + 1, 4), 8)
+    plan = await gemini_json(role="planner", prompt=SYLLABUS_PROMPT.format(
+        concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts), count=count, goal=goal, materials=materials[:40000]))
+    outline = []
+    for item in (plan.get("classes") or [])[:12]:
+        if isinstance(item, dict) and item.get("title"):
+            outline.append({"title": str(item["title"])[:120],
+                            "concepts": [c for c in (item.get("concepts") or []) if c in concept_ids],
+                            "objectives": [str(o) for o in (item.get("objectives") or [])][:5]})
+    if not outline:
+        outline = [{"title": c["name"], "concepts": [c["id"]], "objectives": [c["summary"]] if c["summary"] else []} for c in concepts]
+
+    db.update_course(course_id, title=data.get("title") or course["title"], subject=data.get("subject") or "",
+                     concepts=concepts, diagnostic=questions, status="diagnostic_ready", error=None)
+    db.replace_classes(course_id, outline)
+    course_event(course_id)
+    return {"courseId": course_id, "questions": len(questions), "classes": len(outline)}
+
+async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    concepts = {c["id"]: c for c in course.get("concepts") or []}
+    scores = effective_mastery(course, classes)
+    covered = klass.get("concepts") or []
+    known = [scores.get(c) for c in covered if scores.get(c) is not None]
+    level = sum(known) / len(known) if known else 0.5
+    levels = ["Foundations", "Intermediate", "Advanced"]
+    step = 0 if level < 0.5 else 1 if level < 0.8 else 2
+    # an adapted class moves one level with the student's last quiz, whatever its own concepts scored
+    if klass.get("adapted_from") is not None:
+        step = max(0, step - 1) if klass["adapted_from"] < ADAPT_LOW else min(2, step + 1)
+    difficulty = levels[step]
+    answers = course.get("answers") or {}
+    misses = [
+        f"- {q['question']} | chose: {q['options'][answers[q['id']]] if 0 <= answers.get(q['id'], -1) < len(q['options']) else 'no answer'}"
+        f" -> {q['options'][q['correctAnswer']]}"
+        for q in course.get("diagnostic") or []
+        if q.get("concept") in covered and answers.get(q["id"]) != q["correctAnswer"]
+    ]
+    previous = [f"Class {k['seq']}: {k['title']}" + (f" (quiz score {round(k['score'] * 100)}%)" if k.get("score") is not None else "")
+                for k in classes if k["seq"] < klass["seq"] and k["status"] == "ready"]
+    prompt = CLASS_PROMPT.format(
+        seq=klass["seq"], total=len(classes), course_title=course["title"], title=klass["title"],
+        objectives="; ".join(klass.get("objectives") or []) or "(choose sensible objectives)",
+        concepts=", ".join(concepts[c]["name"] for c in covered if c in concepts) or klass["title"],
+        mastery_line=", ".join(f"{concepts[c]['name']}: {'not tested' if s is None else str(round(s * 100)) + '%'}"
+                               for c, s in scores.items() if c in concepts) or "no data yet",
+        misses="\n".join(misses) or "- none",
+        previous="\n".join(previous) or "- this is the first class",
+        difficulty=difficulty, subject=course.get("subject") or "Science",
+        materials=(course.get("materials_text") or "")[:30000],
+        adjustment=f"\nIMPORTANT ADJUSTMENT FOR THIS STUDENT: {klass['instruction']}" if klass.get("instruction") else "",
+    )
+    data = await gemini_json(prompt, role="lesson")
+    if not isinstance(data, dict):
+        raise RuntimeError("Lesson generation returned no object")
+    topic = {
+        **{k: data.get(k) for k in ("title", "category", "difficulty", "summary", "markdownContent", "cheatSheet", "mermaid", "quiz")},
+        "id": slugify(f"{course['id']}-{klass['seq']:02d}-{klass['title']}")[:80].strip("-"),
+        "icon": "BookOpen",
+        "practice": normalize_practice(data.get("practice")),
+        "source": {"kind": "course", "courseId": course["id"], "courseTitle": course["title"],
+                   "classSeq": klass["seq"], "classTotal": len(classes)},
+    }
+    topic["title"] = topic.get("title") or klass["title"]
+    topic["category"] = topic.get("category") or course.get("subject") or "Course"
+    topic["markdownContent"] = topic.get("markdownContent") or f"# {klass['title']}"
+    if klass.get("instruction"):
+        topic["source"]["adaptedBecause"] = klass["instruction"]
+    normalized, _ = normalize_topic(topic)
+    quiz_check = verify_questions(normalized["quiz"], _topic_brief(normalized, 8000))
+    sim_task = author_simulation(_topic_brief(topic), f"Make the student SEE the key idea of: {klass['title']}")
+    checked, sim = await asyncio.gather(quiz_check, sim_task, return_exceptions=True)
+    topic["quiz"] = checked if isinstance(checked, list) else normalized["quiz"]
+    if isinstance(sim, dict):
+        topic["simulation"] = sim
+    else:
+        print(f"[course] simulation for class {klass['seq']} skipped: {sim}")
+    saved, _ = normalize_topic(topic)
+    saved["notesFile"] = write_notes_file(saved)
+    saved, _ = save_topic(saved, event_type="TOPIC_CREATED", auto_select=False, course_id=course["id"])
+    return saved
+
+VERIFY_PROMPT = """
+You are an exacting examiner checking multiple-choice questions written by another model before students see them.
+Solve each question yourself first, then compare with the marked answer.
+
+Context (the course material the questions are based on, may be partial):
+{context}
+
+Questions (correctAnswer is a 0-based index into options):
+{questions}
+
+Return JSON only: {{"checks": [{{"id": "<question id>", "verdict": "correct" | "wrong" | "ambiguous",
+  "solvedAnswer": <0-based index you got, or null if no option is right>,
+  "confidence": <0.0-1.0 that the FINAL answer key is right>,
+  "note": "one short sentence: why, or what is wrong"}}]}}
+"wrong" = the marked answer is not the right option. "ambiguous" = two options defensible, none right, or the question is unclear.
+"""
+
+# Plan 4/D: check answer keys against the web, and show students the sources. Needs Google Search grounding
+# on the API key; without it the check runs offline. Turn off with SCIEDU_GROUNDED_CHECKS=0.
+GROUNDED_CHECKS = os.environ.get("SCIEDU_GROUNDED_CHECKS", "1") != "0"
+GROUNDING_NOTE = ("\nUse Google Search to confirm facts, constants and standard results, preferring university and "
+                  "textbook sources. Return ONLY the JSON object, no prose around it.")
+
+async def grounded_json(prompt: str) -> Tuple[Any, List[Dict[str, str]]]:
+    """Gemini with Google Search grounding. JSON mode can't be combined with search, so the JSON is cut
+    out of the text reply; the pages the model actually used come from grounding metadata, never from its text."""
+    global GROUNDING_PAUSED_UNTIL
+    if time.time() < GROUNDING_PAUSED_UNTIL:
+        raise RuntimeError("search grounding paused after a quota error")
+    try:
+        response = await acall_gemini(
+            contents=prompt, role="planner", track_cooldown=False,
+            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())], temperature=0.1),
+        )
+    except Exception:
+        GROUNDING_PAUSED_UNTIL = time.time() + 3600
+        raise
+    text = response.text or ""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("grounded check returned no JSON")
+    data = _parse_json_reply(text[start:end + 1])
+    sources, seen = [], set()
+    try:
+        meta = response.candidates[0].grounding_metadata
+        for chunk in (meta.grounding_chunks or []) if meta else []:
+            web = getattr(chunk, "web", None)
+            if web and web.uri and (web.title or web.uri) not in seen:
+                seen.add(web.title or web.uri)
+                sources.append({"title": web.title or "source", "uri": web.uri})
+    except (AttributeError, IndexError):
+        pass
+    return data, sources[:4]
+
+async def verify_questions(questions: List[Dict[str, Any]], context: str, keep_min: int = 3) -> List[Dict[str, Any]]:
+    """Plan section 4: a second model re-solves every question. Wrong keys are corrected, unclear questions
+    dropped (keeping at least `keep_min`), and each question carries `check` = verdict + certainty for the UI."""
+    if not questions:
+        return questions
+    listing = json.dumps([{k: q.get(k) for k in ("id", "question", "options", "correctAnswer")} for q in questions], ensure_ascii=False)
+    prompt = VERIFY_PROMPT.format(context=context[:12000], questions=listing)
+    data, sources = None, []
+    if GROUNDED_CHECKS:
+        try:
+            data, sources = await grounded_json(prompt + GROUNDING_NOTE)
+        except Exception as e:
+            print(f"[verify] grounded check unavailable, using offline check: {friendly_ai_error(e)}")
+    if data is None:
+        try:
+            data = await gemini_json(prompt, temperature=0.1, role="planner")
+        except Exception as e:
+            print(f"[verify] skipped: {e}")
+            return questions
+    checks = {c.get("id"): c for c in (data.get("checks") or []) if isinstance(c, dict)}
+    kept, dropped = [], []
+    for q in questions:
+        c = checks.get(q.get("id"))
+        if not c:
+            kept.append(q)
+            continue
+        conf = c.get("confidence")
+        conf = max(0.0, min(1.0, float(conf))) if isinstance(conf, (int, float)) else None
+        verdict = c.get("verdict")
+        solved = c.get("solvedAnswer")
+        q = dict(q)
+        if verdict == "wrong" and isinstance(solved, int) and 0 <= solved < len(q["options"]):
+            q["correctAnswer"] = solved
+            q["check"] = {"verdict": "corrected", "confidence": conf, "note": c.get("note", ""), "sources": sources}
+            kept.append(q)
+        elif verdict in ("wrong", "ambiguous") or (conf is not None and conf < 0.5):
+            q["check"] = {"verdict": verdict or "low-confidence", "confidence": conf, "note": c.get("note", ""), "sources": sources}
+            dropped.append(q)
+        else:
+            q["check"] = {"verdict": "verified", "confidence": conf, "note": c.get("note", ""), "sources": sources}
+            kept.append(q)
+    # never leave a quiz too short: put back the least doubtful dropped questions, flagged
+    dropped.sort(key=lambda q: -(q["check"].get("confidence") or 0))
+    while len(kept) < keep_min and dropped:
+        kept.append(dropped.pop(0))
+    return kept
+
+def queue_course_generation(course_id: str) -> Dict[str, Any]:
+    """Generates every pending class in order; one job per course, safe to call again to resume."""
+    running = ACTIVE_COURSE_JOBS.get(course_id)
+    if running and JOBS.get(running, {}).get("status") in ("queued", "running"):
+        return JOBS[running]
+
+    async def work(job):
+        built = 0
+        while True:
+            course = db.get_course(course_id)
+            if not course:
+                return {"courseId": course_id, "cancelled": True}
+            classes = db.list_classes(course_id)
+            pending = [k for k in classes if k["status"] in ("pending", "error")]
+            if not pending:
+                break
+            klass = pending[0]
+            done = sum(k["status"] == "ready" for k in classes)
+            _job_update(job, step=f"Writing class {klass['seq']} of {len(classes)}: {klass['title']}",
+                        progress=0.05 + 0.9 * done / max(len(classes), 1))
+            db.update_class(klass["id"], status="generating", error=None)
+            course_event(course_id)
+            try:
+                topic = await build_class(course, klass, classes)
+                db.update_class(klass["id"], status="ready", topic_id=topic["id"])
+                built += 1
+            except Exception as e:
+                db.update_class(klass["id"], status="error", error=friendly_ai_error(e))
+                db.update_course(course_id, status="error", error=f"Class {klass['seq']} failed: {friendly_ai_error(e)}")
+                course_event(course_id)
+                raise
+            course_event(course_id)
+        db.update_course(course_id, status="ready", error=None)
+        course_event(course_id)
+        return {"courseId": course_id, "built": built}
+
+    db.update_course(course_id, status="generating", error=None)
+    job = start_job("course", f"Course classes: {course_id}", work)
+    ACTIVE_COURSE_JOBS[course_id] = job["id"]
+    db.update_course(course_id, job_id=job["id"])
+    course_event(course_id)
+    return job
+
+@app.on_event("startup")
+async def resume_course_generation():
+    """Classes interrupted by a restart pick up where they stopped."""
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
+    db.init_db()
+    db.reset_stuck_classes()
+    db.fail_interrupted_planning()
+    import_topic_files_into_db()
+    for course_id in db.courses_with_pending_classes():
+        queue_course_generation(course_id)
+
+def import_topic_files_into_db():
+    for path in TOPICS_DIR.glob("*.json"):
+        topic = load_json_file(path, None)
+        if isinstance(topic, dict) and topic.get("id") and not db.get_lesson(topic["id"]):
+            db.upsert_lesson(topic)
+
+@app.get("/api/users")
+def list_profiles():
+    if AUTH_REQUIRED:
+        raise HTTPException(status_code=403, detail="Profiles are private on this server.")
+    return {"users": db.list_users()}
+
+@app.post("/api/users")
+def sign_in(req: UserRequest):
+    """Local profiles (no passwords): only for a personal machine, where the server listens on 127.0.0.1."""
+    if AUTH_REQUIRED:
+        raise HTTPException(status_code=403, detail="Sign in with a password on this server.")
+    return {"user": db.get_or_create_user(_clean_name(req.name))}
+
+@app.get("/api/users/{user_id}/courses")
+def list_user_courses(user_id: str):
+    require_user(user_id)
+    return {"courses": db.list_courses(user_id)}
+
+@app.post("/api/courses")
+def create_course(req: CourseRequest):
+    if AUTH_REQUIRED:
+        req.userId = CURRENT_USER.get()["id"]
+    require_user(req.userId)
+    materials = (req.materials_text or "").strip()
+    goal = (req.goal or "").strip()
+    if len(materials) + len(goal) < 20:
+        raise HTTPException(status_code=422, detail="Add study materials or describe what you want to learn (at least a sentence).")
+    n = min(max(req.num_questions or 8, 4), 15)
+    count = min(max(req.class_count, 2), 12) if req.class_count else None
+    course = db.create_course(req.userId, goal[:80] or (req.filenames or ["New course"])[0], goal, materials[:200000], req.filenames or [])
+
+    async def work(job):
+        try:
+            return await plan_course(course["id"], job, n, count)
+        except Exception as e:
+            db.update_course(course["id"], status="error", error=friendly_ai_error(e))
+            course_event(course["id"])
+            raise
+
+    job = start_job("plan", "Diagnostic & syllabus", work)
+    db.update_course(course["id"], job_id=job["id"])
+    return {"course": public_course(db.get_course(course["id"])), "job": job}
+
+@app.get("/api/courses/{course_id}")
+def get_course(course_id: str):
+    return public_course(require_course(course_id))
+
+@app.post("/api/courses/{course_id}/diagnostic")
+def submit_diagnostic(course_id: str, body: DiagnosticAnswers):
+    course = require_course(course_id)
+    if course["status"] != "diagnostic_ready":
+        raise HTTPException(status_code=409, detail=f"This course is '{course['status']}', not waiting for the diagnostic.")
+    questions = course["diagnostic"]
+    valid = {q["id"] for q in questions}
+    answers = {k: v for k, v in body.answers.items() if k in valid}
+    mastery = grade_diagnostic(questions, answers, course["concepts"])
+    db.update_course(course_id, answers=answers, mastery=mastery)
+    job = queue_course_generation(course_id)
+    graded = [{"id": q["id"], "selected": answers.get(q["id"]), "correctAnswer": q["correctAnswer"],
+               "explanation": q.get("explanation", ""), "concept": q.get("concept")} for q in questions]
+    return {"course": public_course(db.get_course(course_id)), "graded": graded, "job": job}
+
+@app.post("/api/courses/{course_id}/skip-diagnostic")
+def skip_diagnostic(course_id: str):
+    course = require_course(course_id)
+    if course["status"] != "diagnostic_ready":
+        raise HTTPException(status_code=409, detail="The diagnostic isn't ready yet.")
+    queue_course_generation(course_id)
+    return public_course(db.get_course(course_id))
+
+@app.post("/api/courses/{course_id}/resume")
+def resume_course(course_id: str):
+    course = require_course(course_id)
+    if not course.get("diagnostic"):
+        raise HTTPException(status_code=409, detail="Planning didn't finish; create the course again.")
+    queue_course_generation(course_id)
+    return public_course(db.get_course(course_id))
+
+class RegenerateRequest(BaseModel):
+    instruction: Optional[str] = None
+
+@app.post("/api/courses/{course_id}/classes/{seq}/regenerate")
+def regenerate_class(course_id: str, seq: int, body: Optional[RegenerateRequest] = None):
+    require_course(course_id)
+    klass = next((k for k in db.list_classes(course_id) if k["seq"] == seq), None)
+    if not klass:
+        raise HTTPException(status_code=404, detail="Class not found")
+    instruction = ((body.instruction if body else None) or "").strip()[:600] or klass.get("instruction")
+    db.update_class(klass["id"], status="pending", instruction=instruction)
+    queue_course_generation(course_id)
+    return public_course(db.get_course(course_id))
+
+@app.delete("/api/courses/{course_id}")
+def remove_course(course_id: str):
+    require_course(course_id)
+    for k in db.list_classes(course_id):
+        if k.get("topic_id"):
+            for p in (topic_path(k["topic_id"]), NOTES_DIR / f"{k['topic_id']}.md"):
+                p.unlink(missing_ok=True)
+    db.delete_course(course_id)
+    emit_event("TOPIC_UPDATED", {"autoSelect": False})
+    return {"status": "deleted"}
+
+# ---------------------------------------------------------------------------
+# AGY AUTONOMOUS AGENT TOOLS (LESSON GENERATION, SIMULATIONS, PAGE SWITCHING & SANDBOX)
 # ---------------------------------------------------------------------------
 agy_create_lesson_tool = types.FunctionDeclaration(
     name="create_or_update_lesson",
-    description="Creates a new interactive educational topic or updates an existing topic with rich derivations, LaTeX notations, interactive simulations, and assessment quizzes.",
+    description="Creates a new interactive educational topic or updates an existing topic with derivations, LaTeX notation, a cheat sheet and an assessment quiz. A matching interactive simulation is generated automatically in the background.",
     parameters=types.Schema(
         type="OBJECT",
         properties={
@@ -2340,18 +3401,16 @@ agy_create_lesson_tool = types.FunctionDeclaration(
             "title": types.Schema(type="STRING", description="Clean topic title"),
             "category": types.Schema(type="STRING", description="e.g. 'Rigid Body Dynamics', 'Classical Mechanics'"),
             "summary": types.Schema(type="STRING", description="1-2 sentence overview"),
-            "simulationType": types.Schema(type="STRING", description="e.g. 'billiard_collisions', 'rolling_without_slipping' or null"),
             "markdownContent": types.Schema(type="STRING", description="Full textbook derivations with KaTeX equations ($...$ and $$...$$)"),
             "cheatSheet": types.Schema(
                 type="ARRAY",
                 items=types.Schema(
                     type="OBJECT",
                     properties={
-                        "name": types.Schema(type="STRING"),
-                        "formula": types.Schema(type="STRING"),
-                        "desc": types.Schema(type="STRING")
+                        "label": types.Schema(type="STRING"),
+                        "formula": types.Schema(type="STRING", description="LaTeX without $ delimiters"),
                     },
-                    required=["name", "formula", "desc"]
+                    required=["label", "formula"]
                 ),
                 description="List of key formulas and constraints"
             ),
@@ -2361,45 +3420,72 @@ agy_create_lesson_tool = types.FunctionDeclaration(
                 items=types.Schema(
                     type="OBJECT",
                     properties={
-                        "id": types.Schema(type="INTEGER"),
+                        "id": types.Schema(type="STRING"),
                         "question": types.Schema(type="STRING"),
                         "options": types.Schema(type="ARRAY", items=types.Schema(type="STRING")),
-                        "correct": types.Schema(type="INTEGER"),
+                        "correctAnswer": types.Schema(type="INTEGER", description="0-based index into options"),
                         "hint": types.Schema(type="STRING"),
                         "explanation": types.Schema(type="STRING")
                     },
-                    required=["id", "question", "options", "correct", "hint", "explanation"]
+                    required=["question", "options", "correctAnswer", "explanation"]
                 ),
-                description="Multiple-choice assessment questions with derivations"
+                description="Multiple-choice assessment questions"
             )
         },
         required=["id", "title", "category", "markdownContent"]
     )
 )
 
+agy_create_simulation_tool = types.FunctionDeclaration(
+    name="create_simulation",
+    description="Builds a brand-new interactive simulation (any physical system, wave, field or function family) for an existing topic. Runs in the background and appears in the topic's Simulation tab.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "topic_id": types.Schema(type="STRING", description="Existing topic ID to attach the simulation to"),
+            "focus": types.Schema(type="STRING", description="What the simulation should let the student explore, e.g. 'how damping changes the decay of a spring-mass oscillator'"),
+        },
+        required=["topic_id", "focus"]
+    )
+)
+
+agy_adjust_class_tool = types.FunctionDeclaration(
+    name="adjust_class",
+    description="Rewrites one class of the student's current course in the background with an instruction, e.g. make it easier, add worked examples, focus on vectors, harder problems. Use when the student says a class is too hard, too easy, or missing something.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "seq": types.Schema(type="INTEGER", description="Class number in the course (1-based)"),
+            "instruction": types.Schema(type="STRING", description="What to change, written as guidance to the lesson writer"),
+        },
+        required=["seq", "instruction"]
+    )
+)
+
 agy_switch_page_tool = types.FunctionDeclaration(
     name="switch_page",
-    description="Changes the active view in SciEdu Studio, navigating to a specific topic, opening a simulation tab, switching to the quiz, or switching between Physics Studio, Code IDE, and Math Mode.",
+    description="Changes the active view in &.edu LAB, navigating to a specific topic, opening a simulation tab, switching to the quiz, or switching between Study Builder, Physics Studio, Code IDE, and Math Mode.",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "topic_id": types.Schema(type="STRING", description="Target topic ID to navigate to, e.g. 'billiard-ball-collisions'"),
-            "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', or 'agent'"),
-            "mode": types.Schema(type="STRING", description="'physics', 'code', or 'math'")
+            "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', 'practice' or 'agent'"),
+            "mode": types.Schema(type="STRING", description="'home', 'physics', 'code', or 'math'")
         }
     )
 )
 
 agy_set_sim_config_tool = types.FunctionDeclaration(
     name="set_simulation_config",
-    description="Dynamically sets or alters the parameters of the active simulation on the user's screen in real time (e.g. coefficient of restitution e, impact parameter/angle cos(theta), cue strike height, velocity).",
+    description="Dynamically sets the parameters of the billiard simulation on the user's screen in real time (coefficient of restitution e, impact offset / cos(theta), cue strike height, speed, felt friction).",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "restitution": types.Schema(type="NUMBER", description="Coefficient of restitution e between 0.0 and 1.0"),
             "impact_offset": types.Schema(type="NUMBER", description="Impact offset b/R (-1.7 to +1.7) to change cos(theta)"),
             "strike_height": types.Schema(type="NUMBER", description="Cue strike height h/R (-0.8 to +0.8)"),
-            "strike_speed": types.Schema(type="NUMBER", description="Strike speed in px/s (100 to 450)")
+            "strike_speed": types.Schema(type="NUMBER", description="Strike speed in px/s (100 to 450)"),
+            "friction": types.Schema(type="NUMBER", description="Kinetic friction coefficient of the felt (0 to 1)")
         }
     )
 )
@@ -2420,165 +3506,148 @@ agy_execute_code_tool = types.FunctionDeclaration(
 agy_agent_tools = types.Tool(
     function_declarations=[
         agy_create_lesson_tool,
+        agy_create_simulation_tool,
+        agy_adjust_class_tool,
         agy_switch_page_tool,
         agy_set_sim_config_tool,
         agy_execute_code_tool
     ]
 )
 
+# The Antigravity CLI is opt-in: it acts on the filesystem with the user's permissions.
+#   AGY_CLI=1                  use /opt/homebrew/bin/agy (or AGY_BIN) for companion prompts
+#   AGY_SKIP_PERMISSIONS=1     additionally pass --dangerously-skip-permissions (your call; see AGENTS.md)
+AGY_BIN = os.environ.get("AGY_BIN", "/opt/homebrew/bin/agy")
+AGY_CLI_TIMEOUT = 120
+
+async def run_agy_cli(prompt: str) -> str:
+    if os.environ.get("AGY_CLI") != "1" or not Path(AGY_BIN).exists():
+        return ""
+    args = [AGY_BIN]
+    if os.environ.get("AGY_SKIP_PERMISSIONS") == "1":
+        args.append("--dangerously-skip-permissions")
+    args.append(f"-p={prompt}")
+    proc = await asyncio.create_subprocess_exec(
+        *args, cwd=str(Path(__file__).parent),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=AGY_CLI_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        print(f"[AGY RUNNER] Antigravity timed out after {AGY_CLI_TIMEOUT}s, falling back to Gemini tools")
+        return ""
+    return stdout.decode("utf-8", errors="replace").strip() if proc.returncode == 0 else ""
+
+AGY_SYSTEM_PROMPT = (
+    "You are the AGY Autonomous Physics & STEM Assistant embedded inside &.edu LAB. "
+    "You can change the workspace directly with your tools, and you should use them instead of only describing changes:\n"
+    "- `create_simulation` builds a new interactive simulation for ANY topic (pendulums, orbits, waves, fields, gas laws, circuits...).\n"
+    "- `create_or_update_lesson` writes lessons with KaTeX derivations, cheat sheets and quizzes (a simulation is added automatically).\n"
+    "- `set_simulation_config` changes the live billiard simulation (restitution e, impact offset, cue height, speed, friction).\n"
+    "- `switch_page` navigates to a topic/tab or mode.\n"
+    "- `execute_python_code` checks numeric work.\n"
+    "- `adjust_class` rewrites a class of the student's current course (too hard, too easy, missing a topic).\n"
+    "Explain with LaTeX ($...$). Existing topics: {topics}. The student is viewing: {active}.{course}"
+)
+
+def course_context(course_id: Optional[str]) -> str:
+    course = db.get_course(course_id) if course_id else None
+    if not course:
+        return ""
+    lines = [f"\nThe student is in the course \"{course['title']}\" (status {course['status']}). Classes:"]
+    for k in db.list_classes(course_id):
+        score = f", quiz {round(k['score'] * 100)}%" if k.get("score") is not None else ""
+        lines.append(f"  {k['seq']}. {k['title']} [{k['status']}{score}]")
+    return "\n".join(lines)
+
 @app.post("/api/agy/prompt")
 async def post_user_prompt(data: AgyPromptModel):
-    messages = load_json_file(MESSAGES_FILE, [])
-    user_msg = {
-        "id": f"msg-{int(time.time()*1000)}",
-        "sender": "user",
-        "content": data.prompt,
-        "timestamp": time.time()
-    }
-    messages.append(user_msg)
-
+    if data.courseId:
+        try:
+            require_course(data.courseId)  # AGY may only see and change the caller's own course
+        except HTTPException:
+            data.courseId = None
+    user_msg = {"id": f"msg-{int(time.time()*1000)}", "sender": "user", "content": data.prompt, "timestamp": time.time()}
     reply_content = ""
-    agy_bin = "/opt/homebrew/bin/agy"
-    project_dir = Path(__file__).parent
 
-    # 1. ATTEMPT FULL AUTONOMOUS EXECUTION VIA GOOGLE ANTIGRAVITY (AGY) CLI
-    if Path(agy_bin).exists():
-        try:
-            print(f"[AGY RUNNER] Spawning Google Antigravity CLI for prompt: '{data.prompt[:80]}'...")
-            agy_proc = subprocess.run(
-                [agy_bin, "--dangerously-skip-permissions", f"-p={data.prompt}"],
-                cwd=str(project_dir),
-                capture_output=True,
-                text=True,
-                timeout=80
-            )
-            if agy_proc.returncode == 0 and agy_proc.stdout.strip():
-                reply_content = agy_proc.stdout.strip()
-                print(f"[AGY RUNNER] Antigravity successfully completed task!")
-                
-                # Hot-reload topic and view in frontend
-                ui_events_queue.append({
-                    "id": f"evt-{int(time.time()*1000)}",
-                    "type": "TOPIC_UPDATED",
-                    "payload": {"topicId": data.topicId, "autoSelect": True}
-                })
-                ui_events_queue.append({
-                    "id": f"evt-{int(time.time()*1000)+1}",
-                    "type": "SWITCH_TAB",
-                    "payload": {"tab": "simulation"}
-                })
-        except subprocess.TimeoutExpired:
-            print("[AGY RUNNER] Antigravity process timed out after 80s, falling back to direct model...")
-        except Exception as agy_err:
-            print(f"[AGY RUNNER EXCEPTION]: {agy_err}, falling back to direct model...")
+    # 1. Opt-in: hand the prompt to the Antigravity CLI (it edits topic files itself; the UI hot-reloads them)
+    cli_reply = await run_agy_cli(data.prompt)
+    if cli_reply:
+        reply_content = cli_reply
+        emit_event("TOPIC_UPDATED", {"topicId": data.topicId, "autoSelect": True})
 
-    # 2. FALLBACK TO DIRECT GEMINI WITH FUNCTION CALLING TOOLS IF AGY CLI WAS NOT AVAILABLE
+    # 2. Default: Gemini with workspace tools
     if not reply_content:
-        system_inst = (
-            "You are the AGY Autonomous Physics & STEM Coding Assistant embedded inside SciEdu Studio. "
-            "You have full autonomous power to create, update, and manipulate the workspace directly using your tools. "
-            "When the user asks you to change or control the simulation (e.g. 'give ability to change cos of collision', 'change restitution', 'set e=0.5'): "
-            "- Use `set_simulation_config` to dynamically alter the simulation parameters (restitution e, impact_offset cos theta, etc.) on screen! "
-            "- Use `create_or_update_lesson` to generate or enhance lessons with KaTeX equations, cheat-sheets, and quizzes. "
-            "- Use `switch_page` to navigate the workspace to the simulation or quiz tab. "
-            "ALWAYS invoke the tool so the application physically updates on the user's screen in real time!"
-        )
-
+        topic_ids = ", ".join(p.stem for p in sorted(TOPICS_DIR.glob("*.json")))
         try:
-            resp = call_gemini(
+            resp = await acall_gemini(
                 contents=data.prompt,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_inst,
+                    system_instruction=AGY_SYSTEM_PROMPT.format(topics=topic_ids, active=data.topicId,
+                                                                course=course_context(data.courseId)),
                     temperature=0.3,
                     tools=[agy_agent_tools]
                 )
             )
 
             for call in (resp.function_calls or []):
+                args = dict(call.args or {})
                 if call.name == "set_simulation_config":
-                    args = dict(call.args)
-                    ui_events_queue.append({
-                        "id": f"evt-{int(time.time()*1000)}",
-                        "type": "SET_SIM_CONFIG",
-                        "payload": args
-                    })
-                    ui_events_queue.append({
-                        "id": f"evt-{int(time.time()*1000)+1}",
-                        "type": "SWITCH_TAB",
-                        "payload": {"tab": "simulation"}
-                    })
-                    reply_content = (
-                        f"🎛️ **Live Simulation Parameters Updated!**\n\n"
-                        f"I have modified the simulation state on your screen:\n"
-                        + (f"- **Coefficient of Restitution (e)**: `{args.get('restitution')}`\n" if 'restitution' in args else "")
-                        + (f"- **Impact Offset (cos θ parameter)**: `{args.get('impact_offset')}`\n" if 'impact_offset' in args else "")
-                        + (f"- **Cue Height (h/R)**: `{args.get('strike_height')}`\n" if 'strike_height' in args else "")
-                        + "\nThe controls and live canvas have been updated in real time on your screen."
-                    )
+                    emit_event("SET_SIM_CONFIG", args)
+                    emit_event("SWITCH_TAB", {"tab": "simulation"})
+                    labels = {"restitution": "Coefficient of Restitution (e)", "impact_offset": "Impact Offset (cos θ parameter)",
+                              "strike_height": "Cue Height (h/R)", "strike_speed": "Strike speed", "friction": "Felt friction μ"}
+                    reply_content = "🎛️ **Live Simulation Parameters Updated!**\n\n" + "".join(
+                        f"- **{labels[k]}**: `{args[k]}`\n" for k in labels if k in args)
                     break
 
                 elif call.name == "create_or_update_lesson":
-                    args = dict(call.args)
-                    tid = args.get("id", f"topic-{int(time.time())}")
-                    tfile = TOPICS_DIR / f"{tid}.json"
-                    
-                    topic_data = {
-                        "id": tid,
-                        "title": args.get("title", "New Lesson"),
-                        "category": args.get("category", "Theoretical Physics"),
-                        "difficulty": args.get("difficulty", "Undergraduate"),
-                        "simulationType": args.get("simulationType"),
-                        "summary": args.get("summary", ""),
-                        "cheatSheet": args.get("cheatSheet", []),
-                        "mermaid": args.get("mermaid", ""),
-                        "markdownContent": args.get("markdownContent", ""),
-                        "quiz": args.get("quiz", [])
-                    }
-                    save_json_file(tfile, topic_data)
-
-                    ui_events_queue.append({
-                        "id": f"evt-{int(time.time()*1000)}",
-                        "type": "TOPIC_CREATED",
-                        "payload": {"topicId": tid, "title": topic_data["title"]}
-                    })
-                    
-                    target_tab = "simulation" if topic_data.get("simulationType") else "theory"
-                    ui_events_queue.append({
-                        "id": f"evt-{int(time.time()*1000)+1}",
-                        "type": "SWITCH_TOPIC",
-                        "payload": {"topicId": tid, "tab": target_tab, "mode": "physics"}
-                    })
-
-                    q_count = len(topic_data.get("quiz", []))
+                    args["id"] = slugify(args.get("id") or args.get("title", ""), f"topic-{int(time.time())}")
+                    args.setdefault("difficulty", "Undergraduate")
+                    saved, warnings = save_topic(args, event_type="TOPIC_CREATED")
+                    sim_job = queue_simulation_job(saved["id"]) if not saved.get("simulation") else None
+                    emit_event("SWITCH_TOPIC", {"topicId": saved["id"], "tab": "theory", "mode": "physics"})
                     reply_content = (
-                        f"🎉 **New Lesson Generated & Workspace Updated!**\n\n"
-                        f"I have created **{topic_data['title']}** with:\n"
-                        f"- Full KaTeX scientific derivations\n"
-                        f"- Key formulas cheat sheet\n"
-                        f"- Interactive simulation: `{topic_data.get('simulationType', 'theory')}`\n"
-                        f"- Assessment quiz ({q_count} questions)\n\n"
-                        f"🚀 *I have switched your workspace directly to this lesson.*"
+                        f"🎉 **{saved['title']}** is ready: derivations, {len(saved['cheatSheet'])} key formulas and "
+                        f"{len(saved['quiz'])} quiz questions."
+                        + ("\n\n🧪 I'm building an interactive simulation for it in the background; the Simulation tab lights up when it's done." if sim_job else "")
+                        + (f"\n\n_Notes: {'; '.join(warnings)}_" if warnings else "")
                     )
                     break
 
+                elif call.name == "create_simulation":
+                    tid = args.get("topic_id") or data.topicId
+                    try:
+                        queue_simulation_job(tid, args.get("focus", ""))
+                        reply_content = f"🧪 Building a new simulation for **{tid}** focused on: _{args.get('focus', 'the core concept')}_. It appears in the Simulation tab in about 20–40 seconds."
+                    except HTTPException:
+                        reply_content = f"I couldn't find a topic called `{tid}`. Ask me to create the lesson first."
+                    break
+
+                elif call.name == "adjust_class":
+                    if not data.courseId or not db.get_course(data.courseId):
+                        reply_content = "Open the course first (My courses → your course), then ask me again so I know which class you mean."
+                        break
+                    klass = next((k for k in db.list_classes(data.courseId) if k["seq"] == int(args.get("seq", 0))), None)
+                    if not klass:
+                        reply_content = f"This course has no class {args.get('seq')}."
+                        break
+                    db.update_class(klass["id"], status="pending", instruction=str(args.get("instruction", ""))[:600])
+                    queue_course_generation(data.courseId)
+                    reply_content = (f"Rewriting **class {klass['seq']}: {klass['title']}** with this change: _{args.get('instruction')}_. "
+                                     "It takes about a minute; the course page shows progress.")
+                    break
+
                 elif call.name == "switch_page":
-                    args = dict(call.args)
                     tid = args.get("topic_id")
                     tab = args.get("tab", "theory")
                     mode = args.get("mode", "physics")
-
-                    ui_events_queue.append({
-                        "id": f"evt-{int(time.time()*1000)}",
-                        "type": "SWITCH_TOPIC",
-                        "payload": {"topicId": tid, "tab": tab, "mode": mode}
-                    })
+                    emit_event("SWITCH_TOPIC", {"topicId": tid, "tab": tab, "mode": mode})
                     reply_content = f"🔄 Switched workspace view to **{tid or mode}** ({tab} tab)."
                     break
 
                 elif call.name == "execute_python_code":
-                    args = dict(call.args)
-                    code_payload = ExecuteCodePayload(code=args.get("code", ""), test_code=args.get("test_code", ""))
-                    exec_res = await execute_code(code_payload)
+                    exec_res = await asyncio.to_thread(run_python_sandboxed, args.get("code", ""), args.get("test_code", ""))
                     reply_content = (
                         f"⚡ **Execution Result:**\n```\n{exec_res.get('stdout', '')}\n{exec_res.get('stderr', '')}\n```\n"
                         f"Status: {'Passed' if exec_res.get('tests_passed') else 'Error'}"
@@ -2587,71 +3656,73 @@ async def post_user_prompt(data: AgyPromptModel):
 
             if not reply_content:
                 try:
-                    reply_content = resp.text.strip()
+                    reply_content = (resp.text or "").strip()
                 except Exception:
                     pass
 
         except Exception as e:
             print("[ERROR agy prompt Gemini call with tools]:", e)
+            reply_content = f"⚠️ {friendly_ai_error(e)}"
 
     if not reply_content:
-        reply_content = f"AGY Companion received: '{data.prompt}'. Solution derived and displayed below."
+        reply_content = "I couldn't produce an answer for that. Try rephrasing, or check the backend log."
 
-    agent_msg = {
-        "id": f"msg-{int(time.time()*1000)+1}",
-        "sender": "agy",
-        "content": reply_content,
-        "timestamp": time.time()
-    }
-    messages.append(agent_msg)
-    save_json_file(MESSAGES_FILE, messages)
-
-    ui_events_queue.append({
-        "id": f"evt-{int(time.time()*1000)}",
-        "type": "NEW_MESSAGE",
-        "payload": {"message": agent_msg}
-    })
-
+    agent_msg = {"id": f"msg-{int(time.time()*1000)+1}", "sender": "agy", "content": reply_content, "timestamp": time.time()}
+    append_messages(user_msg, agent_msg)
+    emit_event("NEW_MESSAGE", {"message": agent_msg})
     return {"status": "ok", "reply": reply_content}
 
 @app.get("/api/agy/inbox")
 def get_agy_inbox():
     items = []
     if INBOX_FILE.exists():
-        try:
-            with open(INBOX_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        items.append(json.loads(line.strip()))
-        except Exception as e:
-            print("[ERROR reading inbox]:", e)
+        with open(INBOX_FILE, "r", encoding="utf-8") as f:
+            for line in f.readlines()[-200:]:
+                try:
+                    items.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
     return {"inbox": items, "count": len(items)}
 
 @app.post("/api/agy/inbox")
 def post_agy_inbox(item: Dict[str, Any]):
-    item["timestamp"] = time.time()
-    with open(INBOX_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(item) + chr(10))
-    return {"status": "queued", "item": item}
+    line = json.dumps({**item, "timestamp": time.time()})
+    if len(line) > MAX_INBOX_BYTES:
+        raise HTTPException(status_code=413, detail=f"Inbox items are limited to {MAX_INBOX_BYTES} bytes")
+    with _file_lock, open(INBOX_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    return {"status": "queued", "item": json.loads(line)}
 
 @app.get("/api/status")
 def get_status():
     return {
         "status": "online",
-        "agent_sync": True,
         "topic_count": len(list(TOPICS_DIR.glob("*.json"))),
-        "pending_events": len(ui_events_queue),
-        "agy_bridge": "active",
+        "gemini_configured": bool(os.environ.get("api_KEY") or os.environ.get("GEMINI_API_KEY")),
+        "agy_cli_enabled": os.environ.get("AGY_CLI") == "1" and Path(AGY_BIN).exists(),
+        "active_jobs": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running")),
+        "event_cursor": _event_seq,
+        "auth_required": AUTH_REQUIRED,
         "port": 8090,
         "features": [
-            "code_sandbox", "multimodal_ingestion", "tutor_chat", 
-            "tutor_brief", "elevenlabs_voiceover", "curriculum_engine",
-            "physics_simulations", "latex_derivations", "assessment_quiz",
-            "agy_file_mailbox"
+            "courses", "sqlite_storage", "simspec_simulations", "background_jobs", "code_sandbox",
+            "multimodal_ingestion", "tutor_chat", "tutor_brief", "elevenlabs_voiceover",
+            "curriculum_engine", "latex_derivations", "assessment_quiz", "agy_file_mailbox"
         ]
     }
 
+# Deployment: serve the built frontend (npm run build -> dist/) from the same server, so no Vite is needed.
+DIST_DIR = Path(__file__).parent / "dist"
+if (DIST_DIR / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="frontend")
+
 if __name__ == "__main__":
     import uvicorn
-    print("Starting SciEdu Studio Universal Backend on port 8090...")
-    uvicorn.run(app, host="0.0.0.0", port=8090)
+    host = os.environ.get("SCIEDU_HOST", "127.0.0.1")
+    port = int(os.environ.get("SCIEDU_PORT", "8090"))
+    if host not in ("127.0.0.1", "localhost", "::1") and not AUTH_REQUIRED:
+        sys.exit("Refusing to listen on {} without accounts: set SCIEDU_AUTH=1 (and SCIEDU_ALLOWED_HOSTS) "
+                 "before serving other machines.".format(host))
+    print(f"Starting &.edu LAB backend on http://{host}:{port} ...")
+    uvicorn.run(app, host=host, port=port)

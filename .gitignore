@@ -5,3 +5,11 @@ __pycache__
 *.pyc
 *.log
 .DS_Store
+
+# runtime data (profiles, courses, attempts)
+content/edu_studio.db*
+content/quiz_results.jsonl
+content/*.tmp
+# generated per student: course lessons and their notes stay out of the repo
+content/topics/course-*.json
+content/notes/

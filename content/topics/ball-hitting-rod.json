@@ -7,17 +7,17 @@
   "summary": "Explore the impulsive collision between a moving ball and a rigid rod, analyzing momentum transfer, impulse, and angular rotation.",
   "cheatSheet": [
     {
-      "name": "Linear Impulse",
-      "desc": "Relates linear impulse $J$ to change in linear momentum",
-      "formula": "J = m(v_f - v_i)"
+      "label": "Linear Impulse",
+      "formula": "J = m(v_f - v_i)",
+      "desc": "Relates linear impulse $J$ to change in linear momentum"
     },
     {
+      "label": "Angular Impulse",
       "formula": "\\int \\tau dt = I(\\omega_f - \\omega_i)",
-      "desc": "Relates angular impulse $\\tau dt$ to change in angular momentum",
-      "name": "Angular Impulse"
+      "desc": "Relates angular impulse $\\tau dt$ to change in angular momentum"
     },
     {
-      "name": "Coefficient of Restitution",
+      "label": "Coefficient of Restitution",
       "formula": "v_{\\text{contact}} = v_{\\text{rod}} + \\omega \\times r = -e (v_{\\text{ball,in}} - v_{\\text{contact,in}})",
       "desc": "Relates velocity of a point on the rod to ball velocity after impact"
     }
@@ -35,12 +35,11 @@
       ],
       "question": "What torque is imparted to the rod during the impulsive collision?",
       "explanation": "The impulse acts perpendicularly to the rod surface at the contact point, creating a torque $J \\cdot r$ about the center of mass.",
-      "correct": 1,
-      "hint": "Consider torque as force multiplied by the perpendicular distance from the center of mass."
+      "hint": "Consider torque as force multiplied by the perpendicular distance from the center of mass.",
+      "correctAnswer": 1
     },
     {
       "id": 2,
-      "correct": 2,
       "question": "How is the coefficient of restitution $e$ defined for a ball-rod collision at the contact point?",
       "explanation": "The coefficient of restitution relates the relative separation velocity to the relative approach velocity along the line of impact: $e = \\frac{v_{\\text{sep}}}{v_{\\text{app}}}$.",
       "hint": "Look at the ratio of relative velocities before and after impact.",
@@ -49,7 +48,9 @@
         "$e = \\frac{\\omega_{\\text{f}}}{\\omega_{\\text{i}}}$",
         "$e = -\\frac{v_{\\text{ball,f}} - v_{\\text{contact,f}}}{v_{\\text{ball,i}} - v_{\\text{contact,i}}}$",
         "$e = 1 - \\frac{M}{m}$"
-      ]
+      ],
+      "correctAnswer": 2
     }
-  ]
+  ],
+  "practice": []
 }

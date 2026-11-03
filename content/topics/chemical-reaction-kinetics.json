@@ -1,0 +1,189 @@
+{
+  "quiz": [
+    {
+      "explanation": "Activation energy is the minimum energy barrier reactants must overcome to form products.",
+      "question": "What is Activation Energy ($E_a$)?",
+      "hint": "Think about the energy barrier in collision theory.",
+      "id": "q1_ea",
+      "options": [
+        "The total energy released by the reaction",
+        "The minimum energy required for a collision to result in a reaction",
+        "The average kinetic energy of the molecules",
+        "The energy difference between reactants and products"
+      ],
+      "correctAnswer": 1
+    },
+    {
+      "question": "According to Le Chatelier's principle, how does a system at equilibrium respond to an added stress?",
+      "options": [
+        "Shift to counteract the disturbance",
+        "Stop reacting entirely",
+        "Increase the activation energy",
+        "Decrease the temperature automatically"
+      ],
+      "hint": "Le Chatelier's principle deals with system disturbances.",
+      "correctAnswer": 0,
+      "explanation": "Le Chatelier's principle states that systems shift to counteract external disturbances to equilibrium.",
+      "id": "q2_lechatelier"
+    }
+  ],
+  "summary": "Explore chemical reactions, collision theory, activation energy, and equilibrium dynamics.",
+  "title": "Chemical Reactions and Kinetics",
+  "cheatSheet": [
+    {
+      "label": "Equilibrium Constant",
+      "formula": "K_{eq} = \\frac{[C]^c[D]^d}{[A]^a[B]^b}"
+    },
+    {
+      "label": "Rate Law",
+      "formula": "Rate = k[A]^m[B]^n"
+    },
+    {
+      "label": "Gibbs Free Energy",
+      "formula": "\\Delta G = \\Delta H - T\\Delta S"
+    }
+  ],
+  "category": "Physical Chemistry",
+  "markdownContent": "# Chemical Reactions, Kinetics, and Equilibrium\n\nChemical reactions represent the transformation of reactants into products through the breaking and forming of chemical bonds. Understanding how and why reactions occur involves studying **kinetics** (how fast they happen) and **thermodynamics** (whether they are favorable).\n\n## 1. Collision Theory and Activation Energy\nFor a chemical reaction to occur, reactant particles must collide with:\n1. **Sufficient Energy**: Equal to or greater than the **Activation Energy ($E_a$)**.\n2. **Proper Orientation**: Aligned correctly to break and form bonds.\n\nThe Arrhenius equation describes how the rate constant $k$ depends on temperature:\n$$k = A e^{-\\frac{E_a}{RT}}$$\n\n## 2. Chemical Equilibrium\nWhen a reversible reaction proceeds, forward and reverse rates eventually become equal:\n$$aA + bB \\rightleftharpoons cC + dD$$\n\nAt equilibrium, the ratio of product concentrations to reactant concentrations is constant ($K_{eq}$):\n$$K_{eq} = \\frac{[C]^c[D]^d}{[A]^a[B]^b}$$\n\n## 3. Le Chatelier's Principle\nIf a dynamic equilibrium is disturbed by changing conditions (concentration, temperature, or pressure), the position of equilibrium shifts to counteract the change and re-establish equilibrium.\n",
+  "mermaid": "graph TD\n    A[Reactants A + B] -->|Collision with Ea| B[Activated Complex / Transition State]\n    B --> C[Products C + D]\n    C -->|Reverse Reaction| A",
+  "id": "chemical-reaction-kinetics",
+  "difficulty": "Undergraduate",
+  "practice": [],
+  "simulation": {
+    "version": 1,
+    "kind": "particles",
+    "title": "Chemical Collision Theory and Reaction Kinetics",
+    "description": "Adjust the activation energy threshold and initial kinetic temperature to see how reactant particles collide, overcome the energy barrier, and transform into products. Watch the kinetic energy distribution and product yield over time.",
+    "params": [
+      {
+        "name": "Ea",
+        "label": "Activation Energy",
+        "min": 1.0,
+        "max": 50.0,
+        "value": 20.0,
+        "step": 1.0,
+        "unit": "J"
+      },
+      {
+        "name": "temp",
+        "label": "Temperature (Speed)",
+        "min": 1.0,
+        "max": 10.0,
+        "value": 5.0,
+        "step": 0.5,
+        "unit": "a.u."
+      }
+    ],
+    "world": {
+      "width": 10.0,
+      "height": 6.0,
+      "ground": false,
+      "walls": true,
+      "label": "",
+      "gravity": "0",
+      "restitution": "1.0"
+    },
+    "bodies": [
+      {
+        "id": "r1",
+        "label": "r1",
+        "color": "cyan",
+        "fixed": false,
+        "trail": false,
+        "x": "2",
+        "y": "3",
+        "vx": "temp",
+        "vy": "temp*0.5",
+        "mass": "1",
+        "radius": "0.3"
+      },
+      {
+        "id": "r2",
+        "label": "r2",
+        "color": "cyan",
+        "fixed": false,
+        "trail": false,
+        "x": "3",
+        "y": "2",
+        "vx": "-temp*0.8",
+        "vy": "temp*0.7",
+        "mass": "1",
+        "radius": "0.3"
+      },
+      {
+        "id": "r3",
+        "label": "r3",
+        "color": "cyan",
+        "fixed": false,
+        "trail": false,
+        "x": "7",
+        "y": "4",
+        "vx": "-temp*0.5",
+        "vy": "-temp*0.6",
+        "mass": "1",
+        "radius": "0.3"
+      },
+      {
+        "id": "r4",
+        "label": "r4",
+        "color": "cyan",
+        "fixed": false,
+        "trail": false,
+        "x": "8",
+        "y": "2",
+        "vx": "-temp",
+        "vy": "-temp*0.3",
+        "mass": "1",
+        "radius": "0.3"
+      },
+      {
+        "id": "p1",
+        "label": "p1",
+        "color": "orange",
+        "fixed": false,
+        "trail": false,
+        "x": "5",
+        "y": "3",
+        "vx": "temp*0.4",
+        "vy": "-temp*0.4",
+        "mass": "1.2",
+        "radius": "0.35"
+      }
+    ],
+    "forces": [],
+    "links": [],
+    "readouts": [
+      {
+        "expr": "r1.speed",
+        "label": "Reactant Speed",
+        "unit": "m/s",
+        "color": "gold"
+      },
+      {
+        "expr": "0.5 * r1.m * r1.speed^2 + 0.5 * r2.m * r2.speed^2",
+        "label": "System Energy",
+        "unit": "J",
+        "color": "cyan"
+      }
+    ],
+    "series": [
+      {
+        "expr": "0.5 * r1.m * r1.speed^2 + 0.5 * r2.m * r2.speed^2 + 0.5 * r3.m * r3.speed^2 + 0.5 * r4.m * r4.speed^2",
+        "label": "Total Kinetic Energy",
+        "unit": "",
+        "color": "gold"
+      }
+    ],
+    "vectors": [
+      {
+        "body": "r1",
+        "x": "r1.vx",
+        "y": "r1.vy",
+        "label": "v",
+        "scale": 0.2,
+        "color": "cyan"
+      }
+    ],
+    "duration": 30.0
+  }
+}
