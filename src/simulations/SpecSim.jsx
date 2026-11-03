@@ -45,6 +45,13 @@ function SpecSimPlayer({ spec }) {
 
   const [params, setParams] = useState(initialParams);
   const [isRunning, setIsRunning] = useState(true);
+  // Teaching overlays: on/off per student, defaults from the spec's "overlays"
+  const [overlays, setOverlays] = useState(() => ({
+    fbd: Boolean(spec.overlays?.fbd), energy: Boolean(spec.overlays?.energy),
+    momentum: Boolean(spec.overlays?.momentum), stress: Boolean(spec.overlays?.stress),
+  }));
+  const overlaysRef = useRef(overlays);
+  overlaysRef.current = overlays;
   const [isUnstable, setIsUnstable] = useState(false);
   const [readoutsData, setReadoutsData] = useState([]);
   const canvasRef = useRef(null);
@@ -217,6 +224,10 @@ function SpecSimPlayer({ spec }) {
 
     simStateRef.current.t = 0;
     simStateRef.current.view = null;
+    simStateRef.current.E0 = null;
+    simStateRef.current.pMax = 0;
+    simStateRef.current.forceLog = {};
+    simStateRef.current.rodTension = [];
     simStateRef.current.yRange = null;
     simStateRef.current.bodies = bodies;
     simStateRef.current.trails = trails;
@@ -277,7 +288,8 @@ function SpecSimPlayer({ spec }) {
 
         // Physics substepping (240 Hz effective)
         if (isRunning && !isUnstable) {
-          const substeps = Math.min(64, Math.max(1, Math.ceil(dt * 240)));
+          // ~1000 Hz: small scenes stay cheap, and rods/springs keep energy to well under 1%
+          const substeps = Math.min(160, Math.max(1, Math.ceil(dt * 1000)));
           const subDt = dt / substeps;
 
           for (let step = 0; step < substeps; step++) {
@@ -299,15 +311,18 @@ function SpecSimPlayer({ spec }) {
             const gVal = world.gravity(scope);
             const restVal = Math.min(1, Math.max(0, world.restitution(scope)));
 
-            // 1. Accumulate forces
+            // 1. Accumulate forces (each one is also logged by source for the free-body diagram)
             const fx = {};
             const fy = {};
+            const forceLog = {};
+            const logF = (id, label, x, y) => { if (x || y) (forceLog[id] || (forceLog[id] = [])).push({ label, x, y }); };
             for (const id in state.bodies) {
               fx[id] = 0;
               fy[id] = 0;
               const b = state.bodies[id];
               if (!b.fixed) {
                 fy[id] -= b.m * gVal;
+                logF(id, 'W', 0, -b.m * gVal);
               }
             }
 
@@ -335,10 +350,12 @@ function SpecSimPlayer({ spec }) {
                     if (!bB.fixed) {
                       fx[bB.id] += Ftotal * nx;
                       fy[bB.id] += Ftotal * ny;
+                      logF(bB.id, 'Fs', Ftotal * nx, Ftotal * ny);
                     }
                     if (!bA.fixed) {
                       fx[bA.id] -= Ftotal * nx;
                       fy[bA.id] -= Ftotal * ny;
+                      logF(bA.id, 'Fs', -Ftotal * nx, -Ftotal * ny);
                     }
                   }
                 }
@@ -352,6 +369,7 @@ function SpecSimPlayer({ spec }) {
                     const mag = coef * Math.pow(spd, pwr);
                     fx[b.id] -= mag * (b.vx / spd);
                     fy[b.id] -= mag * (b.vy / spd);
+                    logF(b.id, 'D', -mag * (b.vx / spd), -mag * (b.vy / spd));
                   }
                 }
               } else if (f.type === 'gravitation') {
@@ -370,16 +388,18 @@ function SpecSimPlayer({ spec }) {
                     const F = (G * b1.m * b2.m) / distSq;
                     const fxPair = F * (dx / dist);
                     const fyPair = F * (dy / dist);
-                    if (!b1.fixed) { fx[b1.id] += fxPair; fy[b1.id] += fyPair; }
-                    if (!b2.fixed) { fx[b2.id] -= fxPair; fy[b2.id] -= fyPair; }
+                    if (!b1.fixed) { fx[b1.id] += fxPair; fy[b1.id] += fyPair; logF(b1.id, 'Fg', fxPair, fyPair); }
+                    if (!b2.fixed) { fx[b2.id] -= fxPair; fy[b2.id] -= fyPair; logF(b2.id, 'Fg', -fxPair, -fyPair); }
                   }
                 }
               } else if (f.type === 'custom') {
                 const b = state.bodies[f.body];
                 if (b && !b.fixed) {
                   const bScope = { ...scope, x: b.x, y: b.y, vx: b.vx, vy: b.vy, m: b.m };
-                  fx[b.id] += f.fx(bScope);
-                  fy[b.id] += f.fy(bScope);
+                  const cfx = f.fx(bScope), cfy = f.fy(bScope);
+                  fx[b.id] += cfx;
+                  fy[b.id] += cfy;
+                  logF(b.id, 'F', cfx, cfy);
                 }
               } else if (f.type === 'uniform') {
                 const fxVal = f.fx(scope);
@@ -390,10 +410,31 @@ function SpecSimPlayer({ spec }) {
                   if (b && !b.fixed) {
                     fx[bid] += fxVal;
                     fy[bid] += fyVal;
+                    logF(bid, 'F', fxVal, fyVal);
                   }
                 }
               }
             }
+
+            // 1b. Rods with one fixed end: apply the exact tension as a force before integrating,
+            //     T = (other forces).n + m v_t^2 / L, so the bob stays on its circle without the
+            //     energy loss of correcting position afterwards (projection below only fixes drift).
+            state.rodTension = compiledSpec.links.map((l) => {
+              const a = state.bodies[l.a], bb = state.bodies[l.b];
+              if (!a || !bb || a.fixed === bb.fixed) return null;
+              const [pivot, bob] = a.fixed ? [a, bb] : [bb, a];
+              const dx = bob.x - pivot.x, dy = bob.y - pivot.y;
+              const L = Math.hypot(dx, dy);
+              if (L < 1e-9) return null;
+              const nx = dx / L, ny = dy / L;
+              const vr = bob.vx * nx + bob.vy * ny;
+              const vt2 = Math.max(0, bob.vx * bob.vx + bob.vy * bob.vy - vr * vr);
+              const T = fx[bob.id] * nx + fy[bob.id] * ny + (bob.m * vt2) / L;
+              fx[bob.id] -= T * nx;
+              fy[bob.id] -= T * ny;
+              logF(bob.id, 'T', -T * nx, -T * ny);
+              return T;
+            });
 
             // 2. Semi-implicit Euler integration
             let exploded = false;
@@ -530,6 +571,9 @@ function SpecSimPlayer({ spec }) {
             for (const id in state.bodies) {
               const b = state.bodies[id];
               if (!b.fixed) {
+                if (world.ground && b.y - b.r <= 1e-3 && fy[id] < 0) {
+                  logF(id, 'N', 0, -fy[id]);  // the ground pushes back on whatever presses into it
+                }
                 if (world.ground && b.y - b.r < 0) {
                   b.y = b.r;
                   if (b.vy < 0) {
@@ -551,6 +595,7 @@ function SpecSimPlayer({ spec }) {
             }
 
             state.t += subDt;
+            state.forceLog = forceLog;
           }
 
           // Append trail points
@@ -833,6 +878,165 @@ function SpecSimPlayer({ spec }) {
               }
             }
           }
+        }
+
+        // ---------------- Teaching overlays ----------------
+        const ov = overlaysRef.current;
+        const oScope = { ...params, t: state.t };
+        for (const id in state.bodies) {
+          const b = state.bodies[id];
+          oScope[id] = { x: b.x, y: b.y, vx: b.vx, vy: b.vy, m: b.m, r: b.r, speed: Math.hypot(b.vx, b.vy) };
+        }
+        const monoFont = '11px "IBM Plex Mono", "JetBrains Mono", monospace';
+        const arrow = (x0, y0, x1, y1, color, label, width = 2) => {
+          const ang = Math.atan2(y1 - y0, x1 - x0);
+          ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 - 8 * Math.cos(ang - 0.45), y1 - 8 * Math.sin(ang - 0.45));
+          ctx.lineTo(x1 - 8 * Math.cos(ang + 0.45), y1 - 8 * Math.sin(ang + 0.45));
+          ctx.closePath(); ctx.fill();
+          if (label) { ctx.font = monoFont; ctx.textAlign = 'left'; ctx.fillText(label, x1 + 5, y1 - 5); }
+        };
+
+        // Stress: springs and rods colored by strain / tension (red = tension, blue = compression)
+        if (ov.stress) {
+          const strainColor = (e) => {
+            const k = Math.min(1, Math.abs(e) / 0.25);
+            return e >= 0 ? `rgba(196, 48, 43, ${0.35 + 0.65 * k})` : `rgba(37, 99, 160, ${0.35 + 0.65 * k})`;
+          };
+          let maxStrain = 0;
+          compiledSpec.forces.forEach((f) => {
+            if (f.type !== 'spring') return;
+            const a = state.bodies[f.a], bb = state.bodies[f.b];
+            if (!a || !bb) return;
+            const rest = Math.max(1e-6, f.rest(oScope));
+            const strain = (Math.hypot(bb.x - a.x, bb.y - a.y) - rest) / rest;
+            if (Math.abs(strain) > Math.abs(maxStrain)) maxStrain = strain;
+            ctx.strokeStyle = strainColor(strain);
+            ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(wX(a.x), wY(a.y)); ctx.lineTo(wX(bb.x), wY(bb.y)); ctx.stroke();
+          });
+          const tensions = (state.rodTension || []).filter((t) => t !== null && isFinite(t));
+          const tMax = Math.max(1e-6, ...tensions.map(Math.abs));
+          compiledSpec.links.forEach((l, i) => {
+            const T = state.rodTension?.[i];
+            const a = state.bodies[l.a], bb = state.bodies[l.b];
+            if (T === null || T === undefined || !a || !bb) return;
+            ctx.strokeStyle = strainColor((T / tMax) * 0.25);
+            ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.moveTo(wX(a.x), wY(a.y)); ctx.lineTo(wX(bb.x), wY(bb.y)); ctx.stroke();
+            ctx.fillStyle = palette['ink'] || '#000';
+            ctx.font = monoFont; ctx.textAlign = 'left';
+            ctx.fillText(`T=${T.toFixed(1)} N`, (wX(a.x) + wX(bb.x)) / 2 + 8, (wY(a.y) + wY(bb.y)) / 2);
+          });
+          ctx.fillStyle = palette['ink-soft'] || '#555';
+          ctx.font = monoFont; ctx.textAlign = 'left';
+          ctx.fillText(`stress: red = tension, blue = compression${maxStrain ? `, max strain ${(maxStrain * 100).toFixed(1)}%` : ''}`, 12, H - chartStrip - 12);
+        }
+
+        // Free-body diagram: every force on each moving body, to scale with the largest one on screen
+        if (ov.fbd) {
+          const FBD_COLORS = { W: palette['gold-text'], N: palette['accent'], Fs: palette['info'], D: palette['bad'], T: palette['plum'], Fg: palette['gold-text'], F: palette['ink'] };
+          const FBD_NAMES = { W: 'W (weight)', N: 'N (normal)', Fs: 'spring', D: 'drag', T: 'T (tension)', Fg: 'gravity', F: 'applied' };
+          const log = state.forceLog || {};
+          let fMax = 1e-9;
+          for (const id in log) for (const f of log[id]) fMax = Math.max(fMax, Math.hypot(f.x, f.y));
+          const used = new Set();
+          for (const id in log) {
+            const b = state.bodies[id];
+            if (!b || b.fixed) continue;
+            const cx = wX(b.x), cy = wY(b.y);
+            for (const f of log[id]) {
+              const mag = Math.hypot(f.x, f.y);
+              if (mag < fMax * 0.02) continue;
+              const len = 18 + (mag / fMax) * 72;
+              arrow(cx, cy, cx + (f.x / mag) * len, cy - (f.y / mag) * len, FBD_COLORS[f.label] || palette['ink'], `${f.label} ${mag.toFixed(1)}N`, 2.5);
+              used.add(f.label);
+            }
+          }
+          // legend of the force types on screen
+          let ly = 18;
+          ctx.font = monoFont; ctx.textAlign = 'right';
+          for (const label of used) {
+            ctx.fillStyle = FBD_COLORS[label] || palette['ink'];
+            ctx.fillText(FBD_NAMES[label] || label, W - 12, ly);
+            ly += 15;
+          }
+        }
+
+        // Momentum: total p of the moving bodies, drawn at their center of mass
+        if (ov.momentum) {
+          let px = 0, py = 0, mSum = 0, cmx = 0, cmy = 0;
+          for (const id in state.bodies) {
+            const b = state.bodies[id];
+            if (b.fixed) continue;
+            px += b.m * b.vx; py += b.m * b.vy; mSum += b.m; cmx += b.m * b.x; cmy += b.m * b.y;
+          }
+          if (mSum > 0) {
+            cmx /= mSum; cmy /= mSum;
+            const pMag = Math.hypot(px, py);
+            state.pMax = Math.max(state.pMax || 0, pMag, 1e-9);
+            const len = (pMag / state.pMax) * 90;
+            ctx.fillStyle = palette['ink'] || '#000';
+            ctx.beginPath(); ctx.arc(wX(cmx), wY(cmy), 4, 0, Math.PI * 2); ctx.fill();
+            if (pMag > state.pMax * 0.01) {
+              arrow(wX(cmx), wY(cmy), wX(cmx) + (px / pMag) * len, wY(cmy) - (py / pMag) * len, palette['gold'], 'p total', 3);
+            }
+            ctx.fillStyle = palette['ink'] || '#000';
+            ctx.font = monoFont; ctx.textAlign = 'right';
+            ctx.fillText(`p = (${px.toFixed(2)}, ${py.toFixed(2)}) kg m/s   |p| = ${pMag.toFixed(2)}`, W - 12, H - chartStrip - 12);
+          }
+        }
+
+        // Energy: kinetic, gravitational, spring and total, with what has been lost since the start
+        if (ov.energy) {
+          const g = world.gravity(oScope);
+          let KE = 0, PEg = 0, PEs = 0, PEgrav = 0;
+          for (const id in state.bodies) {
+            const b = state.bodies[id];
+            if (b.fixed) continue;
+            KE += 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy);
+            PEg += b.m * g * b.y;
+          }
+          for (const f of compiledSpec.forces) {
+            if (f.type === 'spring') {
+              const a = state.bodies[f.a], bb = state.bodies[f.b];
+              if (a && bb) PEs += 0.5 * f.k(oScope) * (Math.hypot(bb.x - a.x, bb.y - a.y) - f.rest(oScope)) ** 2;
+            } else if (f.type === 'gravitation') {
+              const ids = Object.keys(state.bodies);
+              for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+                const p1 = state.bodies[ids[i]], p2 = state.bodies[ids[j]];
+                PEgrav -= (f.G(oScope) * p1.m * p2.m) / Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2 + f.soften(oScope) ** 2);
+              }
+            }
+          }
+          const total = KE + PEg + PEs + PEgrav;
+          if (state.E0 === null || state.E0 === undefined) state.E0 = total;
+          const lost = state.E0 - total;
+          const rows = [['KE', KE, palette['info']]];
+          if (g !== 0 || compiledSpec.forces.some((f) => f.type === 'gravitation')) rows.push(['PE grav', PEg + PEgrav, palette['gold-text']]);
+          if (PEs > 1e-9 || compiledSpec.forces.some((f) => f.type === 'spring')) rows.push(['PE spring', PEs, palette['plum']]);
+          rows.push(['total', total, palette['ink']]);
+          if (Math.abs(lost) > Math.abs(state.E0) * 0.005) rows.push(['lost', lost, palette['bad']]);
+          const scaleE = Math.max(1e-9, ...rows.map((r) => Math.abs(r[1])));
+          const bx = 12, by = 12, rowH = 17, barMax = 110;
+          ctx.fillStyle = palette['surface'] || '#fff';
+          ctx.globalAlpha = 0.9;
+          ctx.fillRect(bx - 6, by - 6, 230, rows.length * rowH + 10);
+          ctx.globalAlpha = 1;
+          ctx.font = monoFont; ctx.textAlign = 'left';
+          rows.forEach(([label, val, color], i) => {
+            const yRow = by + i * rowH;
+            ctx.fillStyle = palette['ink-soft'] || '#555';
+            ctx.fillText(label, bx, yRow + 10);
+            ctx.fillStyle = color || palette['ink'];
+            const w = (Math.abs(val) / scaleE) * barMax;
+            ctx.fillRect(bx + 72, yRow + 2, Math.max(1, w), 9);
+            ctx.fillStyle = palette['ink'] || '#000';
+            ctx.fillText(`${val.toFixed(1)} J`, bx + 76 + Math.max(1, w), yRow + 10);
+          });
         }
 
         ctx.restore();
@@ -1121,6 +1325,18 @@ function SpecSimPlayer({ spec }) {
         <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }}
           role="img" aria-label={spec.description || spec.title || 'Simulation canvas'} />
       </div>
+
+      {compiledSpec.kind === 'particles' && (
+        <div className="btn-row" role="group" aria-label="Overlays">
+          {[['fbd', 'Forces (free-body)'], ['energy', 'Energy'], ['momentum', 'Momentum'], ['stress', 'Stress']].map(([key, label]) => (
+            <label key={key} className="check-row" htmlFor={`ov-${key}`} style={{ marginRight: 'var(--space-3)' }}>
+              <input id={`ov-${key}`} type="checkbox" checked={overlays[key]}
+                onChange={(e) => setOverlays((o) => ({ ...o, [key]: e.target.checked }))} />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      )}
 
       {readoutsData.length > 0 && (
         <div className="readouts" role="status">

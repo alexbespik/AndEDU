@@ -305,6 +305,8 @@ def validate_spec(spec: Any) -> Tuple[Dict[str, Any], List[str]]:
                         "color": _clean_color(v.get("color"), "cyan")})
     clean["vectors"] = vectors
     clean["duration"] = min(max(_num(spec.get("duration"), 0), 0), 600)
+    ov = spec.get("overlays") if isinstance(spec.get("overlays"), dict) else {}
+    clean["overlays"] = {k: bool(ov.get(k, False)) for k in ("fbd", "energy", "momentum", "stress")}
     return clean, errors
 
 
@@ -331,7 +333,11 @@ kind "particles":
  "vectors":[{"body":"bob","x":"bob.vx","y":"bob.vy","label":"v","scale":0.3}],
  "readouts":[{"label":"Speed","expr":"bob.speed","unit":"m/s"}],
  "series":[{"label":"KE","expr":"0.5*bob.m*bob.speed^2"}],   // plotted live vs time
- "duration":20}   // optional: auto-reset after N seconds
+ "duration":20,   // optional: auto-reset after N seconds
+ "overlays":{"fbd":true,"energy":false,"momentum":false,"stress":false}}
+   // overlays start switched on (students can toggle all four): fbd = labeled force arrows on every body,
+   // energy = KE / PE / spring / total / lost bars, momentum = total p at the center of mass,
+   // stress = springs and rods colored by strain (red tension, blue compression)
 Body fields usable in readouts/series/vectors/custom forces: <id>.x .y .vx .vy .m .r .speed
 
 kind "graph": x is the HORIZONTAL axis variable. To plot something against time, make x the time axis and
