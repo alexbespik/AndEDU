@@ -74,22 +74,37 @@ export default function App() {
     return () => { stop = true; };
   }, [fetchTopics]);
 
-  const openTopic = useCallback((id, tab = 'theory') => {
-    setSelectedTopicId(id);
+  // Course classes open in their own view (any subject); Lab is the physics/chemistry library.
+  // A topic missing from the list (just written, or the list is still loading) is fetched, never swapped for another.
+  const [classTopicId, setClassTopicId] = useState(null);
+  const topicsRef = useRef(topics);
+  topicsRef.current = topics;
+  const openTopic = useCallback(async (id, tab = 'theory') => {
+    if (!id) return;
+    let t = topicsRef.current.find((x) => x.id === id);
+    if (!t) {
+      try {
+        t = await api(`/api/topics/${encodeURIComponent(id)}`);
+        setTopics((ts) => (ts.some((x) => x.id === t.id) ? ts : [...ts, t]));
+      } catch {
+        toast('That lesson could not be found. It may still be being written.');
+        return;
+      }
+    }
     setActiveTab(tab);
-    setMode('physics');
-  }, []);
+    if (t.source?.courseId) { setClassTopicId(t.id); setMode('class'); }
+    else { setSelectedTopicId(t.id); setMode('physics'); }
+  }, [toast]);
 
   useAgyEvents((evt) => {
     const p = evt.payload || {};
     switch (evt.type) {
       case 'SWITCH_TOPIC':
-        if (p.topicId) setSelectedTopicId(p.topicId);
-        if (p.tab) setActiveTab(p.tab);
-        setMode(p.mode && p.mode !== 'physics' ? p.mode : 'physics');
+        if (p.mode && p.mode !== 'physics') setMode(p.mode);
+        else if (p.topicId) openTopic(p.topicId, p.tab || 'theory');
         break;
       case 'SWITCH_TAB':
-        if (p.tab) { setActiveTab(p.tab); setMode('physics'); }
+        if (p.tab) { setActiveTab(p.tab); setMode((m) => (m === 'class' ? 'class' : 'physics')); }
         break;
       case 'SWITCH_STUDIO_MODE':
         if (p.mode) setMode(p.mode);
@@ -97,7 +112,7 @@ export default function App() {
       case 'SET_SIM_CONFIG':
         setLiveSimConfig({ ...p, _at: evt.seq });
         setActiveTab('simulation');
-        setMode('physics');
+        setMode((m) => (m === 'class' ? 'class' : 'physics'));
         toast('AGY updated the simulation settings.');
         break;
       case 'TOPIC_UPDATED':
@@ -146,10 +161,17 @@ export default function App() {
 
   if (!user) return <LoginPage onSignedIn={signIn} />;
 
-  const activeTopic = topics.find((t) => t.id === selectedTopicId) || topics[0];
+  const libraryTopics = topics.filter((t) => !t.source?.courseId);
+  const activeTopic = libraryTopics.find((t) => t.id === selectedTopicId) || libraryTopics[0];
+  const classTopic = topics.find((t) => t.id === classTopicId) || null;
+  const classSiblings = classTopic
+    ? topics.filter((t) => t.source?.courseId === classTopic.source.courseId).sort((a, b) => (a.source.classSeq || 0) - (b.source.classSeq || 0))
+    : [];
+  const classIdx = classSiblings.findIndex((t) => t.id === classTopicId);
+  const viewedTopic = mode === 'class' ? classTopic : activeTopic;
   const showSidebar = mode === 'physics';
   const ideMode = mode === 'code';
-  const navMode = mode === 'course' ? 'home' : mode;
+  const navMode = mode === 'course' || mode === 'class' || mode === 'review' ? 'home' : mode;
 
   return (
     <div className="app">
@@ -168,7 +190,7 @@ export default function App() {
 
       <div className={`workspace${showSidebar ? '' : ' no-sidebar'}${panelOpen ? ' has-panel' : ''}`}>
         {showSidebar && (
-          <Sidebar topics={topics} selectedTopicId={activeTopic?.id} open={sidebarOpen}
+          <Sidebar topics={libraryTopics} selectedTopicId={activeTopic?.id} open={sidebarOpen}
             onClose={() => setSidebarOpen(false)} onSelectTopic={(id) => openTopic(id)} />
         )}
 
@@ -186,6 +208,12 @@ export default function App() {
             <TopicViewer topic={activeTopic} activeTab={activeTab} setActiveTab={setActiveTab}
               liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} />
           )}
+          {mode === 'class' && (classTopic ? (
+            <TopicViewer key={classTopic.id} topic={classTopic} activeTab={activeTab} setActiveTab={setActiveTab}
+              liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} onHome={() => switchMode('home')}
+              prevClass={classSiblings[classIdx - 1]} nextClass={classSiblings[classIdx + 1]}
+              onOpenClass={(id) => { openTopic(id); document.getElementById('main')?.scrollTo(0, 0); }} />
+          ) : <div className="page"><p className="hint">Loading the class…</p></div>)}
           {ideMode && (
             <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
               <EduStudioIDE initialMode="code" onSwitchToPhysics={() => setMode('physics')} request={ideRequest}
@@ -199,8 +227,8 @@ export default function App() {
           )}
         </main>
 
-        <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={activeTopic?.id} agyCli={agyCli}
-          courseId={mode === 'course' ? courseId : mode === 'physics' ? activeTopic?.source?.courseId : undefined} />
+        <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={viewedTopic?.id} agyCli={agyCli}
+          courseId={mode === 'course' ? courseId : mode === 'class' ? classTopic?.source?.courseId : undefined} />
       </div>
 
       <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />

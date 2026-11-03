@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion } from 'lucide-react';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
 import SpecSim from '../simulations/SpecSim';
@@ -61,7 +61,7 @@ function LessonTab({ topic }) {
   );
 }
 
-export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse }) {
+export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse, onHome, prevClass, nextClass, onOpenClass }) {
   const [tutorFocus, setTutorFocus] = useState(null);
 
   // Opening a course class tells the server, so adaptation never rewrites a lesson you're reading.
@@ -97,11 +97,22 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     <div className="page">
       <header className="topic-head">
         {src.courseId && (
-          <nav className="crumbs" aria-label="Breadcrumb">
-            <button type="button" onClick={() => onOpenCourse?.(src.courseId)}>{course?.title || src.courseTitle || 'Course'}</button>
-            <span aria-hidden="true">/</span>
-            <span>Class {src.classSeq}{src.classTotal ? ` of ${src.classTotal}` : ''}</span>
-          </nav>
+          <div className="class-bar">
+            <nav className="crumbs" aria-label="Breadcrumb">
+              {onHome && <><button type="button" onClick={onHome}>My courses</button><span aria-hidden="true">/</span></>}
+              <button type="button" onClick={() => onOpenCourse?.(src.courseId)}>{course?.title || src.courseTitle || 'Course'}</button>
+              <span aria-hidden="true">/</span>
+              <span>Class {src.classSeq}{src.classTotal ? ` of ${src.classTotal}` : ''}</span>
+            </nav>
+            {onOpenClass && (prevClass || nextClass) && (
+              <div className="btn-row">
+                <button type="button" className="btn btn-quiet btn-sm" disabled={!prevClass} onClick={() => onOpenClass(prevClass.id)}
+                  title={prevClass?.title}><ChevronLeft size={14} aria-hidden="true" /> Previous class</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={!nextClass} onClick={() => onOpenClass(nextClass.id)}
+                  title={nextClass?.title}>Next class <ChevronRight size={14} aria-hidden="true" /></button>
+              </div>
+            )}
+          </div>
         )}
         <h1>{topic.title}</h1>
         <div className="topic-tags">
