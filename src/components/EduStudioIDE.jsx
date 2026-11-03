@@ -864,8 +864,10 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const activeState = problemStates[activeProblemIndex] || {};
 
   // Resizable Panel Dimensions ("Drag and Drop Walls")
-  const [leftWidth, setLeftWidth] = useState(280);
-  const [rightWidth, setRightWidth] = useState(340);
+  const compact = typeof window !== 'undefined' && window.innerWidth < 1280;
+  const [leftWidth, setLeftWidth] = useState(compact ? 236 : 280);
+  const [rightWidth, setRightWidth] = useState(compact ? 290 : 340);
+  const [mentorOpen, setMentorOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1100);
   const [terminalHeight, setTerminalHeight] = useState(170);
   const [isDragging, setIsDragging] = useState(null); // 'left' | 'right' | 'terminal' | null
 
@@ -2992,7 +2994,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: '300px', overflow: 'hidden' }}>
         
         {/* Editor Tabs Bar */}
-        <div style={{ height: '36px', backgroundColor: theme.bgHeader, display: 'flex', alignItems: 'center', borderBottom: `1px solid ${theme.borderContrast}` }}>
+        <div style={{ height: '36px', backgroundColor: theme.bgHeader, display: 'flex', alignItems: 'center', borderBottom: `1px solid ${theme.borderContrast}`, overflowX: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
           <div 
             onClick={() => setActiveTab("editor")}
             style={{ 
@@ -3043,6 +3045,9 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
             <span style={{ fontSize: '11px', color: theme.accentYellow, backgroundColor: theme.bgCardAlt, padding: '2px 8px', borderRadius: '3px', border: `1px solid ${theme.border}` }}>
               Tier {currentLevel}
             </span>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setMentorOpen(o => !o)} aria-pressed={mentorOpen}>
+              {mentorOpen ? 'Hide mentor' : 'Show mentor'}
+            </button>
           </div>
         </div>
 
@@ -3327,7 +3332,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       </main>
 
       {/* RIGHT DIVIDER WALL (DRAG TO RESIZE SOCRATIC MENTOR PANEL) */}
-      <div
+      {mentorOpen && <div
         onMouseDown={() => setIsDragging('right')}
         title="Drag wall to resize Socratic Mentor Panel"
         style={{
@@ -3346,10 +3351,10 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         }}
       >
         <div style={{ width: '2px', height: '24px', backgroundColor: isDragging === 'right' ? theme.accentGold : theme.textMuted, borderRadius: '1px' }} />
-      </div>
+      </div>}
 
       {/* 3. RIGHT PANEL: SOCRATIC MENTOR (THEORY-FIRST PEDAGOGICAL LEADERSHIP) (RESIZABLE) */}
-      <section style={{ 
+      <section hidden={!mentorOpen} style={{ 
         width: `${rightWidth}px`, 
         minWidth: '200px', 
         maxWidth: '750px', 
