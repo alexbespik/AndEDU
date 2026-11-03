@@ -2817,7 +2817,7 @@ def normalize_practice(items: Any) -> List[Dict[str, Any]]:
         elif t == "code":
             # &EDU-style coding exercise; runs in the student's browser (Pyodide), never on the server
             tests = str(p.get("tests") or "").strip()
-            if tests and "assert" in tests:
+            if re.search(r"^\s*assert\s", tests, re.M):  # a real assert statement, not the word in a string
                 clean.append({**base, "language": "python", "starter": str(p.get("starter") or "")[:4000],
                               "tests": tests[:4000], "solution": str(p.get("solution") or "")[:6000]})
     return clean
