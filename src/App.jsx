@@ -16,6 +16,8 @@ import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api
 // The IDE and the math workspace load on demand
 const EduStudioIDE = lazy(() => import('./components/EduStudioIDE'));
 const MathLab = lazy(() => import('./components/MathLab'));
+const SubjectWorkspace = lazy(() => import('./components/SubjectWorkspace'));
+const AdvisorPage = lazy(() => import('./components/AdvisorPage'));
 
 const FALLBACK_TOPICS = [rollingTopic, billiardTopic, lagrangianTopic];
 
@@ -107,7 +109,7 @@ export default function App() {
     }
     setActiveTab(tab);
     const ws = workspaceOf(t);
-    if (ws === 'math') { setClassTopicId(t.id); setMode('math'); }
+    if (ws === 'math' || ws === 'history' || ws === 'language') { setClassTopicId(t.id); setMode(ws); }  // library lessons too
     else if (ws === 'code') { setClassTopicId(t.id); setMode('class'); }
     else { setSelectedTopicId(t.id); setMode('physics'); }
   }, [toast]);
@@ -188,8 +190,10 @@ export default function App() {
   const activeTopic = labTopics.find((t) => t.id === selectedTopicId) || labTopics[0];
   const classTopic = topics.find((t) => t.id === classTopicId) || null;
   const mathClass = classTopic && workspaceOf(classTopic) === 'math' ? classTopic : null;
+  const subjectClass = classTopic && workspaceOf(classTopic) === mode ? classTopic : null;
+  const subjectTopics = topics.filter((t) => workspaceOf(t) === mode);  // course classes and library lessons of this subject
   const codeClass = classTopic && workspaceOf(classTopic) === 'code' ? classTopic : null;
-  const viewedTopic = mode === 'math' ? mathClass : mode === 'class' ? codeClass : activeTopic;
+  const viewedTopic = mode === 'math' ? mathClass : mode === 'class' ? codeClass : mode === 'history' || mode === 'language' ? subjectClass : activeTopic;
   // previous/next class for whichever course class is on screen
   const siblingsOf = (t) => (t?.source?.courseId
     ? topics.filter((x) => x.source?.courseId === t.source.courseId).sort((a, b) => (a.source.classSeq || 0) - (b.source.classSeq || 0))
@@ -232,6 +236,20 @@ export default function App() {
               progress={progress} onProgress={setProgress} onOpenTopic={(id) => openTopic(id)} onReview={() => setMode('review')}
               onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }} />
           )}
+          {(mode === 'history' || mode === 'language') && (
+            <Suspense fallback={<div className="page"><p className="hint">Loading…</p></div>}>
+              <SubjectWorkspace key={mode} kind={mode} classTopic={subjectClass} topics={subjectTopics} onOpenTopic={(id) => openTopic(id)}
+                renderClass={(t) => (
+                  <TopicViewer key={t.id} embedded topic={t} activeTab={activeTab} setActiveTab={setActiveTab}
+                    liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(t)} />
+                )} />
+            </Suspense>
+          )}
+          {mode === 'advisor' && (
+            <Suspense fallback={<div className="page"><p className="hint">Loading…</p></div>}>
+              <AdvisorPage user={user} onOpenCourse={openCourse} />
+            </Suspense>
+          )}
           {mode === 'review' && <ReviewSession userId={user.id} onDone={() => switchMode('home')} />}
           {mode === 'course' && courseId && (
             <CourseView key={courseId} courseId={courseId} onBack={() => switchMode('home')} onOpenTopic={(id) => openTopic(id)} />
@@ -241,8 +259,9 @@ export default function App() {
               liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(activeTopic)} />
           )}
           {mode === 'class' && (codeClass ? (
-            <TopicViewer key={codeClass.id} topic={codeClass} activeTab={activeTab} setActiveTab={setActiveTab}
-              liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(codeClass)} />
+            <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
+              <EduStudioIDE initialMode="code" classTopic={codeClass} {...classNav(codeClass)} userId={user.id} onOpenTopic={(id) => openTopic(id)} onSwitchToPhysics={() => setMode('physics')} />
+            </Suspense>
           ) : <div className="page"><p className="hint">Loading the class…</p></div>)}
           {ideMode && (
             <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>

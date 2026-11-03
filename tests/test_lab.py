@@ -435,3 +435,37 @@ class Mcp(unittest.TestCase):
             self.assertEqual(t["inputSchema"]["type"], "object")
         bad = mcp_server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nope"}})
         self.assertTrue(bad["isError"])
+
+
+class Advisor(unittest.TestCase):
+    CATALOG = """CSCI 141. Computational Problem Solving. (4 Credits)
+Fundamental programming concepts in Python. (COLL 150) NQR
+CSCI 241. Data Structures. (3 Credits)
+Arrays, linked lists, trees, hash tables and their analysis.
+Prerequisite(s): CSCI 141 and MATH 111 or MATH 131.
+MATH 111. Calculus I. (4 Credits)
+Limits, derivatives and integrals.
+"""
+
+    def test_catalog_parse_and_readiness(self):
+        import advisor
+        db.init_db(); advisor.init()
+        rows = advisor.parse_catalog_text(self.CATALOG)
+        self.assertEqual([r["code"] for r in rows], ["CSCI 141", "CSCI 241", "MATH 111"])
+        self.assertEqual(rows[1]["prereq_codes"], ["CSCI 141", "MATH 111", "MATH 131"])
+        self.assertEqual(rows[0]["credits"], "4")
+        advisor.upsert_courses(rows, "test")
+        u = db.get_or_create_user("Advisor Tester")["id"]
+        advisor.add_completed(u, advisor.transcript_rows("CSCI 141  Computational Problem Solving  A-\nMATH 111 Calculus I B+"), "test")
+        self.assertEqual({r["code"]: r["grade"] for r in advisor.completed(u)}, {"CSCI 141": "A-", "MATH 111": "B+"})
+        self.assertTrue(advisor.readiness(u, "csci241")["met"])  # 'or' prerequisites: one of the group is enough
+        self.assertIn("CSCI 241", [c["code"] for c in advisor.recommend(u)])
+
+    def test_new_activity_types_are_normalized(self):
+        self.assertEqual(len(server.normalize_flashcards([{"front": "hola", "back": "hello", "lang": "es"}, {"front": "x"}])), 1)
+        tl = server.normalize_timeline([{"year": 1789, "title": "Bastille"}, {"year": -44, "title": "Caesar"}, {"title": "no year"}])
+        self.assertEqual([e["year"] for e in tl], [-44, 1789])
+        mp = server.normalize_practice([{"type": "match_pairs", "prompt": "m", "pairs": [["a", "1"], ["b", "2"], ["c", "3"]]}])
+        self.assertEqual(len(mp), 1)
+        self.assertEqual(server.guess_workspace("European History"), "history")
+        self.assertEqual(server.guess_workspace("Introduction to Linguistics"), "language")

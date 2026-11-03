@@ -535,14 +535,15 @@ function KitTab({ preview }) {
   );
 }
 
-function CoursesTab({ topics, onOpenTopic, activeId }) {
+export function CoursesTab({ topics, onOpenTopic, activeId, empty }) {
   const courses = [];
   for (const t of topics) {
-    const c = courses.find((x) => x.id === t.source.courseId) || (courses.push({ id: t.source.courseId, title: t.source.courseTitle, classes: [] }), courses[courses.length - 1]);
+    const cid = t.source?.courseId || 'library';
+    const c = courses.find((x) => x.id === cid) || (courses.push({ id: cid, title: t.source?.courseTitle || 'Library lessons', classes: [] }), courses[courses.length - 1]);
     c.classes.push(t);
   }
   if (!courses.length) {
-    return <div className="panel" style={{ marginTop: 'var(--space-4)' }}><p>No math courses yet. Start one from My courses: its classes open here, next to the math tools.</p></div>;
+    return <div className="panel" style={{ marginTop: 'var(--space-4)' }}><p>{empty || 'No math courses yet. Start one from My courses: its classes open here, next to the math tools.'}</p></div>;
   }
   return (
     <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
@@ -550,10 +551,10 @@ function CoursesTab({ topics, onOpenTopic, activeId }) {
         <section key={c.id} className="panel stack-sm">
           <h2>{c.title}</h2>
           <ol className="class-list">
-            {c.classes.sort((a, b) => a.source.classSeq - b.source.classSeq).map((t) => (
+            {c.classes.sort((a, b) => (a.source?.classSeq || 0) - (b.source?.classSeq || 0)).map((t) => (
               <li key={t.id}>
                 <button type="button" className="card-link" aria-current={t.id === activeId ? 'page' : undefined} onClick={() => onOpenTopic(t.id)}>
-                  <span className="class-num-sm">{String(t.source.classSeq).padStart(2, '0')}</span> {t.title.replace(/^Class \d+:\s*/, '')}
+                  {t.source?.classSeq && <span className="class-num-sm">{String(t.source.classSeq).padStart(2, '0')}</span>} {t.title.replace(/^Class \d+:\s*/, '')}
                 </button>
               </li>
             ))}

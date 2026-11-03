@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight } from 'lucide-react';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
 import SpecSim from '../simulations/SpecSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
+import { FlashcardDeck, SpeedRound, TimelineView } from './Activities';
 import { reportXp } from '../lib/engage';
 import MermaidViewer from './MermaidViewer';
 import Md, { MdInline } from './Md';
@@ -87,6 +88,9 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     ...(hasSim ? [{ id: 'simulation', label: 'Simulation', icon: Compass }] : []),
     { id: 'quiz', label: 'Quiz', icon: Award, count: topic.quiz?.length || 0 },
     { id: 'practice', label: 'Practice', icon: Puzzle, count: topic.practice?.length || 0 },
+    ...(topic.flashcards?.length ? [{ id: 'cards', label: 'Flashcards', icon: Layers, count: topic.flashcards.length }] : []),
+    ...((topic.quiz?.length || 0) >= 3 ? [{ id: 'speed', label: 'Speed round', icon: Zap }] : []),
+    ...(topic.timeline?.length ? [{ id: 'timeline', label: 'Timeline', icon: CalendarRange, count: topic.timeline.length }] : []),
     { id: 'tutor', label: 'Tutor', icon: MessageCircleQuestion },
   ];
   const tab = tabs.some((t) => t.id === activeTab) ? activeTab : 'theory';
@@ -141,6 +145,9 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
             onAskTutor={(focus) => { setTutorFocus(focus); setActiveTab('tutor'); }} />
         )}
         {tab === 'tutor' && <LessonTutor key={topic.id} topic={topic} focus={tutorFocus} onFocusUsed={() => setTutorFocus(null)} />}
+        {tab === 'cards' && <FlashcardDeck key={topic.id} cards={topic.flashcards} topicId={topic.id} />}
+        {tab === 'speed' && <SpeedRound key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId} />}
+        {tab === 'timeline' && <TimelineView key={topic.id} events={topic.timeline} topicId={topic.id} />}
         {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} onSolved={(item) => reportXp('practice_correct', `${topic.id}:${item.id}`)} />}
       </div>
     </div>

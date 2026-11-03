@@ -1,0 +1,160 @@
+{
+  "id": "french-revolution",
+  "title": "The French Revolution, 1789-1799",
+  "category": "Modern European History",
+  "difficulty": "Introductory",
+  "summary": "How a fiscal crisis became a revolution that ended the monarchy, launched the Terror and opened the way for Napoleon.",
+  "simulationType": null,
+  "simulation": null,
+  "cheatSheet": [],
+  "mermaid": null,
+  "markdownContent": "# The French Revolution\n\n## Causes\nBy 1788 France was nearly bankrupt after the Seven Years' War and its support for the American Revolution. The tax burden fell on the Third Estate, while the clergy (First Estate) and nobility (Second Estate) were largely exempt. Bad harvests in 1788 drove bread prices up.\n\n## From reform to revolution\nLouis XVI summoned the **Estates-General** in May 1789. The Third Estate declared itself the **National Assembly** and swore the **Tennis Court Oath** not to disband until France had a constitution. On 14 July Parisians stormed the **Bastille**.\n\n## Radicalization\nThe monarchy was abolished in 1792 and Louis XVI executed in January 1793. Under Robespierre's Committee of Public Safety, the **Reign of Terror** (1793-94) executed some 17,000 people officially. After Robespierre's fall the Directory governed until Napoleon's coup of **18 Brumaire** (November 1799).\n\n> Historians still debate whether the Revolution was driven mainly by class conflict, political culture or contingency. Ask the Tutor to argue each side.",
+  "quiz": [
+    {
+      "question": "Why did Louis XVI summon the Estates-General in 1789?",
+      "options": [
+        "To raise money in a fiscal crisis",
+        "To declare war on Austria",
+        "To abolish the nobility",
+        "To elect Napoleon"
+      ],
+      "correctAnswer": 0,
+      "explanation": "The crown was nearly bankrupt and needed new taxes, which required the Estates-General.",
+      "id": "q1"
+    },
+    {
+      "question": "What did the Tennis Court Oath commit the National Assembly to?",
+      "options": [
+        "Executing the king",
+        "Staying together until France had a constitution",
+        "Abolishing the Church",
+        "Storming the Bastille"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Deputies swore not to separate until a constitution was established.",
+      "id": "q2"
+    },
+    {
+      "question": "Who led the Committee of Public Safety during the Terror?",
+      "options": [
+        "Napoleon Bonaparte",
+        "Louis XVI",
+        "Maximilien Robespierre",
+        "Marie Antoinette"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Robespierre dominated the Committee until his fall in July 1794.",
+      "id": "q3"
+    },
+    {
+      "question": "Which event ended the Directory in 1799?",
+      "options": [
+        "The Flight to Varennes",
+        "The coup of 18 Brumaire",
+        "The Storming of the Bastille",
+        "The Great Fear"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Napoleon's coup of 18 Brumaire (9 November 1799) replaced the Directory with the Consulate.",
+      "id": "q4"
+    }
+  ],
+  "practice": [
+    {
+      "type": "match_pairs",
+      "prompt": "Match each figure to their role",
+      "pairs": [
+        [
+          "Louis XVI",
+          "King executed in January 1793"
+        ],
+        [
+          "Robespierre",
+          "Leading member of the Committee of Public Safety"
+        ],
+        [
+          "Napoleon Bonaparte",
+          "General who seized power in 1799"
+        ],
+        [
+          "Abbé Sieyès",
+          "Author of 'What Is the Third Estate?'"
+        ]
+      ],
+      "explanation": "Sieyès's pamphlet argued the Third Estate was the nation itself."
+    }
+  ],
+  "workspace": "history",
+  "flashcards": [
+    {
+      "front": "Third Estate",
+      "back": "Everyone who was neither clergy nor nobility: about 97% of the population"
+    },
+    {
+      "front": "Tennis Court Oath",
+      "back": "20 June 1789: the National Assembly swore not to disband until France had a constitution"
+    },
+    {
+      "front": "Reign of Terror",
+      "back": "1793-94: mass executions of suspected enemies of the Revolution under the Committee of Public Safety"
+    },
+    {
+      "front": "18 Brumaire",
+      "back": "Napoleon's coup of 9 November 1799, ending the Directory"
+    },
+    {
+      "front": "Declaration of the Rights of Man and of the Citizen",
+      "back": "August 1789 statement of natural rights: liberty, property, security, resistance to oppression"
+    }
+  ],
+  "timeline": [
+    {
+      "year": 1789.35,
+      "title": "Estates-General opens at Versailles",
+      "date": "5 May 1789",
+      "detail": ""
+    },
+    {
+      "year": 1789.47,
+      "title": "Tennis Court Oath",
+      "date": "20 June 1789",
+      "detail": ""
+    },
+    {
+      "year": 1789.54,
+      "title": "Storming of the Bastille",
+      "date": "14 July 1789",
+      "detail": ""
+    },
+    {
+      "year": 1789.65,
+      "title": "Declaration of the Rights of Man and of the Citizen",
+      "date": "26 August 1789",
+      "detail": ""
+    },
+    {
+      "year": 1792.72,
+      "title": "Monarchy abolished; First Republic",
+      "date": "September 1792",
+      "detail": ""
+    },
+    {
+      "year": 1793.06,
+      "title": "Execution of Louis XVI",
+      "date": "21 January 1793",
+      "detail": ""
+    },
+    {
+      "year": 1794.57,
+      "title": "Execution of Robespierre; end of the Terror",
+      "date": "28 July 1794",
+      "detail": ""
+    },
+    {
+      "year": 1799.86,
+      "title": "Coup of 18 Brumaire",
+      "date": "9 November 1799",
+      "detail": ""
+    }
+  ]
+}

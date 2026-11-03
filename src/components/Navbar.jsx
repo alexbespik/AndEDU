@@ -1,5 +1,5 @@
 import React from 'react';
-import { GraduationCap, FlaskConical, Code2, Sigma, MessageSquare, LogOut, Menu } from 'lucide-react';
+import { GraduationCap, FlaskConical, Code2, Sigma, MessageSquare, LogOut, Menu, Landmark, Languages, Compass } from 'lucide-react';
 import ThemeSwitch from './ThemeSwitch';
 
 const MODES = [
@@ -7,6 +7,9 @@ const MODES = [
   { id: 'physics', label: 'Lab', icon: FlaskConical, title: 'Physics and chemistry lessons and simulations' },
   { id: 'code', label: 'IDE', icon: Code2, title: 'Write and run code' },
   { id: 'math', label: 'Math', icon: Sigma, title: 'Graphing, LaTeX notes and practice' },
+  { id: 'history', label: 'History', icon: Landmark, title: 'Timelines, flashcards and history classes' },
+  { id: 'language', label: 'Languages', icon: Languages, title: 'Languages and linguistics: flashcards read aloud, pronunciation, IPA' },
+  { id: 'advisor', label: 'Advisor', icon: Compass, title: 'Course advisor: your record, the catalog, readiness checks' },
 ];
 
 /** W&M masthead: brand, mode switch, connection, AGY toggle and profile. Every row wraps; nothing overlaps. */
