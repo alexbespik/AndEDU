@@ -10,10 +10,10 @@ State at this commit:
 
 To do:
 1. Done: browser check, regenerated limits simulations, tests (37 pass).
-2. Still open: check the Animate button on each widget, and that Lab's sidebar lists the physics course classes.
-4. Review agy's work (AGY_TASK_workspaces.md): run tests and the build, read the diff, then integrate:
+2. Done: Animate works on all 8 sweepable widgets; Lab lists the physics course, no math classes.
+3. Review agy's work (AGY_TASK_workspaces.md): run tests and the build, read the diff, then integrate:
    - chemistry: pass `CHEM_GUIDE` into `author_simulation` for lab classes about chemistry (add a `chem`
      flag like `math`), and add a "Chemistry kit" tab to Lab (gallery like Math's KitTab);
    - code classes: check the IDE class view end to end (a code exercise passes, quiz answers reach
      `/api/quiz/submit`, XP appears).
-5. Update AGENTS.md (workspaces, `kind: "math"` and `"chem"`), then commit.
+4. Update AGENTS.md (workspaces, `kind: "math"` and `"chem"`), then commit.
