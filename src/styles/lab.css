@@ -656,3 +656,5 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 @media (prefers-reduced-motion: reduce) {
   .xp-pop, .reward-card, .combo { animation: none; }
 }
+
+.class-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); }
