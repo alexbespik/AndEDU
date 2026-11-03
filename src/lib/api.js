@@ -11,9 +11,14 @@ export function getToken() {
 export function setToken(token) {
   try { if (token) localStorage.setItem(TOKEN_KEY, token); else localStorage.removeItem(TOKEN_KEY); } catch { /* tab-only */ }
 }
+/** The student's calendar day (streaks and daily goals follow local midnight, not UTC). */
+export function localDay(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 function authHeaders(extra) {
   const token = getToken();
-  return { ...(extra || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  return { ...(extra || {}), 'X-Local-Day': localDay(), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
 export async function api(path, { method = 'GET', body, signal } = {}) {

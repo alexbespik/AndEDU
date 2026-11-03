@@ -6,6 +6,8 @@ import AgyBridgeDrawer from './components/AgyBridgeDrawer';
 import LoginPage from './components/LoginPage';
 import CoursesHome from './components/CoursesHome';
 import CourseView from './components/CourseView';
+import ReviewSession from './components/ReviewSession';
+import RewardLayer, { StreakChip } from './components/Rewards';
 import rollingTopic from '../content/topics/rolling-without-slipping.json';
 import lagrangianTopic from '../content/topics/lagrangian-mechanics.json';
 import billiardTopic from '../content/topics/billiard-ball-collisions.json';
@@ -31,7 +33,8 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [agyCli, setAgyCli] = useState(false);
   const [ideRequest, setIdeRequest] = useState(null); // a practice set asked for in My courses
-  const [homePreset, setHomePreset] = useState(null);  // e.g. the IDE's "New practice set" opens the hub on Coding practice
+  const [homePreset, setHomePreset] = useState(null);
+  const [progress, setProgress] = useState(null); // streak, daily goal, quests (engage.py)  // e.g. the IDE's "New practice set" opens the hub on Coding practice
 
   useEffect(() => {
     api('/api/status').then((st) => setAgyCli(Boolean(st.agy_cli_enabled))).catch(() => {});
@@ -114,6 +117,18 @@ export default function App() {
     }
   });
 
+  const loadProgress = useCallback(() => {
+    if (!user?.id) return;
+    api(`/api/engage/${user.id}`).then(setProgress).catch(() => {});
+  }, [user?.id]);
+  useEffect(() => { loadProgress(); }, [loadProgress, mode]);
+  // a new day can start while the tab is open
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) loadProgress(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [loadProgress]);
+
   const signIn = (u) => { saveProfile(u); setUser(u); setMode('home'); };
   const signOut = useCallback(() => {
     api('/api/auth/logout', { method: 'POST' }).catch(() => {});
@@ -148,6 +163,7 @@ export default function App() {
         onTogglePanel={() => setPanelOpen((o) => !o)}
         assistantName={agyCli ? 'AGY' : 'Assistant'}
         onOpenTopics={() => setSidebarOpen(true)}
+        streakChip={<StreakChip progress={progress} onOpen={() => switchMode('home')} />}
       />
 
       <div className={`workspace${showSidebar ? '' : ' no-sidebar'}${panelOpen ? ' has-panel' : ''}`}>
@@ -158,8 +174,11 @@ export default function App() {
 
         <main className="main" id="main">
           {mode === 'home' && (
-            <CoursesHome user={user} onOpenCourse={openCourse} initialPreset={homePreset} onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }} />
+            <CoursesHome user={user} onOpenCourse={openCourse} initialPreset={homePreset}
+              progress={progress} onProgress={setProgress} onOpenTopic={(id) => openTopic(id)} onReview={() => setMode('review')}
+              onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }} />
           )}
+          {mode === 'review' && <ReviewSession userId={user.id} onDone={() => switchMode('home')} />}
           {mode === 'course' && courseId && (
             <CourseView key={courseId} courseId={courseId} onBack={() => switchMode('home')} onOpenTopic={(id) => openTopic(id)} />
           )}
@@ -184,6 +203,7 @@ export default function App() {
           courseId={mode === 'course' ? courseId : mode === 'physics' ? activeTopic?.source?.courseId : undefined} />
       </div>
 
+      <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />
       <div className="toast-region" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>

@@ -18,6 +18,7 @@ os.environ["GEMINI_API_KEY"] = ""
 sys.path.insert(0, str(ROOT))
 
 import db  # noqa: E402
+import engage  # noqa: E402
 import server  # noqa: E402
 
 
@@ -309,3 +310,79 @@ class Api(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Engagement(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.ctx = TestClient(server.app, base_url=LOCAL)
+        cls.c = cls.ctx.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.ctx.__exit__(None, None, None)
+
+    def user(self, name):
+        return db.get_or_create_user(name)["id"]
+
+    def test_xp_pays_once_and_amounts_are_server_side(self):
+        u = self.user("Xp Tester")
+        first = engage.award(u, "2026-11-01", "practice_correct", "t:p1")
+        again = engage.award(u, "2026-11-01", "practice_correct", "t:p1")
+        self.assertEqual((first["xp"], again["xp"]), (8, 0))
+        self.assertTrue(first["streakExtended"])
+        self.assertEqual(engage.award(u, "2026-11-02", "practice_correct", "t:p1")["xp"], 8)  # new day
+        self.assertEqual(engage.award(u, "2026-11-03", "ide_solved", "p")["xp"], 15)
+        self.assertEqual(engage.award(u, "2026-11-04", "ide_solved", "p")["xp"], 0)       # once ever
+        r = self.c.post(f"/api/engage/{u}/xp", json={"source": "quests_bonus", "ref": "x"})
+        self.assertEqual(r.status_code, 422)                                                   # not client-reportable
+
+    def test_streak_freeze_covers_one_missed_day(self):
+        u = self.user("Streak Tester")
+        for d in ("2026-10-01", "2026-10-02", "2026-10-03"):
+            engage.award(u, d, "lesson_read", d)
+        self.assertEqual(engage.streak_info(u, "2026-10-03")["streak"], 3)
+        self.assertEqual(engage.streak_info(u, "2026-10-04")["streak"], 3)    # not done today yet: still alive
+        engage.award(u, "2026-10-05", "lesson_read", "x")                    # missed the 4th, one freeze spent
+        self.assertEqual(engage.streak_info(u, "2026-10-05")["streak"], 5)
+        self.assertEqual(engage.prefs(u)["freezes"], 0)
+        engage.award(u, "2026-10-08", "lesson_read", "y")                    # two missed days, no freeze left
+        self.assertEqual(engage.streak_info(u, "2026-10-08")["streak"], 1)
+        self.assertEqual(engage.streak_info(u, "2026-10-08")["longest"], 5)
+
+    def test_goal_and_badges(self):
+        u = self.user("Goal Tester")
+        engage.set_prefs(u, daily_goal=10)
+        r1 = engage.award(u, "2026-09-01", "practice_correct", "a")
+        r2 = engage.award(u, "2026-09-01", "practice_correct", "b")
+        self.assertFalse(r1["goalReached"])
+        self.assertTrue(r2["goalReached"])
+        self.assertIn("first_steps", [b["id"] for b in r1["newBadges"]])
+
+    def test_missed_quiz_question_comes_back_spaced(self):
+        u = self.user("Review Tester")
+        self.c.post("/api/topics", json=topic("review-topic", quiz=[{"id": "q1", "question": "2+2?", "options": ["3", "4"], "correctAnswer": 1}]))
+        r = self.c.post("/api/quiz/submit", json={"userId": u, "topicId": "review-topic", "questionId": "q1", "selected": 0, "isCorrect": False},
+                        headers={"X-Local-Day": engage.utc_day()}).json()
+        self.assertEqual(r["rewards"]["xp"], 2)
+        tomorrow = engage._shift(engage.utc_day(), 1)
+        self.assertEqual(self.c.get(f"/api/review/{u}/session").json()["questions"], [])     # not due today
+        s = self.c.get(f"/api/review/{u}/session", headers={"X-Local-Day": tomorrow}).json()["questions"]
+        self.assertEqual([(q["questionId"], "correctAnswer" in q) for q in s], [("q1", False)])  # key not sent
+        a = self.c.post(f"/api/review/{u}/answer", json={"topicId": "review-topic", "questionId": "q1", "selected": 1},
+                        headers={"X-Local-Day": tomorrow}).json()
+        self.assertTrue(a["correct"])
+        self.assertEqual(a["nextReview"], engage._shift(tomorrow, 3))
+        self.assertEqual(a["rewards"]["xp"], 6)
+
+    def test_forged_day_is_ignored(self):
+        self.assertEqual(engage.clean_day("1999-01-01"), engage.utc_day())
+        self.assertEqual(engage.clean_day("nonsense"), engage.utc_day())
+
+    def test_quests_are_stable_for_a_day(self):
+        u = self.user("Quest Tester")
+        q1 = [q["id"] for q in engage.quests(u, "2026-08-01")]
+        q2 = [q["id"] for q in engage.quests(u, "2026-08-01")]
+        self.assertEqual(q1, q2)
+        self.assertEqual(len(q1), 3)
+        self.assertEqual(q1[0], "xp")

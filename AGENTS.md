@@ -111,6 +111,14 @@ answers in the &EDU mentor style: short, one leading question, no spoilers for u
 returns Goal / Key idea / Check yourself. The spoken lecture (`/api/elevenlabs-voiceover`) sits in each topic's
 "More" menu; it uses the browser's voice unless `SCIEDU_ELEVENLABS=1`.
 
+## Engagement (engage.py)
+XP for real learning actions, a daily goal (10/20/30/50), streaks with freezes (one earned every 7 days,
+max 2), three daily quests, 12 badges, and spaced review: every missed quiz question returns after
+1, 3, 7, 14 and 30 days (`/api/review/{user}/session|answer|finish`). The server sets every amount and
+pays each (source, ref) once per day or once ever; browsers only report what happened via
+`POST /api/engage/{user}/xp` (practice, math, IDE, simulations, reading). Days follow the browser's
+`X-Local-Day` header (accepted within a day of UTC). Focus mode hides streaks, XP and celebrations.
+
 ## Spending guards
 - `SCIEDU_DAILY_MODEL_CALLS` (default 400): Gemini requests per day across all features, fallbacks included.
 - `SCIEDU_RATE_SCALE`: per-user hourly limits on generation (see `RATE_LIMITS` in server.py).

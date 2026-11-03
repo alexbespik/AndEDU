@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { CheckCircle2, XCircle, Lightbulb, ArrowRight, RotateCcw } from 'lucide-react';
+import { CheckCircle2, XCircle, Lightbulb, ArrowRight, RotateCcw, Flame } from 'lucide-react';
 import Md, { MdInline } from './Md';
 import { api } from '../lib/api';
+import { emitRewards } from '../lib/engage';
 
 /** Older agy topics stored the answer as `correct`; the documented key is `correctAnswer`. */
 export function answerIndex(q) {
@@ -55,6 +56,7 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
   const [showHint, setShowHint] = useState(false);
   const [results, setResults] = useState({});
   const [done, setDone] = useState(false);
+  const [combo, setCombo] = useState(0);
 
   if (questions.length === 0) {
     return (
@@ -73,9 +75,10 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
     const isCorrect = selected === correct;
     setAnswered(true);
     setResults((r) => ({ ...r, [idx]: isCorrect }));
+    setCombo((c) => (isCorrect ? c + 1 : 0));
     const record = { userId, topicId, questionId: q.id ?? idx, selected, isCorrect };
     if (onAnswer) onAnswer(record);
-    else api('/api/quiz/submit', { method: 'POST', body: record }).catch(() => {});
+    else api('/api/quiz/submit', { method: 'POST', body: record }).then((r) => emitRewards(r?.rewards)).catch(() => {});
   };
 
   const next = () => {
@@ -112,6 +115,7 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
     <section className="panel stack" aria-labelledby="quiz-q">
       <div className="quiz-progress">
         <span>Question {idx + 1} of {questions.length}{q.difficulty ? `, ${q.difficulty}` : ''}</span>
+        {combo >= 2 && <span className="combo" role="status"><Flame size={15} aria-hidden="true" /> {combo} in a row</span>}
         <div className="meter" style={{ width: 160 }} aria-hidden="true">
           <span style={{ width: `${((idx + (answered ? 1 : 0)) / questions.length) * 100}%` }} />
         </div>
