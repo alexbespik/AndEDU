@@ -47,7 +47,7 @@ export function CheckBadge({ check }) {
  * Graded multiple-choice quiz. Parent passes key={topic.id} so state resets per topic.
  * `onAnswer` is optional; by default answers are recorded through /api/quiz/submit.
  */
-export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, title = 'Quiz' }) {
+export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAskTutor, title = 'Quiz' }) {
   const questions = quiz.filter((q) => q && q.question && answerIndex(q) !== null);
   const [idx, setIdx] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -164,9 +164,17 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, title
             )}
           </>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={next}>
-            {idx < questions.length - 1 ? 'Next question' : 'See results'} <ArrowRight size={16} aria-hidden="true" />
-          </button>
+          <>
+            <button type="button" className="btn btn-primary" onClick={next}>
+              {idx < questions.length - 1 ? 'Next question' : 'See results'} <ArrowRight size={16} aria-hidden="true" />
+            </button>
+            {onAskTutor && selected !== correct && (
+              <button type="button" className="btn btn-quiet"
+                onClick={() => onAskTutor({ question: q.question, options: q.options, selected, correctAnswer: correct })}>
+                Talk it through with the tutor
+              </button>
+            )}
+          </>
         )}
       </div>
     </section>

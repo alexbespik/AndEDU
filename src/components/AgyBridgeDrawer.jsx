@@ -10,7 +10,7 @@ const SUGGESTIONS = [
 ];
 
 /** AGY companion: its own column on wide screens, a sheet over the page on narrow ones. */
-export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId }) {
+export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId, agyCli = false }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -65,9 +65,14 @@ export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId
   return (
     <>
       <div className="agy-scrim" onClick={onClose} aria-hidden="true" />
-      <aside className="agy-panel" aria-label="AGY assistant">
+      <aside className="agy-panel" aria-label="Assistant">
         <div className="agy-head">
-          <h2>AGY assistant</h2>
+          <div>
+            <h2>{agyCli ? 'AGY assistant' : 'Assistant'}</h2>
+            <p className="hint" style={{ fontSize: '0.8rem' }}>
+              {agyCli ? 'Antigravity CLI on this machine, Gemini when it is busy or capped' : 'Powered by Gemini'}
+            </p>
+          </div>
           <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={onClose} aria-label="Close AGY"><X size={16} /></button>
         </div>
         <div className="agy-log" ref={logRef} aria-live="polite">

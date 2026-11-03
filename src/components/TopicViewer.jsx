@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { BookOpen, Compass, Award, Puzzle, Copy, Check, Download, FlaskConical, Loader2 } from 'lucide-react';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, FlaskConical, Loader2, MessageCircleQuestion } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
 import MermaidViewer from './MermaidViewer';
 import Md, { MdInline } from './Md';
-import { api, useAgyEvents, downloadFile } from '../lib/api';
+import { api, useAgyEvents } from '../lib/api';
+import LessonTutor from './LessonTutor';
+import MoreMenu from './MoreMenu';
 
 const BUILTIN = {
   rolling_without_slipping: () => <RollingWithoutSlippingSim />,
@@ -106,6 +108,7 @@ function LessonTab({ topic }) {
 }
 
 export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse }) {
+  const [tutorFocus, setTutorFocus] = useState(null);
   if (!topic) {
     return <div className="page"><p className="hint">Pick a topic from the list to start.</p></div>;
   }
@@ -116,6 +119,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     { id: 'simulation', label: 'Simulation', icon: Compass, note: hasSim ? null : 'none yet' },
     { id: 'quiz', label: 'Quiz', icon: Award, count: topic.quiz?.length || 0 },
     { id: 'practice', label: 'Practice', icon: Puzzle, count: topic.practice?.length || 0 },
+    { id: 'tutor', label: 'Tutor', icon: MessageCircleQuestion },
   ];
   const tab = tabs.some((t) => t.id === activeTab) ? activeTab : 'theory';
   const src = topic.source || {};
@@ -136,14 +140,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
           {topic.difficulty && <span>{topic.difficulty}</span>}
         </div>
         {topic.summary && <p className="summary">{topic.summary}</p>}
-        {topic.notesFile && (
-          <div className="btn-row">
-            <button type="button" className="btn btn-quiet btn-sm"
-              onClick={() => downloadFile(`/api/notes/${topic.id}.md`, `${topic.id}.md`).catch(() => {})}>
-              <Download size={14} aria-hidden="true" /> Download notes (.md)
-            </button>
-          </div>
-        )}
+        <MoreMenu key={topic.id} topic={topic} courseTitle={course?.title || src.courseTitle} />
         <div className="tabs" role="tablist" aria-label="Topic sections">
           {tabs.map(({ id, label, icon: Icon, count, note }) => (
             <button key={id} type="button" role="tab" id={`tab-${id}`} aria-selected={tab === id} aria-controls={`panel-${id}`}
@@ -159,7 +156,11 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === 'theory' && <LessonTab topic={topic} />}
         {tab === 'simulation' && <SimulationTab key={topic.id} topic={topic} liveSimConfig={liveSimConfig} />}
-        {tab === 'quiz' && <QuizEngine key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId} />}
+        {tab === 'quiz' && (
+          <QuizEngine key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId}
+            onAskTutor={(focus) => { setTutorFocus(focus); setActiveTab('tutor'); }} />
+        )}
+        {tab === 'tutor' && <LessonTutor key={topic.id} topic={topic} focus={tutorFocus} onFocusUsed={() => setTutorFocus(null)} />}
         {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} />}
       </div>
     </div>

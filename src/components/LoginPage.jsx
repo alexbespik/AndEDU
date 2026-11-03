@@ -12,6 +12,7 @@ export default function LoginPage({ onSignedIn }) {
   const [authRequired, setAuthRequired] = useState(false);
   const [password, setPassword] = useState('');
   const [creating, setCreating] = useState(false);
+  const [adult, setAdult] = useState(false);
 
   useEffect(() => {
     api('/api/status')
@@ -29,7 +30,7 @@ export default function LoginPage({ onSignedIn }) {
     setError(null);
     try {
       const { token, user } = await api(creating ? '/api/auth/register' : '/api/auth/login', {
-        method: 'POST', body: { name: name.trim(), password },
+        method: 'POST', body: { name: name.trim(), password, ...(creating ? { adult } : {}) },
       });
       setToken(token);
       onSignedIn(user);
@@ -85,8 +86,14 @@ export default function LoginPage({ onSignedIn }) {
                 autoComplete={creating ? 'new-password' : 'current-password'} minLength={creating ? 8 : undefined} />
               {creating && <span className="hint">At least 8 characters.</span>}
             </div>
+            {creating && (
+              <label className="check-row" htmlFor="acct-adult">
+                <input id="acct-adult" type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} />
+                <span>I am 18 or older (required by the Gemini API terms)</span>
+              </label>
+            )}
             <div className="btn-row">
-              <button type="submit" className="btn btn-primary" disabled={busy || name.trim().length < 2 || !password}>
+              <button type="submit" className="btn btn-primary" disabled={busy || name.trim().length < 2 || !password || (creating && !adult)}>
                 {busy ? 'Working…' : creating ? 'Create account' : 'Sign in'}
               </button>
               <button type="button" className="btn btn-quiet" onClick={() => { setCreating((c) => !c); setError(null); }}>
@@ -127,6 +134,8 @@ export default function LoginPage({ onSignedIn }) {
         </form>}
 
         {error && <p className="notice notice-bad" role="alert">{error}</p>}
+        <p className="hint">Your uploaded materials, prompts and quiz answers are sent to Google's Gemini API to write your
+          lessons. Don't upload anything confidential or personal.</p>
       </section>
     </main>
   );

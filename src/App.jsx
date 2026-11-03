@@ -28,6 +28,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [online, setOnline] = useState(true);
   const [toasts, setToasts] = useState([]);
+  const [agyCli, setAgyCli] = useState(false);
+
+  useEffect(() => {
+    api('/api/status').then((st) => setAgyCli(Boolean(st.agy_cli_enabled))).catch(() => {});
+  }, []);
   const versionRef = useRef(null);
 
   const toast = useCallback((text) => {
@@ -138,6 +143,7 @@ export default function App() {
         online={online}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen((o) => !o)}
+        assistantName={agyCli ? 'AGY' : 'Assistant'}
         onOpenTopics={() => setSidebarOpen(true)}
       />
 
@@ -163,7 +169,7 @@ export default function App() {
           )}
         </main>
 
-        <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={activeTopic?.id}
+        <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={activeTopic?.id} agyCli={agyCli}
           courseId={mode === 'course' ? courseId : mode === 'physics' ? activeTopic?.source?.courseId : undefined} />
       </div>
 

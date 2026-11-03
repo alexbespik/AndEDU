@@ -101,6 +101,30 @@ class Accounts(unittest.TestCase):
         self.assertFalse(db.check_password("x", None))
 
 
+class SpendingGuards(unittest.TestCase):
+    def test_daily_model_budget_stops_calls(self):
+        saved = server.DAILY_MODEL_CALLS
+        server.DAILY_MODEL_CALLS = 2
+        server._budget.update(day="", used=0)
+        try:
+            server.spend_model_call()
+            server.spend_model_call()
+            with self.assertRaises(RuntimeError):
+                server.spend_model_call()
+        finally:
+            server.DAILY_MODEL_CALLS = saved
+            server._budget.update(day="", used=0)
+
+    def test_agy_cli_never_runs_on_a_server_with_accounts(self):
+        os.environ["AGY_CLI"] = "1"
+        try:
+            server.AUTH_REQUIRED = True
+            self.assertFalse(server.agy_cli_allowed())
+        finally:
+            server.AUTH_REQUIRED = False
+            os.environ.pop("AGY_CLI", None)
+
+
 class Api(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -176,8 +200,10 @@ class Api(unittest.TestCase):
     def test_accounts_keep_courses_private(self):
         server.AUTH_REQUIRED = True
         self.assertEqual(self.c.get("/api/topics").status_code, 401)
-        a = self.c.post("/api/auth/register", json={"name": "Ana Test", "password": "correct horse"}).json()
-        b = self.c.post("/api/auth/register", json={"name": "Ben Test", "password": "battery staple"}).json()
+        no_age = self.c.post("/api/auth/register", json={"name": "Kid Test", "password": "correct horse"})
+        self.assertEqual(no_age.status_code, 422)  # Gemini API terms: users must be 18+
+        a = self.c.post("/api/auth/register", json={"name": "Ana Test", "password": "correct horse", "adult": True}).json()
+        b = self.c.post("/api/auth/register", json={"name": "Ben Test", "password": "battery staple", "adult": True}).json()
         ha, hb = {"Authorization": f"Bearer {a['token']}"}, {"Authorization": f"Bearer {b['token']}"}
         course = self.c.post("/api/courses", headers=ha, json={"userId": b["user"]["id"],
                              "goal": "A goal long enough to be accepted by the server"}).json()["course"]
