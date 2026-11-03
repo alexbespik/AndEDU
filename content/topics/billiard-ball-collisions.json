@@ -7,14 +7,14 @@
   "summary": "Explore 2D billiard ball collisions with adjustable coefficient of restitution (e), masses, and velocities.",
   "cheatSheet": [
     {
+      "label": "Coefficient of Restitution",
       "formula": "v_{1,f} - v_{2,f} = -e (v_{1,i} - v_{2,i})",
-      "desc": "Relates post-collision velocity to pre-collision velocity along the normal vector.",
-      "name": "Coefficient of Restitution"
+      "desc": "Relates post-collision velocity to pre-collision velocity along the normal vector."
     },
     {
+      "label": "Momentum Conservation",
       "formula": "m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'",
-      "desc": "Conservation of total linear momentum in an isolated system of colliding bodies.",
-      "name": "Momentum Conservation"
+      "desc": "Conservation of total linear momentum in an isolated system of colliding bodies."
     }
   ],
   "mermaid": "graph TD\n    A[Initial Velocities v1, v2] --> B[Resolve Normal & Tangential Components]\n    B --> C[Apply Coefficient of Restitution e]\n    C --> D[Compute Final Velocities]\n    D --> E[Update Positions & Trajectories]",
@@ -28,15 +28,14 @@
         "e = -1",
         "e = 0.5"
       ],
-      "correct": 1,
       "id": 1,
       "hint": "Think about the bounds of e for energy conservation.",
-      "question": "What is the coefficient of restitution (e) for a perfectly elastic collision?"
+      "question": "What is the coefficient of restitution (e) for a perfectly elastic collision?",
+      "correctAnswer": 1
     },
     {
       "explanation": "In a perfectly inelastic collision, the bodies stick together and move with a common velocity, meaning the relative separation velocity is zero, so e = 0.",
       "hint": "What happens to the relative speed after they stick?",
-      "correct": 0,
       "options": [
         "e = 0",
         "e = 1",
@@ -44,7 +43,9 @@
         "e = 2"
       ],
       "question": "What is the value of e for a perfectly inelastic collision?",
-      "id": 2
+      "id": 2,
+      "correctAnswer": 0
     }
-  ]
+  ],
+  "practice": []
 }
