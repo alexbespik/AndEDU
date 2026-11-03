@@ -4,9 +4,9 @@ import Md from './Md';
 import { api, useAgyEvents } from '../lib/api';
 
 const SUGGESTIONS = [
-  'Make a simulation for this topic',
   'Explain this lesson more simply',
   'Make the next class easier',
+  'Write 3 harder quiz questions for this lesson',
 ];
 
 /** AGY companion: its own column on wide screens, a sheet over the page on narrow ones. */

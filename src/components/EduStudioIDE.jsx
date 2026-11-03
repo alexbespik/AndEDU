@@ -48,7 +48,6 @@ const PenguinShadow = ({ size = 320, color = theme.accentGreen }) => {
         fontSize: '12px', 
         fontWeight: 800, 
         letterSpacing: '6px', 
-        textTransform: 'uppercase', 
         color: color, 
         opacity: 0.75,
         fontFamily: theme.fontMono 
@@ -602,7 +601,7 @@ const InlineMathText = ({ content, inline = false }) => {
                 display: p.isDisplay ? 'block' : 'inline-block',
                 margin: p.isDisplay ? '8px 0' : '0 3px',
                 verticalAlign: p.isDisplay ? 'baseline' : 'middle',
-                color: '#ffffff'
+                color: theme.textOnBrand
               }}
             />
           );
@@ -776,8 +775,10 @@ const VSCodeMarkdown = ({ content }) => {
           td: ({ children }) => (
             <td style={{ border: `1px solid ${theme.border}`, padding: '6px 10px', color: theme.textMain }}>{children}</td>
           ),
-          code: ({ inline, children }) => {
-            if (!inline) {
+          code: ({ className, children }) => {
+            const text = String(children ?? '');
+            const isBlock = /language-/.test(className || '') || text.includes('\n');
+            if (isBlock) {
               return (
                 <pre style={{ margin: '10px 0', padding: '12px', backgroundColor: theme.bgPanel, border: `1px solid ${theme.borderContrast}`, borderRadius: '4px', overflowX: 'auto', fontFamily: theme.fontMono, fontSize: '12px', color: theme.textMain }}>
                   <code>{children}</code>
@@ -805,8 +806,9 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   // App Mode: 'code' | 'math'
   const [appMode, setAppMode] = useState(initialMode || "code");
 
+  // Runs on mount too: the curriculum state starts as the code course, so Math must load its own.
   useEffect(() => {
-    if (initialMode && (initialMode === "code" || initialMode === "math") && initialMode !== appMode) {
+    if (initialMode === "code" || initialMode === "math") {
       handleModeChange(initialMode);
     }
   }, [initialMode]);
@@ -819,7 +821,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const [escalating, setEscalating] = useState(false);
 
   // Curriculum State
-  const [curriculum, setCurriculum] = useState(DEFAULT_CODE_CURRICULUM);
+  const [curriculum, setCurriculum] = useState(() => (initialMode === 'math' ? DEFAULT_MATH_CURRICULUM : DEFAULT_CODE_CURRICULUM));
   const [activeChapterId, setActiveChapterId] = useState(1);
   const [activeProblemIndex, setActiveProblemIndex] = useState(0);
   const [activeTab, setActiveTab] = useState("editor"); // 'editor' | 'docs'
@@ -844,11 +846,12 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
   // Socratic Mentor with Theory-First Briefings
   const briefedProblemsRef = useRef(new Set());
+  const currentBriefKeyRef = useRef(null);  // a briefing that returns after the problem changed is dropped
   const [briefLoading, setBriefLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState([
     { 
       role: 'model', 
-      content: "👋 Welcome to **&.edu LAB**! I am your senior Socratic mentor. I will guide you **theory-first**, ask diagnostic check questions, and review your reasoning step-by-step as you progress." 
+      content: "Welcome to **&.edu LAB**! I am your senior Socratic mentor. I will guide you **theory-first**, ask diagnostic check questions, and review your reasoning step-by-step as you progress." 
     }
   ]);
   const [userInput, setUserInput] = useState("");
@@ -931,7 +934,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
             setKernelStatus("ready");
             setTerminalOutput(prev => [
               ...prev,
-              "[PYODIDE KERNEL] ⚡ Client-side WebAssembly Python 3.12 Kernel ready!",
+              "[PYODIDE KERNEL] Client-side WebAssembly Python 3.12 Kernel ready!",
               "[RUNNER] In-browser execution enabled (0ms latency, zero server load)."
             ]);
           }
@@ -950,7 +953,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
               setKernelStatus("ready");
               setTerminalOutput(prev => [
                 ...prev,
-                "[PYODIDE KERNEL] ⚡ Client-side WebAssembly Python 3.12 Kernel ready!",
+                "[PYODIDE KERNEL] Client-side WebAssembly Python 3.12 Kernel ready!",
                 "[RUNNER] In-browser execution enabled (0ms latency, zero server load)."
               ]);
             }
@@ -978,8 +981,13 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   // ---------------------------------------------------------------------------
   const deliverProblemBriefing = async (problem, force = false) => {
     if (!problem) return;
-    const problemKey = `${problem.chapter_id || 1}_${problem.id}_${problem.title}`;
+    const problemKey = `${appMode}_${problem.chapter_id || 1}_${problem.id}_${problem.title}`;
+    currentBriefKeyRef.current = problemKey;
     if (!force && briefedProblemsRef.current.has(problemKey)) return;
+    const isMathBrief = appMode === 'math' || problem.mode === 'math';
+    const briefActions = isMathBrief
+      ? ["Give me a harder problem", "Show me just the first step", "Break down the theory deeper", "Give me a subtle hint", "Why do the distractors fail?"]
+      : ["Give me a hard blank coding challenge", "Give me a partially coded scaffold", "Break down the theory deeper", "Give me a subtle hint", "Why do the distractors fail?"];
 
     briefedProblemsRef.current.add(problemKey);
     setBriefLoading(true);
@@ -1009,43 +1017,36 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      if (currentBriefKeyRef.current !== problemKey) return;  // student moved on (or switched mode)
 
-      setChatHistory(prev => [
+      setChatHistory(prev => prev.some(m => m.briefKey === problemKey) ? prev : [
         ...prev,
         {
           role: 'model',
           isBriefing: true,
+          briefKey: problemKey,
           problemId: problem.id,
           content: data.briefing,
-          suggestedActions: [
-            "⚡ Give me a hard blank coding challenge",
-            "🧩 Give me a partially coded scaffold",
-            "Break down the theory deeper",
-            "Give me a subtle hint",
-            "Why do the distractors fail?"
-          ]
+          suggestedActions: briefActions
         }
       ]);
     } catch (err) {
+      if (currentBriefKeyRef.current !== problemKey) return;
       // Local fallback briefing: ultra-short, concise, leading
-      const isMath = appMode === 'math' || problem.mode === 'math';
+      const isMath = isMathBrief;
       const fallbackBrief = isMath 
-        ? `🎯 **Task**: Solve for ${problem.guiding_question || problem.title}.\n\n💡 **Lead**: What differentiation or integration rule applies directly to this term?\n\n❓ **Check**: Does your chosen candidate preserve signs and exponent boundaries?`
-        : `🎯 **Task**: Identify the loop invariant condition.\n\n💡 **Lead**: Look at the variable mutation on each iteration step.\n\n❓ **Check**: Which boundary test guarantees the loop terminates without crashing?`;
+        ? `**Task**: Solve for ${problem.guiding_question || problem.title}.\n\n**Lead**: What differentiation or integration rule applies directly to this term?\n\n**Check**: Does your chosen candidate preserve signs and exponent boundaries?`
+        : `**Task**: Identify the loop invariant condition.\n\n**Lead**: Look at the variable mutation on each iteration step.\n\n**Check**: Which boundary test guarantees the loop terminates without crashing?`;
 
-      setChatHistory(prev => [
+      setChatHistory(prev => prev.some(m => m.briefKey === problemKey) ? prev : [
         ...prev,
         {
           role: 'model',
           isBriefing: true,
+          briefKey: problemKey,
           problemId: problem.id,
           content: fallbackBrief,
-          suggestedActions: [
-            "⚡ Give me a hard blank coding challenge",
-            "🧩 Give me a partially coded scaffold",
-            "Explain the lead",
-            "Give a subtle hint"
-          ]
+          suggestedActions: briefActions
         }
       ]);
     } finally {
@@ -1058,7 +1059,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
     if (currentProblem) {
       deliverProblemBriefing(currentProblem);
     }
-  }, [activeProblemIndex, currentProblem?.id, appMode]);
+  }, [activeProblemIndex, currentProblem?.id, currentProblem?.title, appMode]);
 
   // ---------------------------------------------------------------------------
   // 3. SWITCH APP MODE (CODE vs MATH)
@@ -1066,6 +1067,8 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
   const handleModeChange = (newMode) => {
     setAppMode(newMode);
     briefedProblemsRef.current.clear();
+    currentBriefKeyRef.current = null;
+    setChatHistory(prev => prev.slice(0, 1));
     if (newMode === 'math') {
       setCurriculum(DEFAULT_MATH_CURRICULUM);
       initProblemStates(DEFAULT_MATH_CURRICULUM);
@@ -1087,7 +1090,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       setTerminalOutput(prev => [
         ...prev,
         "----------------------------------------",
-        "[MODE SWITCH] ⚡ CODE / PROGRAMMING MODE ACTIVATED.",
+        "[MODE SWITCH] CODE / PROGRAMMING MODE ACTIVATED.",
         "[FEATURES] Interactive Code Slots, Indented Blocks, and WebAssembly Python Kernel."
       ]);
     }
@@ -1163,7 +1166,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       setTerminalOutput(prev => [
         ...prev,
         `[INGESTION SUCCESS] Ingested ${files.length} document(s) (${(data.extracted_text || "").length} characters parsed).`,
-        `[READY] Materials loaded. Click 'Synthesize AI Curriculum' to build lessons & tests.`
+        `[READY] Materials loaded. Click 'Generate practice set' to build exercises.`
       ]);
     } catch (err) {
       setTerminalOutput(prev => [
@@ -1284,7 +1287,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
       setTerminalOutput(prev => [
         ...prev,
-        `[TIER ESCALATED] ⚡ Promoted to Level ${nextLevel}! +50 Bonus XP awarded.`,
+        `[TIER ESCALATED] Promoted to Level ${nextLevel}! +50 Bonus XP awarded.`,
         `[HARD CHALLENGES] Included blank-space coding challenges and partial scaffold exercises.`
       ]);
     } catch (err) {
@@ -1318,7 +1321,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       setVoiceoverSource("browser");
       setTerminalOutput(prev => [
         ...prev,
-        `[SPEECH FALLBACK] 🔊 Playing via browser speech synthesis (robot voice fallback).`
+        `[SPEECH FALLBACK] Playing via browser speech synthesis (robot voice fallback).`
       ]);
     }
   };
@@ -1333,8 +1336,8 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
     setVoiceoverError(null);
     setTerminalOutput(prev => [
       ...prev,
-      `[VOICEOVER] 🎙️ Professor is preparing lecture for: "${currentChapter?.title || 'Lesson'}"...`,
-      `[VOICE PROFILE] 👨‍🏫 Voice: ${selectedVoice === 'JBFqnCBsd6RMkjVDRZzb' ? 'Prof. George (Distinguished British Scholar)' : selectedVoice === 'VR6AewLTigWG4xSOukaG' ? 'Prof. Arnold (Crisp American Scholar)' : 'Prof. Daniel (Authoritative Broadcaster)'}...`
+      `[VOICEOVER] Professor is preparing lecture for: "${currentChapter?.title || 'Lesson'}"...`,
+      `[VOICE PROFILE] ‍Voice: ${selectedVoice === 'JBFqnCBsd6RMkjVDRZzb' ? 'Prof. George (Distinguished British Scholar)' : selectedVoice === 'VR6AewLTigWG4xSOukaG' ? 'Prof. Arnold (Crisp American Scholar)' : 'Prof. Daniel (Authoritative Broadcaster)'}...`
     ]);
 
     try {
@@ -1373,7 +1376,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
       // 2. If backend did not synthesize audio (e.g. key issue on server), but user provided key in UI
       if (!finalAudioBase64 && elevenApiKey.trim() && returnedScript) {
-        setTerminalOutput(prev => [...prev, `[ELEVENLABS DIRECT] 🌐 Calling ElevenLabs API directly with client key...`]);
+        setTerminalOutput(prev => [...prev, `[ELEVENLABS DIRECT] Calling ElevenLabs API directly with client key...`]);
         try {
           const directRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${selectedVoice}`, {
             method: "POST",
@@ -1435,7 +1438,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         setVoiceoverError(null);
         setTerminalOutput(prev => [
           ...prev,
-          `[ELEVENLABS SUCCESS] 🔊 Playing ElevenLabs neural lecture by ${finalVoiceName}!`,
+          `[ELEVENLABS SUCCESS] Playing ElevenLabs neural lecture by ${finalVoiceName}!`,
           `[SPOKEN SCRIPT] "${returnedScript.slice(0, 110)}..."`
         ]);
       } else {
@@ -1445,7 +1448,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         setVoiceoverSource("error");
         setTerminalOutput(prev => [
           ...prev,
-          `[ELEVENLABS NOTICE] ⚠️ ${errDetail}`,
+          `[ELEVENLABS NOTICE] ${errDetail}`,
           `[NOTE] Check backend .env ELEVENLABS_API_KEY. Use button below for browser speech if offline.`
         ]);
       }
@@ -1456,7 +1459,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
       setVoiceoverSource("error");
       setTerminalOutput(prev => [
         ...prev,
-        `[VOICEOVER ERROR] ⚠️ ${errMsg}`
+        `[VOICEOVER ERROR] ${errMsg}`
       ]);
     } finally {
       setVoiceoverLoading(false);
@@ -1485,7 +1488,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
     setTerminalOutput(prev => [
       ...prev,
       `----------------------------------------`,
-      `[CURRICULUM EXPANSION] 🚀 Synthesizing Chapter ${nextChapterNum}...`,
+      `[CURRICULUM EXPANSION] Synthesizing Chapter ${nextChapterNum}...`,
       targetTopic ? `[TOPIC TARGET] "${targetTopic}"` : `[AI AUTO-SEQUENCE] Determining next advancing conceptual tier...`
     ]);
 
@@ -1561,7 +1564,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
       setTerminalOutput(prev => [
         ...prev,
-        `[SUCCESS] 📚 Chapter ${newChapter.id} generated: "${newChapter.title}"`,
+        `[SUCCESS] Chapter ${newChapter.id} generated: "${newChapter.title}"`,
         `[CONTENT READY] Created ${(newChapter.problems || []).length} interactive exercises + complete study guide.`
       ]);
     } catch (err) {
@@ -1584,9 +1587,9 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
     setIsGeneratingProblem(true);
     const label = requestedType === 'code_blank'
-      ? '⚡ HARD BLANK CODING TASK'
+      ? 'Hard blank coding task'
       : requestedType === 'code_partial'
-        ? '🧩 PARTIALLY CODED SCAFFOLD'
+        ? 'Partially coded scaffold'
         : 'practice exercise';
     setTerminalOutput(prev => [
       ...prev,
@@ -1696,7 +1699,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
 
     setTerminalOutput(prev => [
       ...prev,
-      `[TUTOR] 🎯 Tailored exercise ready: "${newProblem.title}" in ${targetChapter.title}.`
+      `[TUTOR] Tailored exercise ready: "${newProblem.title}" in ${targetChapter.title}.`
     ]);
   };
 
@@ -1753,7 +1756,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `----------------------------------------`,
         `[SLOT VERIFIED] Inserted '${option}' into space.`,
         ...(currentProblem.test_cases || ["[PASS] Identity satisfied."]),
-        `[SUCCESS] 🎉 Correct solution! (+25 XP)`
+        `[SUCCESS] Correct solution! (+25 XP)`
       ]);
 
       // Mentor congratulates and reinforces learning
@@ -1761,7 +1764,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         ...prev,
         {
           role: 'model',
-          content: `🎉 **Excellent Work!** You correctly chose \`${option}\`.\n\n*Why it works*: ${currentProblem.explanation || "This choice satisfies the structural invariant perfectly."}\n\nNotice how understanding the underlying invariant made the choice clear! Ready for the next challenge?`
+          content: `**Excellent Work!** You correctly chose \`${option}\`.\n\n*Why it works*: ${currentProblem.explanation || "This choice satisfies the structural invariant perfectly."}\n\nNotice how understanding the underlying invariant made the choice clear! Ready for the next challenge?`
         }
       ]);
     } else {
@@ -1776,7 +1779,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         ...prev,
         {
           role: 'model',
-          content: `🤔 **Let's pause and review**: You selected \`${option}\`. Think about what happens when this expression executes or evaluates. Does it satisfy the boundary condition? *Hint*: ${currentProblem.concept_hint || "Re-check the invariant."}`
+          content: `**Let's pause and review**: You selected \`${option}\`. Think about what happens when this expression executes or evaluates. Does it satisfy the boundary condition? *Hint*: ${currentProblem.concept_hint || "Re-check the invariant."}`
         }
       ]);
     }
@@ -1804,14 +1807,14 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `----------------------------------------`,
         `[DIAGNOSTIC QUESTION] Selected (${letter}): "${option}"`,
         ...(currentProblem.test_cases || ["[PASS] Conceptual understanding verified."]),
-        `[SUCCESS] 🎉 Correct answer! (+25 XP)`
+        `[SUCCESS] Correct answer! (+25 XP)`
       ]);
 
       setChatHistory(prev => [
         ...prev,
         {
           role: 'model',
-          content: `🎉 **Correct!** Option (${letter}) \`${option}\` is accurate.\n\n*Pedagogical Insight*: ${currentProblem.explanation || "Your conceptual grasp of this principle is verified."}\n\nReady for the next exercise?`
+          content: `**Correct!** Option (${letter}) \`${option}\` is accurate.\n\n*Pedagogical Insight*: ${currentProblem.explanation || "Your conceptual grasp of this principle is verified."}\n\nReady for the next exercise?`
         }
       ]);
     } else {
@@ -1825,7 +1828,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         ...prev,
         {
           role: 'model',
-          content: `🤔 **Let's rethink this**: You picked (${letter}) \`${option}\`. Consider the underlying definition or edge cases: *${currentProblem.concept_hint || "What invariant or condition does this violate?"}*`
+          content: `**Let's rethink this**: You picked (${letter}) \`${option}\`. Consider the underlying definition or edge cases: *${currentProblem.concept_hint || "What invariant or condition does this violate?"}*`
         }
       ]);
     }
@@ -1869,14 +1872,14 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code" }) => {
         `----------------------------------------`,
         `[STEP-BY-STEP VERIFIED]:`,
         ...nextAssembled,
-        `[STATUS] 🎉 Sequence / Proof assembled perfectly! (+50 XP)`
+        `[STATUS] Sequence / Proof assembled perfectly! (+50 XP)`
       ]);
 
       setChatHistory(prev => [
         ...prev,
         {
           role: 'model',
-          content: `🏆 **Derivation Complete!** You assembled the steps in exact logical sequence. Notice how each step logically follows from the previous one without skips!`
+          content: `**Derivation Complete!** You assembled the steps in exact logical sequence. Notice how each step logically follows from the previous one without skips!`
         }
       ]);
     } else if (corrBlocks.length > 0 && nextAssembled.length >= corrBlocks.length) {
@@ -1967,7 +1970,7 @@ sys.stderr = _sys_err
           stdout ? `[STDOUT]\n${stdout.trim()}` : "[STDOUT] (No output printed)",
           stderr ? `[STDERR]\n${stderr.trim()}` : "",
           testMode 
-            ? (testsPassed ? "[TEST REPORT] ✅ Verified in WebAssembly Kernel! (+100 XP)" : "[TEST REPORT] ❌ Test assertion failed.") 
+            ? (testsPassed ? "[TEST REPORT] Verified in WebAssembly Kernel! (+100 XP)" : "[TEST REPORT] Test assertion failed.") 
             : "[STATUS] Execution finished with exit code 0."
         ]);
       } catch (runErr) {
@@ -2011,7 +2014,7 @@ sys.stderr = _sys_err
           data.stdout ? `[STDOUT]\n${data.stdout.trim()}` : "[STDOUT] (No output printed)",
           data.stderr ? `[STDERR]\n${data.stderr.trim()}` : "",
           testMode 
-            ? (data.tests_passed ? "[TEST REPORT] ✅ Verified! All assertions passed! (+100 XP)" : "[TEST REPORT] ❌ Test assertion failed.") 
+            ? (data.tests_passed ? "[TEST REPORT] Verified! All assertions passed! (+100 XP)" : "[TEST REPORT] Test assertion failed.") 
             : "[STATUS] Execution finished."
         ]);
       } catch (err) {
@@ -2180,7 +2183,7 @@ sys.stderr = _sys_err
             gap: '10px' 
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: theme.accentYellow, textTransform: 'uppercase' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: theme.accentYellow }}>
                 Mathematical Terms Palette (LaTeX Notation)
               </span>
               {slotChoice && (
@@ -2238,8 +2241,8 @@ sys.stderr = _sys_err
       return (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, backgroundColor: 'transparent' }}>
           <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              MATHEMATICAL DERIVATION STEPS (Tap steps below to construct derivation from premise to Q.E.D.):
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '4px', letterSpacing: 0 }}>
+              Derivation steps (tap them in order, from premise to Q.E.D.):
             </div>
 
             {assembled.length === 0 ? (
@@ -2267,14 +2270,14 @@ sys.stderr = _sys_err
                     <span style={{ color: theme.accentBlue, fontSize: '11px', fontWeight: 700 }}>Step {idx + 1}</span>
                     <MathFormula math={step} inline={true} />
                   </div>
-                  <span style={{ fontSize: '11px', color: theme.textMuted }}>✕ remove</span>
+                  <span style={{ fontSize: '11px', color: theme.textMuted }}>remove</span>
                 </div>
               ))
             )}
           </div>
 
           <div style={{ borderTop: `1px solid ${theme.borderContrast}`, backgroundColor: theme.bgPanel, padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain }}>
               Scrambled Derivation Steps (Tap to Insert)
             </span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -2360,7 +2363,7 @@ sys.stderr = _sys_err
 
           <div style={{ borderTop: `1px solid ${theme.borderContrast}`, backgroundColor: theme.bgPanel, padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain, textTransform: 'uppercase' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain }}>
                 Code Options Palette (Drag or Click to Slot)
               </span>
               {slotChoice && (
@@ -2429,7 +2432,7 @@ sys.stderr = _sys_err
           </div>
 
           <div style={{ borderTop: `1px solid ${theme.borderContrast}`, backgroundColor: theme.bgPanel, padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain }}>
               Scrambled Code Bank (Tap to Insert With Indentation)
             </span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -2468,7 +2471,7 @@ sys.stderr = _sys_err
           <div style={{ maxWidth: '700px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ backgroundColor: theme.bgCard, border: `1px solid ${theme.borderContrast}`, padding: '16px', borderRadius: '4px' }}>
               <div style={{ fontSize: '11px', color: theme.accentBlue, fontWeight: 700, marginBottom: '6px' }}>
-                DIAGNOSTIC QUESTION #{activeProblemIndex + 1}
+                Diagnostic question {activeProblemIndex + 1}
               </div>
               <div style={{ fontSize: '14px', color: theme.textMain }}>
                 {isMath ? <MathFormula math={currentProblem.question_text || currentProblem.guiding_question} /> : (currentProblem.question_text || currentProblem.guiding_question)}
@@ -2541,17 +2544,17 @@ sys.stderr = _sys_err
             {isBlankTask ? (
               <span style={{ backgroundColor: theme.bgCardAlt, color: theme.accentGold, padding: '3px 8px', borderRadius: '3px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Zap size={12} color={theme.accentGold} />
-                HARD CHALLENGE: BLANK SCRATCHPAD
+                Hard challenge: blank scratchpad
               </span>
             ) : isPartialTask ? (
               <span style={{ backgroundColor: theme.bgCardAlt, color: theme.accentGreen, padding: '3px 8px', borderRadius: '3px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Code2 size={12} color={theme.accentGreen} />
-                PARTIALLY CODED SCAFFOLD
+                Partially coded scaffold
               </span>
             ) : (
               <span style={{ backgroundColor: theme.bgCardAlt, color: theme.accentBlue, padding: '3px 8px', borderRadius: '3px', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Terminal size={12} color={theme.accentBlue} />
-                FREEFORM CODING IDE
+                Freeform coding
               </span>
             )}
             <span style={{ fontSize: '11px', color: theme.textMuted }}>
@@ -2628,7 +2631,7 @@ sys.stderr = _sys_err
         <div style={{ borderTop: `1px solid ${theme.borderContrast}`, backgroundColor: theme.bgPanel, padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: '11px', color: theme.accentBlue, display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Zap size={12} color={theme.accentGold} />
-            <span>WebAssembly Kernel: {kernelStatus === 'ready' ? '⚡ Python 3.12 Ready' : 'Connecting...'}</span>
+            <span>WebAssembly Kernel: {kernelStatus === 'ready' ? 'Python 3.12 Ready' : 'Connecting...'}</span>
           </div>
 
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -2642,7 +2645,7 @@ sys.stderr = _sys_err
             <button
               onClick={() => handleRunInPyodideKernel(true)}
               disabled={executingCode}
-              style={{ backgroundColor: theme.accentGreen, color: '#ffffff', border: 'none', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+              style={{ backgroundColor: theme.accentGreen, color: theme.textOnBrand, border: 'none', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', fontSize: '11px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               <Check size={12} /> Run Test Suite
             </button>
@@ -2680,71 +2683,6 @@ sys.stderr = _sys_err
         overflowY: 'auto',
         gap: '12px'
       }}>
-        {/* Brand & Mode Switcher */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${theme.border}`, paddingBottom: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: theme.accentForestLight || '#2ecc71', boxShadow: '0 0 8px rgba(17, 87, 64, 0.30)' }} />
-            <span style={{ fontWeight: 800, fontSize: '12.5px', color: '#ffffff', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ color: theme.accentForestLight || '#2ecc71' }}>&amp;</span>.edu
-              <span style={{ fontSize: '9px', backgroundColor: 'rgba(17, 87, 64, 0.10)', color: theme.accentForestLight || '#2ecc71', border: '1px solid rgba(17, 87, 64, 0.22)', padding: '1px 5px', borderRadius: '3px', fontWeight: 800, letterSpacing: '0.08em' }}>LAB</span>
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', backgroundColor: theme.bgInput, border: `1px solid ${theme.border}`, borderRadius: '4px', padding: '2px', gap: '2px' }}>
-            {onSwitchToPhysics && (
-              <button
-                onClick={onSwitchToPhysics}
-                style={{
-                  backgroundColor: 'transparent',
-                  color: theme.accentGold,
-                  border: 'none',
-                  padding: '3px 8px',
-                  borderRadius: '3px',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}
-                title="Switch to Physics & Simulations Studio"
-              >
-                🌌 Physics
-              </button>
-            )}
-            <button
-              onClick={() => handleModeChange('code')}
-              style={{
-                backgroundColor: appMode === 'code' ? theme.accentGreen : 'transparent',
-                color: appMode === 'code' ? '#ffffff' : theme.textDim,
-                border: 'none',
-                padding: '3px 8px',
-                borderRadius: '3px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              ⚡ Code
-            </button>
-            <button
-              onClick={() => handleModeChange('math')}
-              style={{
-                backgroundColor: appMode === 'math' ? theme.accentGreen : 'transparent',
-                color: appMode === 'math' ? '#ffffff' : theme.textDim,
-                border: 'none',
-                padding: '3px 8px',
-                borderRadius: '3px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              ∑ Math
-            </button>
-          </div>
-        </div>
-
         {/* Multi-File Upload Input (Few or Any Amount) */}
         <div>
           <label style={{ 
@@ -2797,7 +2735,7 @@ sys.stderr = _sys_err
 
         {/* Topic Input */}
         <div>
-          <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textDim, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textDim, marginBottom: '4px' }}>
             {appMode === 'math' ? 'Target Math Field' : 'Target Programming Topic'}
           </div>
           <textarea
@@ -2830,7 +2768,7 @@ sys.stderr = _sys_err
                 onClick={() => setTargetChapterCount(cnt)}
                 style={{
                   backgroundColor: targetChapterCount === cnt ? theme.accentGreen : theme.bgCard,
-                  color: targetChapterCount === cnt ? '#ffffff' : theme.textDim,
+                  color: targetChapterCount === cnt ? theme.textOnBrand : theme.textDim,
                   border: `1px solid ${targetChapterCount === cnt ? theme.accentGreen : theme.border}`,
                   borderRadius: '2px',
                   padding: '2px 6px',
@@ -2853,7 +2791,7 @@ sys.stderr = _sys_err
             style={{ 
               flex: 1, 
               backgroundColor: theme.accentGreen, 
-              color: '#ffffff', 
+              color: theme.textOnBrand, 
               border: 'none', 
               padding: '8px', 
               borderRadius: '4px', 
@@ -2866,8 +2804,8 @@ sys.stderr = _sys_err
               gap: '6px' 
             }}
           >
-            {loading ? <Loader2 size={12} className="animate-spin" color="#ffffff" /> : <Play size={12} color="#ffffff" />}
-            Synthesize AI Curriculum
+            {loading ? <Loader2 size={12} className="animate-spin" color={theme.textOnBrand} /> : <Play size={12} color={theme.textOnBrand} />}
+            Generate practice set
           </button>
           <button
             onClick={handleMakeHarder}
@@ -2885,182 +2823,15 @@ sys.stderr = _sys_err
             {escalating ? <Loader2 size={12} className="animate-spin" /> : <Flame size={12} color={theme.accentOrange} />}
           </button>
         </div>
-
-        {/* Elderly Male Professor Audio Lecture (ElevenLabs Neural Voice) */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: theme.bgCard, border: `1px solid ${theme.borderContrast}`, borderRadius: '5px', padding: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: theme.accentGreen, display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <GraduationCap size={14} color={theme.accentGreen} />
-              <span>Professor Audio Lecture</span>
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <select
-                value={selectedVoice}
-                onChange={(e) => setSelectedVoice(e.target.value)}
-                title="Select Professor Voice (ElevenLabs)"
-                style={{
-                  backgroundColor: theme.bgInput,
-                  color: theme.textMain,
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: '3px',
-                  fontSize: '9px',
-                  padding: '2px 4px',
-                  cursor: 'pointer',
-                  outline: 'none',
-                  maxWidth: '120px'
-                }}
-              >
-                <option value="JBFqnCBsd6RMkjVDRZzb">Prof. George (British)</option>
-                <option value="VR6AewLTigWG4xSOukaG">Prof. Arnold (American)</option>
-                <option value="onwK4e9ZLuTAKqWW03F9">Prof. Daniel (Broadcaster)</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <button
-              onClick={handleGenerateVoiceover}
-              disabled={voiceoverLoading}
-              title="Listen to conversational audio lecture by elderly male professor"
-              style={{
-                flex: 1,
-                backgroundColor: voiceoverPlaying ? theme.accentGreenBg : theme.accentGreen,
-                color: voiceoverPlaying ? theme.accentGreen : '#ffffff',
-                border: `1px solid ${voiceoverPlaying ? theme.accentGreen : 'transparent'}`,
-                padding: '8px',
-                borderRadius: '4px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                transition: 'background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s'
-              }}
-            >
-              {voiceoverLoading ? (
-                <Loader2 size={13} className="animate-spin" color={voiceoverPlaying ? theme.accentGreen : '#ffffff'} />
-              ) : voiceoverPlaying ? (
-                <Volume2 size={13} color={theme.accentGreen} className="animate-pulse" />
-              ) : (
-                <Mic size={13} color="#ffffff" />
-              )}
-              <span>{voiceoverLoading ? 'Synthesizing Audio...' : voiceoverPlaying ? 'Professor Speaking...' : '🎙️ Listen to Lecture'}</span>
-            </button>
-
-            {voiceoverPlaying && (
-              <button
-                onClick={handleStopVoiceover}
-                title="Stop voiceover lecture"
-                style={{
-                  backgroundColor: theme.errorBg,
-                  border: `1px solid ${theme.accentPink}`,
-                  color: theme.accentPink,
-                  padding: '8px 10px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-              >
-                <Square size={11} color={theme.accentPink} />
-              </button>
-            )}
-
-            {voiceoverScript && (
-              <button
-                onClick={() => setShowTranscript(prev => !prev)}
-                title="Toggle spoken lecture transcript"
-                style={{
-                  backgroundColor: showTranscript ? theme.bgHighlight : theme.bgCardAlt,
-                  border: `1px solid ${theme.border}`,
-                  color: showTranscript ? theme.textMain : theme.textDim,
-                  padding: '8px 9px',
-                  borderRadius: '4px',
-                  fontSize: '10px',
-                  cursor: 'pointer'
-                }}
-              >
-                <FileText size={12} />
-              </button>
-            )}
-          </div>
-
-          {/* ElevenLabs Error & Fallback Banner */}
-          {voiceoverError && (
-            <div style={{
-              backgroundColor: theme.errorBg,
-              border: `1px solid ${theme.accentPink}`,
-              borderRadius: '4px',
-              padding: '6px 8px',
-              fontSize: '10px',
-              color: '#f8f8f2',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '4px'
-            }}>
-              <div style={{ color: theme.accentPink, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <AlertTriangle size={11} /> ElevenLabs Connection Notice:
-              </div>
-              <div style={{ fontSize: '9px', color: theme.accentPink }}>{voiceoverError}</div>
-              <button
-                onClick={handlePlayBrowserFallbackSpeech}
-                style={{
-                  alignSelf: 'flex-start',
-                  backgroundColor: theme.bgCardAlt,
-                  border: `1px solid ${theme.accentOrange}`,
-                  color: theme.accentOrange,
-                  borderRadius: '3px',
-                  padding: '3px 7px',
-                  fontSize: '9px',
-                  cursor: 'pointer',
-                  marginTop: '2px'
-                }}
-              >
-                🤖 Play Offline Browser Speech Fallback
-              </button>
-            </div>
-          )}
-
-          {/* Collapsible Professor Transcript Drawer */}
-          {showTranscript && voiceoverScript && (
-            <div style={{
-              backgroundColor: theme.bgPanel,
-              border: `1px solid ${theme.border}`,
-              borderRadius: '4px',
-              padding: '8px 10px',
-              fontSize: '10px',
-              lineHeight: '1.5',
-              color: theme.textDim,
-              maxHeight: '120px',
-              overflowY: 'auto',
-              fontStyle: 'italic'
-            }}>
-              <div style={{ fontSize: '9px', fontWeight: 700, color: theme.accentBlue, marginBottom: '3px', fontStyle: 'normal' }}>
-                👨‍🏫 PROFESSOR'S SPOKEN LECTURE TRANSCRIPT:
-              </div>
-              "{voiceoverScript}"
-            </div>
-          )}
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9px', color: theme.textMuted }}>
-            <span>Engine: ElevenLabs Neural TTS</span>
-            {voiceoverSource && (
-              <span style={{ 
-                color: voiceoverSource === 'elevenlabs' ? theme.accentGreen : voiceoverSource === 'browser' ? theme.accentOrange : theme.accentPink, 
-                fontWeight: 600 
-              }}>
-                {voiceoverSource === 'elevenlabs' ? '● ElevenLabs Neural' : voiceoverSource === 'browser' ? '● Browser Speech Engine' : '● ElevenLabs Error'}
-              </span>
-            )}
-          </div>
-        </div>
+        <p style={{ fontSize: '11.5px', lineHeight: 1.45, color: theme.textMuted, margin: 0 }}>
+          Practice workspace: sets generated here are not saved to My courses. For an adaptive course with a
+          diagnostic, use My courses, then New course.
+        </p>
 
         {/* Chapters & Problem Explorer with Dynamic Chapter Generation */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: '10px', fontWeight: 700, color: theme.accentYellow, textTransform: 'uppercase' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: theme.accentYellow }}>
               Multi-Chapter Syllabus ({chapters.length} Chapters)
             </div>
             <button
@@ -3069,7 +2840,7 @@ sys.stderr = _sys_err
               title="Generate a new chapter to expand this curriculum"
               style={{
                 backgroundColor: showAddChapterModal ? theme.accentGreen : theme.bgCardAlt,
-                color: showAddChapterModal ? '#ffffff' : theme.accentGreen,
+                color: showAddChapterModal ? theme.textOnBrand : theme.accentGreen,
                 border: `1px solid ${theme.accentGreen}`,
                 borderRadius: '3px',
                 padding: '2px 7px',
@@ -3089,7 +2860,7 @@ sys.stderr = _sys_err
           {showAddChapterModal && (
             <div style={{ backgroundColor: theme.bgCard, border: `1px solid ${theme.accentGreen}`, borderRadius: '5px', padding: '10px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
               <div style={{ fontSize: '11px', fontWeight: 700, color: theme.accentGreen, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>➕ Generate Next Chapter</span>
+                <span>Generate Next Chapter</span>
                 <button onClick={() => setShowAddChapterModal(false)} style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer' }}><X size={12} /></button>
               </div>
 
@@ -3143,7 +2914,7 @@ sys.stderr = _sys_err
                   style={{
                     flex: 1,
                     backgroundColor: theme.accentGreen,
-                    color: '#ffffff',
+                    color: theme.textOnBrand,
                     border: 'none',
                     borderRadius: '3px',
                     padding: '6px 10px',
@@ -3156,8 +2927,8 @@ sys.stderr = _sys_err
                     gap: '5px'
                   }}
                 >
-                  {isGeneratingChapter ? <Loader2 size={12} className="animate-spin" color="#ffffff" /> : <Sparkles size={12} color="#ffffff" />}
-                  <span>{isGeneratingChapter ? 'Synthesizing...' : '⚡ Generate Chapter'}</span>
+                  {isGeneratingChapter ? <Loader2 size={12} className="animate-spin" color={theme.textOnBrand} /> : <Sparkles size={12} color={theme.textOnBrand} />}
+                  <span>{isGeneratingChapter ? 'Synthesizing...' : 'Generate Chapter'}</span>
                 </button>
                 <button
                   onClick={() => setShowAddChapterModal(false)}
@@ -3446,34 +3217,13 @@ sys.stderr = _sys_err
 
         {/* Main Canvas Area */}
         <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: theme.bgEditor }}>
-          {/* Centered Linux Tux Penguin Shadow Watermark in Middle of Canvas */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'none',
-              userSelect: 'none',
-              zIndex: 0,
-              opacity: 0.18,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: theme.accentGreen
-            }}
-          >
-            <PenguinShadow size={320} color={theme.accentGreen} />
-          </div>
-
           <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {activeTab === 'docs' ? (
               <div style={{ flex: 1, padding: '24px 30px', overflowY: 'auto', backgroundColor: 'transparent' }}>
                 <div style={{ maxWidth: '800px', margin: '0 auto' }}>
                   <div style={{ marginBottom: '16px', padding: '12px 16px', backgroundColor: theme.bgCard, border: `1px solid ${theme.borderContrast}`, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
-                      <div style={{ fontSize: '11px', color: theme.accentYellow, fontWeight: 700, textTransform: 'uppercase' }}>
+                      <div style={{ fontSize: '11px', color: theme.accentYellow, fontWeight: 700 }}>
                         Lesson Study Guide • {currentChapter?.title}
                       </div>
                       <div style={{ fontSize: '12px', color: theme.textDim, marginTop: '2px' }}>
@@ -3505,7 +3255,7 @@ sys.stderr = _sys_err
                       }}
                     >
                       {voiceoverLoading ? <Loader2 size={12} className="animate-spin" color={theme.accentGreen} /> : voiceoverPlaying ? <Volume2 size={12} className="animate-pulse" color={theme.accentGreen} /> : <Mic size={12} color={theme.accentGreen} />}
-                      <span>{voiceoverLoading ? 'Synthesizing...' : voiceoverPlaying ? 'Lecture Playing...' : '🎙️ Listen to Professor Lecture'}</span>
+                      <span>{voiceoverLoading ? 'Synthesizing...' : voiceoverPlaying ? 'Lecture Playing...' : 'Listen to Professor Lecture'}</span>
                     </button>
 
                     <button
@@ -3625,7 +3375,7 @@ sys.stderr = _sys_err
                       }}
                       style={{
                         backgroundColor: theme.accentGreen,
-                        color: '#ffffff',
+                        color: theme.textOnBrand,
                         border: 'none',
                         padding: '10px 20px',
                         borderRadius: '4px',
@@ -3638,7 +3388,7 @@ sys.stderr = _sys_err
                       }}
                     >
                       <span>Start Chapter Exercises & Tests</span>
-                      <ChevronRight size={14} color="#ffffff" />
+                      <ChevronRight size={14} color={theme.textOnBrand} />
                     </button>
                   </div>
                 </div>
@@ -3676,7 +3426,7 @@ sys.stderr = _sys_err
           <div style={{ height: '26px', backgroundColor: theme.bgActivity, display: 'flex', alignItems: 'center', padding: '0 12px', gap: '8px', borderBottom: `1px solid ${theme.border}` }}>
             <Terminal size={12} color={theme.accentGreen} />
             <span style={{ fontSize: '11px', color: theme.textMain, fontWeight: 700 }}>
-              {appMode === 'math' ? 'MATHEMATICAL LOG & VERIFICATION' : 'SANDBOX EXECUTION CONSOLE (PYODIDE WASM)'}
+              {appMode === 'math' ? 'Verification log' : 'Python console (runs in your browser)'}
             </span>
           </div>
           <div style={{ padding: '8px 14px', overflowY: 'auto', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: theme.fontMono }}>
@@ -3755,7 +3505,7 @@ sys.stderr = _sys_err
               }}
             >
               {msg.isBriefing && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', fontWeight: 700, color: theme.accentYellow, textTransform: 'uppercase', marginBottom: '6px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', fontWeight: 700, color: theme.accentYellow, marginBottom: '6px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '4px' }}>
                   <GraduationCap size={13} color={theme.accentYellow} />
                   <span>Problem Briefing & Theory</span>
                 </div>
@@ -3810,8 +3560,8 @@ sys.stderr = _sys_err
               outline: 'none'
             }}
           />
-          <button type="submit" style={{ backgroundColor: theme.accentGreen, border: 'none', color: '#ffffff', borderRadius: '4px', padding: '0 12px', cursor: 'pointer', fontWeight: 700 }}>
-            <Send size={13} color="#ffffff" />
+          <button type="submit" style={{ backgroundColor: theme.accentGreen, border: 'none', color: theme.textOnBrand, borderRadius: '4px', padding: '0 12px', cursor: 'pointer', fontWeight: 700 }}>
+            <Send size={13} color={theme.textOnBrand} />
           </button>
         </form>
       </section>

@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
-import { BookOpen, Compass, Award, Puzzle, Copy, Check, FlaskConical, Loader2, MessageCircleQuestion } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
 import MermaidViewer from './MermaidViewer';
 import Md, { MdInline } from './Md';
-import { api, useAgyEvents } from '../lib/api';
+import { api } from '../lib/api';
 import LessonTutor from './LessonTutor';
 import MoreMenu from './MoreMenu';
 
@@ -16,58 +16,8 @@ const BUILTIN = {
 };
 
 function SimulationTab({ topic, liveSimConfig }) {
-  const [job, setJob] = useState(null);
-  const [error, setError] = useState(null);
-
-  useAgyEvents((evt) => {
-    if (evt.type === 'JOB_UPDATE' && job && evt.payload.id === job.id) setJob(evt.payload);
-  });
-
-  if (BUILTIN[topic.simulationType]) return BUILTIN[topic.simulationType](liveSimConfig);
-
-  if (topic.simulation) {
-    const s = topic.simulation;
-    return (
-      <section className="panel stack">
-        <h2>{s.title}</h2>
-        {s.description && <p>{s.description}</p>}
-        {s.params?.length > 0 && (
-          <ul className="stack-sm" style={{ margin: 0, paddingLeft: '1.2em' }}>
-            {s.params.map((p) => (
-              <li key={p.name}>{p.label}: {p.min} to {p.max}{p.unit ? ` ${p.unit}` : ''}</li>
-            ))}
-          </ul>
-        )}
-        <p className="notice notice-info">This simulation is saved and validated. The interactive renderer for generated simulations isn't wired up yet, so it can't be played here.</p>
-      </section>
-    );
-  }
-
-  const running = job && (job.status === 'queued' || job.status === 'running');
-  const start = async () => {
-    setError(null);
-    try {
-      setJob(await api('/api/simulations/generate', { method: 'POST', body: { topicId: topic.id } }));
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  return (
-    <section className="panel empty-sim">
-      <FlaskConical size={28} color="var(--wm-green)" aria-hidden="true" />
-      <h2>No simulation for this topic yet</h2>
-      <p style={{ maxWidth: '52ch' }}>AGY can design one from this lesson: sliders for the quantities that matter, plus live readouts of what they change.</p>
-      <div className="btn-row" style={{ justifyContent: 'center' }}>
-        <button type="button" className="btn btn-primary" onClick={start} disabled={running}>
-          {running ? <><Loader2 size={16} className="spin" aria-hidden="true" /> {job.step || 'Working'}</> : 'Generate simulation'}
-        </button>
-      </div>
-      {job?.status === 'error' && <p className="notice notice-bad">{job.error}</p>}
-      {job?.status === 'done' && <p className="notice notice-ok">Simulation created. It will appear here in a moment.</p>}
-      {error && <p className="notice notice-bad">{error}</p>}
-    </section>
-  );
+  // Only the built-in labs can be played; the tab is hidden for every other topic.
+  return BUILTIN[topic.simulationType] ? BUILTIN[topic.simulationType](liveSimConfig) : null;
 }
 
 function LessonTab({ topic }) {
@@ -109,14 +59,20 @@ function LessonTab({ topic }) {
 
 export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse }) {
   const [tutorFocus, setTutorFocus] = useState(null);
+
+  // Opening a course class tells the server, so adaptation never rewrites a lesson you're reading.
+  useEffect(() => {
+    if (topic?.source?.courseId) api(`/api/topics/${topic.id}/opened`, { method: 'POST' }).catch(() => {});
+  }, [topic?.id, topic?.source?.courseId]);
+
   if (!topic) {
     return <div className="page"><p className="hint">Pick a topic from the list to start.</p></div>;
   }
 
-  const hasSim = Boolean(topic.simulation || BUILTIN[topic.simulationType]);
+  const hasSim = Boolean(BUILTIN[topic.simulationType]);
   const tabs = [
     { id: 'theory', label: 'Lesson', icon: BookOpen },
-    { id: 'simulation', label: 'Simulation', icon: Compass, note: hasSim ? null : 'none yet' },
+    ...(hasSim ? [{ id: 'simulation', label: 'Simulation', icon: Compass }] : []),
     { id: 'quiz', label: 'Quiz', icon: Award, count: topic.quiz?.length || 0 },
     { id: 'practice', label: 'Practice', icon: Puzzle, count: topic.practice?.length || 0 },
     { id: 'tutor', label: 'Tutor', icon: MessageCircleQuestion },
