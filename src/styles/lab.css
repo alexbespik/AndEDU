@@ -501,3 +501,8 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .tutor-log { display: flex; flex-direction: column; gap: var(--space-3); max-height: 52vh; overflow-y: auto; }
 .check-row { display: flex; gap: var(--space-2); align-items: flex-start; font-size: 0.92rem; color: var(--ink); cursor: pointer; }
 .check-row input { margin-top: 3px; accent-color: var(--accent); }
+
+/* ---------- Coding exercises (Pyodide in the browser) ---------- */
+.code-editor { font: 400 0.9rem/1.55 var(--font-mono); tab-size: 4; white-space: pre; overflow-x: auto; background: var(--code-bg); }
+.code-tests { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); background: var(--code-bg); border: 1px solid var(--rule);
+  border-radius: var(--radius-sm); font: 400 0.82rem/1.5 var(--font-mono); white-space: pre-wrap; overflow-x: auto; color: var(--ink); }

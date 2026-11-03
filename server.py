@@ -2374,7 +2374,7 @@ TOPIC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 MAX_EVENTS = 200
 MAX_MESSAGES = 500
 MAX_INBOX_BYTES = 16_000
-PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false"}
+PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false", "code"}
 
 _file_lock = threading.Lock()
 _events_lock = threading.Lock()
@@ -2814,6 +2814,12 @@ def normalize_practice(items: Any) -> List[Dict[str, Any]]:
                           "unit": str(p.get("unit") or "")})
         elif t == "true_false" and isinstance(p.get("answer"), bool):
             clean.append({**base, "answer": p["answer"]})
+        elif t == "code":
+            # &EDU-style coding exercise; runs in the student's browser (Pyodide), never on the server
+            tests = str(p.get("tests") or "").strip()
+            if tests and "assert" in tests:
+                clean.append({**base, "language": "python", "starter": str(p.get("starter") or "")[:4000],
+                              "tests": tests[:4000], "solution": str(p.get("solution") or "")[:6000]})
     return clean
 
 def write_notes_file(topic: Dict[str, Any]) -> str:
@@ -3063,6 +3069,9 @@ Return JSON only:
     {{"type": "true_false", "prompt": "a statement targeting a misconception", "answer": false, "explanation": "..."}}
   ]}}
 Write 5 quiz questions that check the objectives (vary the correctAnswer position) and 4-6 practice items using all four types.
+If the course involves programming (Python, algorithms, data), add 1-2 items of type "code":
+    {{"type": "code", "prompt": "what to implement", "starter": "def f(x):\\n    # TODO\\n    pass", "tests": "assert f(2) == 4\\nassert f(0) == 0", "solution": "def f(x):\\n    return x * 2", "explanation": "..."}}
+    Python only, standard library only, tests are plain assert lines covering normal and edge cases.
 Every variable, formula, exponent and unit with a power (e.g. $v_0$, $9.80\\,\\text{{m/s}}^2$) is LaTeX inside $...$, including inside
 options, steps, hints and answers; never write bare x^2 or v_0.
 """

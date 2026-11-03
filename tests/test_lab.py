@@ -57,6 +57,15 @@ class AnswerKeys(unittest.TestCase):
         ])
         self.assertEqual([i["type"] for i in items], ["fill_blank", "numeric"])
 
+    def test_code_exercises_need_real_tests(self):
+        items = server.normalize_practice([
+            {"type": "code", "prompt": "p", "starter": "def f(x):\n    pass", "tests": "assert f(1) == 2", "solution": "def f(x):\n    return 2 * x"},
+            {"type": "code", "prompt": "p", "starter": "", "tests": "print('no asserts')"},
+        ])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["language"], "python")
+        self.assertIn("assert", items[0]["tests"])
+
 
 class LatexJson(unittest.TestCase):
     def parse(self, raw):

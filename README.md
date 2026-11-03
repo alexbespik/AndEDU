@@ -37,7 +37,7 @@ non-Docker path above was tested.
 
 ## Tests
 ```bash
-python -m unittest discover -s tests -v    # 20 tests, temporary data folder, no Gemini calls
+python -m unittest discover -s tests -v    # 24 tests, temporary data folder, no Gemini calls
 ```
 
 ## Where things are
