@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { ArrowUp, ArrowDown, RotateCcw, Play, Loader2 } from 'lucide-react';
 import { runPython } from '../lib/pyodide';
 import Md, { MdInline } from './Md';
@@ -25,7 +25,15 @@ function seededShuffle(items, seed) {
   return out;
 }
 
+// Lets the page that shows the deck award XP for a solved item (TopicViewer, Math practice)
+const SolvedCtx = createContext(null);
+function useReportSolved(ok, item) {
+  const onSolved = useContext(SolvedCtx);
+  useEffect(() => { if (ok && onSolved) onSolved(item); }, [ok]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 function Feedback({ ok, item, extra }) {
+  useReportSolved(ok, item);
   return (
     <div className={`feedback ${ok ? 'ok' : 'bad'}`} aria-live="polite">
       <p style={{ fontWeight: 700, marginBottom: 4 }}>{ok ? 'Correct.' : 'Not yet.'}{extra ? ` ${extra}` : ''}</p>
@@ -194,6 +202,7 @@ function CodeExercise({ item }) {
         )}
         <span className="hint">Runs in your browser; the first run loads Python (a few seconds).</span>
       </div>
+      {result && <SolvedReporter ok={result.passed} item={item} />}
       {result && (
         <div className={`feedback ${result.passed ? 'ok' : 'bad'}`} aria-live="polite">
           <p style={{ fontWeight: 700, marginBottom: 4 }}>
@@ -208,14 +217,20 @@ function CodeExercise({ item }) {
   );
 }
 
+function SolvedReporter({ ok, item }) {
+  useReportSolved(ok, item);
+  return null;
+}
+
 const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise };
 
-export default function PracticeDeck({ items = [] }) {
+export default function PracticeDeck({ items = [], onSolved }) {
   const usable = items.filter((p) => RENDER[p.type]);
   if (!usable.length) {
     return <div className="panel"><p>No practice puzzles for this topic yet. Lessons generated in a course come with them.</p></div>;
   }
   return (
+    <SolvedCtx.Provider value={onSolved || null}>
     <div className="stack">
       {usable.map((item, i) => {
         const Body = RENDER[item.type];
@@ -228,5 +243,6 @@ export default function PracticeDeck({ items = [] }) {
         );
       })}
     </div>
+    </SolvedCtx.Provider>
   );
 }

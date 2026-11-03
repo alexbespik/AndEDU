@@ -10,7 +10,7 @@ const MODES = [
 ];
 
 /** W&M masthead: brand, mode switch, connection, AGY toggle and profile. Every row wraps; nothing overlaps. */
-export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut, online, panelOpen, onTogglePanel, onOpenTopics, assistantName = 'Assistant' }) {
+export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut, online, panelOpen, onTogglePanel, onOpenTopics, assistantName = 'Assistant', streakChip }) {
   return (
     <header className="masthead">
       <button type="button" className="brand" onClick={() => onSwitchStudioMode('home')} aria-label="&.edu LAB, go to my courses">
@@ -32,6 +32,7 @@ export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut
       </nav>
 
       <div className="masthead-right">
+        {streakChip}
         <ThemeSwitch />
         <span className="conn" data-state={online ? 'online' : 'offline'} role="status">
           {online ? 'Connected' : 'Backend offline'}

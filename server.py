@@ -27,6 +27,7 @@ import docx
 import nbformat
 from simspec import validate_spec, SPEC_GUIDE
 import db
+import engage
 
 ENV_FILE = Path(__file__).parent / ".env"
 if ENV_FILE.exists():
@@ -53,6 +54,7 @@ AUTH_REQUIRED = os.environ.get("SCIEDU_AUTH") == "1"
 PUBLIC_API = {"/api/status", "/api/auth/login", "/api/auth/register"}
 CURRENT_USER: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("current_user", default=None)
 CLIENT_KEY: "contextvars.ContextVar[str]" = contextvars.ContextVar("client_key", default="local")
+LOCAL_DAY: contextvars.ContextVar = contextvars.ContextVar("local_day", default="")  # student's calendar day
 
 # Requests that spend model quota, per signed-in user (or per client address without accounts), per hour.
 # SCIEDU_RATE_SCALE multiplies every limit; 0 turns limiting off.
@@ -80,7 +82,7 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization", "X-Local-Day"],
 )
 
 @app.middleware("http")
@@ -97,6 +99,7 @@ async def reject_foreign_hosts(request, call_next):
             return JSONResponse({"detail": "Sign in to continue."}, status_code=401)
         CURRENT_USER.set(user)
     CLIENT_KEY.set(CURRENT_USER.get()["id"] if CURRENT_USER.get() else (request.client.host if request.client else "local"))
+    LOCAL_DAY.set(engage.clean_day(request.headers.get("x-local-day")))
     return await call_next(request)
 
 # Models in order of quota resilience & latency
@@ -2673,9 +2676,123 @@ def submit_quiz_answer(sub: QuizSubmission):
             class_progress["adapted"] = adapt_next_class(class_progress)
         course_event(class_progress["courseId"])
 
+    rewards = None
+    if sub.userId and db.get_user(sub.userId):
+        day = today()
+        ref = f"{sub.topicId}:{sub.questionId}"
+        if not sub.isCorrect:
+            engage.remember_miss(sub.userId, sub.topicId, str(sub.questionId), day)
+        rewards = merge_rewards(
+            engage.award(sub.userId, day, "quiz_correct" if sub.isCorrect else "quiz_attempt", ref),
+            engage.award(sub.userId, day, "class_complete", class_progress["classId"]) if class_progress and class_progress.get("justCompleted") else None,
+            engage.award(sub.userId, day, "quiz_perfect", class_progress["classId"])
+            if class_progress and class_progress.get("justCompleted") and class_progress["score"] >= 1 else None,
+        )
+
     status_msg = "Correct answer recorded!" if sub.isCorrect else "Answer incorrect — review recommended."
     emit_event("QUIZ_SUBMITTED", {"topicId": sub.topicId, "isCorrect": sub.isCorrect, "statusMessage": status_msg})
-    return {"status": "recorded", "isCorrect": sub.isCorrect, "classProgress": class_progress}
+    return {"status": "recorded", "isCorrect": sub.isCorrect, "classProgress": class_progress, "rewards": rewards}
+
+# ---------------------------------------------------------------- engagement (engage.py)
+def today() -> str:
+    return LOCAL_DAY.get() or engage.utc_day()
+
+def merge_rewards(*parts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Several awards from one action, reported as one celebration."""
+    out: Dict[str, Any] = {"xp": 0, "newBadges": []}
+    for r in parts:
+        if not r or not r.get("xp"):
+            continue
+        out["xp"] += r["xp"]
+        out["newBadges"] += r.get("newBadges", [])
+        for k in ("goalReached", "streakExtended", "freezeEarned", "levelUp", "questsDone"):
+            out[k] = out.get(k) or r.get(k, False)
+        for k in ("xpToday", "goal", "streak", "level"):
+            out[k] = r.get(k, out.get(k))
+        out.setdefault("sources", []).append(r.get("source"))
+    return out
+
+class XpRequest(BaseModel):
+    source: str
+    ref: Optional[str] = ""
+
+class EngagePrefs(BaseModel):
+    dailyGoal: Optional[int] = None
+    focusMode: Optional[bool] = None
+
+class ReviewAnswer(BaseModel):
+    topicId: str
+    questionId: str
+    selected: int
+
+class ReviewFinish(BaseModel):
+    answered: int = 0
+
+@app.get("/api/engage/{user_id}")
+def engage_progress(user_id: str):
+    require_user(user_id)
+    return engage.progress(user_id, today())
+
+@app.post("/api/engage/{user_id}/xp")
+def engage_xp(user_id: str, body: XpRequest):
+    """Actions graded in the browser (practice, math, IDE, simulations, reading) report here; amounts are server-side."""
+    rate_limit("chat")
+    require_user(user_id)
+    if body.source not in engage.CLIENT_SOURCES:
+        raise HTTPException(status_code=422, detail="Unknown activity.")
+    return engage.award(user_id, today(), body.source, body.ref or "")
+
+@app.post("/api/engage/{user_id}/prefs")
+def engage_prefs(user_id: str, body: EngagePrefs):
+    require_user(user_id)
+    engage.set_prefs(user_id, body.dailyGoal, body.focusMode)
+    return engage.progress(user_id, today())
+
+def _review_question(topic_id: str, question_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        topic = json.loads(topic_path(topic_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError, HTTPException):
+        return None
+    quiz = [q for q in topic.get("quiz") or [] if isinstance(q, dict) and isinstance(q.get("correctAnswer"), int)]
+    q = next((q for q in quiz if str(q.get("id")) == str(question_id)), None)
+    if q is None and str(question_id).isdigit() and int(question_id) < len(quiz):
+        q = quiz[int(question_id)]
+    return {**q, "topicTitle": topic.get("title", "")} if q else None
+
+@app.get("/api/review/{user_id}/session")
+def review_session(user_id: str):
+    """Up to 10 questions the student missed before, due today (spaced: 1, 3, 7, 14, 30 days)."""
+    require_user(user_id)
+    out = []
+    for item in engage.due_items(user_id, today()):
+        q = _review_question(item["topic_id"], item["question_id"])
+        if not q:
+            engage.drop_item(user_id, item["topic_id"], item["question_id"])  # lesson or question no longer exists
+            continue
+        out.append({"topicId": item["topic_id"], "questionId": item["question_id"], "topicTitle": q["topicTitle"],
+                    "question": q["question"], "options": q["options"], "hint": q.get("hint", ""), "box": item["box"]})
+    return {"questions": out, "nextReview": engage.next_due(user_id)}
+
+@app.post("/api/review/{user_id}/answer")
+def review_answer(user_id: str, body: ReviewAnswer):
+    require_user(user_id)
+    q = _review_question(body.topicId, body.questionId)
+    if not q:
+        raise HTTPException(status_code=404, detail="That question no longer exists.")
+    correct = body.selected == q["correctAnswer"]
+    day = today()
+    result = engage.review_result(user_id, body.topicId, body.questionId, correct, day)
+    rewards = engage.award(user_id, day, "review_correct" if correct else "review_attempt", f"{body.topicId}:{body.questionId}")
+    return {"correct": correct, "correctAnswer": q["correctAnswer"], "explanation": q.get("explanation", ""),
+            **result, "rewards": rewards}
+
+@app.post("/api/review/{user_id}/finish")
+def review_finish(user_id: str, body: ReviewFinish):
+    require_user(user_id)
+    if body.answered < 3:
+        return {"xp": 0}
+    return engage.award(user_id, today(), "review_session", str(time.time()))
+
 
 ADAPT_LOW, ADAPT_HIGH = 0.5, 0.9
 
@@ -3494,6 +3611,7 @@ async def resume_course_generation():
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()
     db.init_db()
+    engage.init()
     db.reset_stuck_classes()
     for course in db.interrupted_planning():  # planning jobs die with the process: redo them from stored materials
         start_plan_job(course["id"], course.get("plan_questions") or 8, course.get("plan_classes"))

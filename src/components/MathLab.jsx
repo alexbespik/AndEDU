@@ -3,6 +3,7 @@ import { LineChart, NotebookPen, Sigma, Plus, X, Loader2, Crosshair } from 'luci
 import { tryCompile, RESERVED_NAMES } from '../lib/expr';
 import { canvasPalette } from '../theme';
 import { api } from '../lib/api';
+import { reportXp } from '../lib/engage';
 import Md from './Md';
 import PracticeDeck from './PracticeDeck';
 
@@ -486,7 +487,8 @@ function PracticeTab() {
             {set.title}. Every numeric answer was recomputed before you see it
             {set.dropped ? `; ${set.dropped} problem${set.dropped > 1 ? 's' : ''} failed that check and were left out` : ''}.
           </p>
-          <PracticeDeck key={set.title + set.items.length} items={set.items} />
+          <PracticeDeck key={set.title + set.items.length} items={set.items}
+            onSolved={(item) => reportXp('math_correct', `${set.title}:${item.id}:${item.prompt.slice(0, 60)}`)} />
         </>
       )}
     </div>

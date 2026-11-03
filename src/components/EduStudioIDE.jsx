@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { reportXp } from '../lib/engage';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -1720,6 +1721,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
       const alreadySolved = completedProblems[activeProblemIndex];
       if (!alreadySolved) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
+        reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
         setTotalXp(prev => prev + 25);
       }
       setTerminalOutput(prev => [
@@ -1755,6 +1757,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
       const alreadySolved = completedProblems[activeProblemIndex];
       if (!alreadySolved) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
+        reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
         setTotalXp(prev => prev + 25);
       }
       setTerminalOutput(prev => [
@@ -1806,6 +1809,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
       const alreadySolved = completedProblems[activeProblemIndex];
       if (!alreadySolved) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
+        reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
         setTotalXp(prev => prev + 50);
       }
       setTerminalOutput(prev => [
@@ -1867,6 +1871,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
     if (testsPassed && testMode) {
       if (!completedProblems[activeProblemIndex]) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
+        reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
         setTotalXp(prev => prev + 100);
       }
       updateActiveState({ evaluation: 'correct' });

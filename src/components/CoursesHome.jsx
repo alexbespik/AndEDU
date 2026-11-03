@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload, X, Loader2, BookOpen, Target, ListPlus, Code2, Plus } from 'lucide-react';
 import { api, uploadFiles, useAgyEvents } from '../lib/api';
+import TodayPanel from './TodayPanel';
 
 export const STATUS = {
   planning: ['Writing diagnostic', 'status-working'],
@@ -202,7 +203,7 @@ export function StudyHub({ userId, courses = [], preset, onOpened, onCodePractic
   );
 }
 
-export default function CoursesHome({ user, onOpenCourse, onCodePractice, initialPreset }) {
+export default function CoursesHome({ user, onOpenCourse, onCodePractice, initialPreset, progress, onProgress, onOpenTopic, onReview }) {
   const [courses, setCourses] = useState(null);
   const [preset, setPreset] = useState(initialPreset || null);
   const [creating, setCreating] = useState(Boolean(initialPreset));
@@ -230,6 +231,8 @@ export default function CoursesHome({ user, onOpenCourse, onCodePractice, initia
           </button>
         )}
       </div>
+
+      <TodayPanel userId={user.id} progress={progress} onChange={onProgress} onContinue={onOpenTopic} onReview={onReview} />
 
       {(creating || (courses && courses.length === 0)) && (
         <StudyHub userId={user.id} courses={courses || []} preset={preset} onOpened={onOpenCourse} onCodePractice={onCodePractice}

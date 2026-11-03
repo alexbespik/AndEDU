@@ -5,6 +5,7 @@ import BilliardSim from '../simulations/BilliardSim';
 import SpecSim from '../simulations/SpecSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
+import { reportXp } from '../lib/engage';
 import MermaidViewer from './MermaidViewer';
 import Md, { MdInline } from './Md';
 import { api } from '../lib/api';
@@ -68,6 +69,14 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     if (topic?.source?.courseId) api(`/api/topics/${topic.id}/opened`, { method: 'POST' }).catch(() => {});
   }, [topic?.id, topic?.source?.courseId]);
 
+  // Time spent with a lesson or a simulation counts (not just opening it)
+  useEffect(() => {
+    const source = activeTab === 'simulation' ? 'sim_explored' : activeTab === 'theory' || !activeTab ? 'lesson_read' : null;
+    if (!source || !topic?.id) return undefined;
+    const t = setTimeout(() => { if (!document.hidden) reportXp(source, topic.id); }, source === 'lesson_read' ? 90000 : 30000);
+    return () => clearTimeout(t);
+  }, [activeTab, topic?.id]);
+
   if (!topic) {
     return <div className="page"><p className="hint">Pick a topic from the list to start.</p></div>;
   }
@@ -81,6 +90,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     { id: 'tutor', label: 'Tutor', icon: MessageCircleQuestion },
   ];
   const tab = tabs.some((t) => t.id === activeTab) ? activeTab : 'theory';
+
   const src = topic.source || {};
 
   return (
@@ -120,7 +130,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
             onAskTutor={(focus) => { setTutorFocus(focus); setActiveTab('tutor'); }} />
         )}
         {tab === 'tutor' && <LessonTutor key={topic.id} topic={topic} focus={tutorFocus} onFocusUsed={() => setTutorFocus(null)} />}
-        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} />}
+        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} onSolved={(item) => reportXp('practice_correct', `${topic.id}:${item.id}`)} />}
       </div>
     </div>
   );
