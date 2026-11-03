@@ -404,6 +404,9 @@ def validate_math(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
             continue
         _check_expr(value, names | variables, field, errors)
         clean[field] = value
+    if widget == "epsilon_delta" and spec.get("delta_rule") not in (None, ""):
+        _check_expr(spec["delta_rule"], names | {"eps"}, "delta_rule", errors)
+        clean["delta_rule"] = spec["delta_rule"]
     if widget == "riemann":
         clean["method"] = spec.get("method") if spec.get("method") in RIEMANN_METHODS else "left"
     if widget == "epsilon_n":
@@ -423,8 +426,10 @@ kind "math": interactive math widgets (pick the one that makes the class's key i
  "params":[{"name":"c","label":"...","min":0,"max":2,"value":1,"step":0.1}],   // optional extra sliders
  "view":{"xmin":-1,"xmax":4,"ymin":-1,"ymax":6}, ...widget fields}
 Widgets (expressions use the same grammar as other specs; fact(n) is n!):
-- "epsilon_delta": f (in x), a, L. Sliders eps, delta are added. Shows the eps-band around L, the delta-band
-   around a, and marks where f leaves the eps-band, so the student can find a delta that works.
+- "epsilon_delta": f (in x), a, L, optional delta_rule (in eps, e.g. "eps/2" or "min(1, eps/5)"). Sliders eps,
+   delta are added. Shows the eps-band around L and the delta-band around a, marks where f escapes, plots the
+   largest working delta as a function of eps, and checks a delta_rule for every eps (the proof's choice of delta).
+   Give the correct delta_rule when the class teaches a specific proof; omit it to let the student discover one.
 - "epsilon_n": term (in n), L, optional nmax. Slider eps. Plots a_n with the eps-band and the first N after which
    every term stays inside.
 - "secant_tangent": f, a. Slider h. Secant through (a, f(a)) and (a+h, f(a+h)) approaching the tangent.

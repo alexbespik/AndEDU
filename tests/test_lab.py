@@ -420,3 +420,18 @@ class Workspaces(unittest.TestCase):
             self.assertEqual(c.get("/api/topics/ws-class").json()["source"]["workspace"], "math")
             db.update_course(course["id"], workspace="lab")  # an explicit choice wins over the guess
             self.assertEqual(c.get("/api/topics/ws-class").json()["source"]["workspace"], "lab")
+
+
+class Mcp(unittest.TestCase):
+    def test_protocol_and_tool_list(self):
+        import mcp_server
+        init = mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+        self.assertIn("tools", init["capabilities"])
+        self.assertIsNone(mcp_server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        tools = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["tools"]
+        names = {t["name"] for t in tools}
+        self.assertTrue({"attach_simulation", "show_on_graph", "preview_math_simulation", "add_practice_items"} <= names)
+        for t in tools:
+            self.assertEqual(t["inputSchema"]["type"], "object")
+        bad = mcp_server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "nope"}})
+        self.assertTrue(bad["isError"])

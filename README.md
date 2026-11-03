@@ -1,7 +1,7 @@
-# &.edu LAB
+# &.edu
 
 Turn your course materials into a course that adapts to you. Upload notes, slides or a problem set;
-&.edu LAB places you with a short diagnostic, writes an ordered sequence of classes (lesson, quiz,
+&.edu places you with a short diagnostic, writes an ordered sequence of classes (lesson, quiz,
 practice puzzles, simulation, `.md` notes), and rewrites upcoming classes when a quiz shows you are
 struggling or bored. Started at &hacks (best Gemini API usage); continued from the original &EDU.
 

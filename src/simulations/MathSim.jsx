@@ -102,12 +102,40 @@ function simpson(f, a, b, n = 2000) {
   return (s * h) / 3;
 }
 
+/** Largest |f(x) - L| over 0 < |x - a| < d, sampled densely, including points close to a. */
+function worstDeviation(f, a, L, d) {
+  let dev = 0, wx = null;
+  const probe = (x) => { const v = Math.abs(f(x) - L); if (Number.isFinite(v) && v > dev) { dev = v; wx = x; } };
+  for (let i = 0; i < 600; i++) probe(a - d + (2 * d * (i + 0.5)) / 600);
+  for (let k = 1; k <= 8; k++) { probe(a - d * 10 ** -k); probe(a + d * 10 ** -k); }
+  probe(a - d * 0.999999); probe(a + d * 0.999999);
+  return { dev, x: wx };
+}
+
+function deltaMax(f, a, L, eps, hi = 4) {
+  if (worstDeviation(f, a, L, hi).dev < eps) return hi;
+  let lo = 0;
+  for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (worstDeviation(f, a, L, m).dev < eps) lo = m; else hi = m; }
+  return lo;
+}
+
+const curveCache = new Map();
+function deltaCurve(f, a, L, epsMax, key) {
+  const k = `${key}|${a}|${L}|${epsMax}`;
+  if (!curveCache.has(k)) {
+    if (curveCache.size > 50) curveCache.clear();
+    curveCache.set(k, Array.from({ length: 24 }, (_, i) => { const e = (epsMax * (i + 1)) / 24; return [e, deltaMax(f, a, L, e)]; }));
+  }
+  return curveCache.get(k);
+}
+
 /** Each widget: view(spec, fns, scope) -> {xmin..}, draw(ctx, F, W, H, pal, fns, scope, state) -> readouts[] */
 const WIDGETS = {
   epsilon_delta: {
     view: (s, fn, sc) => { const a = fn.a(sc), L = fn.L(sc); return { xmin: a - 2.5, xmax: a + 2.5, ymin: L - 3, ymax: L + 3 }; },
-    draw(ctx, F, W, H, pal, fn, sc) {
-      const a = fn.a(sc), L = fn.L(sc), eps = sc.eps, d = sc.delta, f = (x) => fn.f({ ...sc, x });
+    draw(ctx, F, W, H, pal, fn, sc, s, st) {
+      const a = fn.a(sc), L = fn.L(sc), eps = sc.eps, d = st.delta, f = (x) => fn.f({ ...sc, x });
+      const epsMax = (s.params || []).find((p) => p.name === 'eps')?.max || 2;
       ctx.fillStyle = pal.gold; ctx.globalAlpha = 0.18; ctx.fillRect(0, F.Y(L + eps), W, F.Y(L - eps) - F.Y(L + eps));
       ctx.fillStyle = pal.accent; ctx.globalAlpha = 0.13; ctx.fillRect(F.X(a - d), 0, F.X(a + d) - F.X(a - d), H); ctx.globalAlpha = 1;
       ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2;
@@ -115,32 +143,52 @@ const WIDGETS = {
       ctx.strokeStyle = pal.accent; for (const x of [a - d, a + d]) { ctx.beginPath(); ctx.moveTo(F.X(x), 0); ctx.lineTo(F.X(x), H); ctx.stroke(); }
       ctx.setLineDash([]);
       plot(ctx, F, W, H, f, pal.ink, 2);
-      // inside the delta band: green where |f - L| < eps, red where it escapes
-      let worst = 0, worstX = null;
+      // the part of the graph over 0 < |x - a| < delta: green inside the eps band, red where it escapes
+      const worst = worstDeviation(f, a, L, d);
       ctx.lineWidth = 4;
-      for (let i = 0; i <= 300; i++) {
-        const x = a - d + (2 * d * i) / 300;
-        if (Math.abs(x - a) < 1e-9) continue;
-        const y = f(x), dev = Math.abs(y - L);
-        if (!Number.isFinite(y)) continue;
-        if (dev > worst) { worst = dev; worstX = x; }
-        ctx.fillStyle = dev < eps ? pal.accent : pal.bad;
-        ctx.fillRect(F.X(x) - 1.5, F.Y(y) - 1.5, 3, 3);
+      for (let i = 0; i < 400; i++) {
+        const x = a - d + (2 * d * (i + 0.5)) / 400; if (Math.abs(x - a) < 1e-12) continue;
+        const y = f(x); if (!Number.isFinite(y)) continue;
+        ctx.fillStyle = Math.abs(y - L) < eps ? pal.accent : pal.bad; ctx.fillRect(F.X(x) - 1.5, F.Y(y) - 1.5, 3, 3);
       }
       ctx.fillStyle = pal.surface; ctx.strokeStyle = pal.ink; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(F.X(a), F.Y(L), 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      label(ctx, `L ± ε`, 8, F.Y(L + eps) - 6, pal['gold-text']);
-      label(ctx, `a ± δ`, F.X(a + d) + 6, 16, pal.accent);
-      // largest delta that works (bisection on the worst deviation)
-      const dev = (dd) => { let m = 0; for (let i = 0; i <= 200; i++) { const x = a - dd + (2 * dd * i) / 200; if (Math.abs(x - a) > 1e-9) { const v = Math.abs(f(x) - L); if (Number.isFinite(v)) m = Math.max(m, v); } } return m; };
-      let lo = 0, hi = Math.max(2, d * 2);
-      if (dev(hi) < eps) lo = hi; else for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (dev(m) < eps) lo = m; else hi = m; }
-      const ok = worst < eps;
-      return [
-        ok ? `δ = ${fmt(d)} works for ε = ${fmt(eps)}: every x with 0 < |x − a| < δ has |f(x) − L| < ε`
-          : `δ = ${fmt(d)} fails for ε = ${fmt(eps)}: at x = ${fmt(worstX)}, |f(x) − L| = ${fmt(worst)}`,
-        `Largest δ that works here ≈ ${fmt(lo, 3)}`,
+      label(ctx, 'L ± ε', 8, F.Y(L + eps) - 6, pal['gold-text']);
+      label(ctx, 'a ± δ', F.X(a + d) + 6, 16, pal.accent);
+
+      // inset: the largest delta that works, as a function of eps, with the student's (eps, delta)
+      const iw = Math.min(220, W * 0.32), ih = 130, ix = W - iw - 10, iy = 10;
+      const curve = deltaCurve(f, a, L, epsMax, st.cacheKey);
+      const dTop = Math.max(...curve.map((p) => p[1]), d, 1e-6) * 1.15;
+      ctx.fillStyle = pal.surface; ctx.globalAlpha = 0.94; ctx.fillRect(ix, iy, iw, ih); ctx.globalAlpha = 1;
+      ctx.strokeStyle = pal.rule; ctx.lineWidth = 1; ctx.strokeRect(ix, iy, iw, ih);
+      const IX = (e) => ix + 28 + (e / epsMax) * (iw - 38), IY = (dd) => iy + ih - 20 - (dd / dTop) * (ih - 34);
+      ctx.fillStyle = pal.accent; ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.moveTo(IX(0), IY(0));
+      curve.forEach(([e, dd]) => ctx.lineTo(IX(e), IY(dd))); ctx.lineTo(IX(epsMax), IY(0)); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = pal.accent; ctx.lineWidth = 2; ctx.beginPath(); curve.forEach(([e, dd], i) => (i ? ctx.lineTo(IX(e), IY(dd)) : ctx.moveTo(IX(e), IY(dd)))); ctx.stroke();
+      if (st.rule) { ctx.strokeStyle = pal.gold; ctx.setLineDash([4, 3]); ctx.beginPath(); curve.forEach(([e], i) => { const v = st.rule(e); if (Number.isFinite(v)) (i ? ctx.lineTo(IX(e), IY(v)) : ctx.moveTo(IX(e), IY(v))); }); ctx.stroke(); ctx.setLineDash([]); }
+      const ok = worst.dev < eps;
+      ctx.fillStyle = ok ? pal.accent : pal.bad; ctx.beginPath(); ctx.arc(IX(eps), IY(d), 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '10px "IBM Plex Mono", monospace'; ctx.fillStyle = pal.muted; ctx.textAlign = 'left';
+      ctx.fillText('δ_max(ε)', ix + 6, iy + 13); ctx.fillText('ε →', ix + iw - 30, iy + ih - 6); ctx.fillText('δ', ix + 6, iy + ih / 2);
+
+      const dmax = deltaMax(f, a, L, eps);
+      const out = [
+        ok ? `δ = ${fmt(d)} works for ε = ${fmt(eps)}: whenever 0 < |x − a| < δ, |f(x) − L| < ε`
+          : `δ = ${fmt(d)} is too big for ε = ${fmt(eps)}: at x = ${fmt(worst.x)}, |f(x) − L| = ${fmt(worst.dev)} ≥ ε`,
+        `Largest δ that works for this ε ≈ ${fmt(dmax, 3)}${dmax > 0 && eps > 0 ? `  (δ/ε ≈ ${fmt(dmax / eps, 3)})` : ''}. Any smaller δ works too.`,
       ];
+      if (st.rule) {
+        // a rule delta(eps) is a proof strategy: it must work for EVERY eps, so check it across the range
+        let fail = null;
+        for (let k = 1; k <= 40 && !fail; k++) {
+          const e = (epsMax * k) / 40, dd = st.rule(e);
+          if (!(dd > 0) || worstDeviation(f, a, L, dd).dev >= e) fail = [e, dd];
+        }
+        out.push(fail ? `Your rule δ(ε) = ${st.ruleText} fails at ε = ${fmt(fail[0], 3)} (δ = ${fmt(fail[1], 3)}): it needs a smaller δ there.`
+          : `Your rule δ(ε) = ${st.ruleText} works for every ε tested in (0, ${fmt(epsMax, 3)}]: that is the δ your proof should choose.`);
+      }
+      return out;
     },
   },
 
@@ -337,6 +385,8 @@ export default function MathSim({ spec, editable = false }) {
   const [values, setValues] = useState(() => Object.fromEntries((spec.params || []).map((p) => [p.name, p.value])));
   const [overrides, setOverrides] = useState({});
   const [method, setMethod] = useState(spec.method || 'left');
+  const [linked, setLinked] = useState(Boolean(spec.delta_rule));
+  const [ruleText, setRuleText] = useState(spec.delta_rule || 'eps/2');
   const [hover, setHover] = useState(null);
   const [flows, setFlows] = useState([]);
   const [playing, setPlaying] = useState(false);
@@ -344,6 +394,9 @@ export default function MathSim({ spec, editable = false }) {
   const canvasRef = useRef(null);
   const [fns, errs] = useCompiled(spec, overrides);
   const scope = useMemo(() => ({ e: Math.E, ...values }), [values]);
+  const [ruleFn, ruleErr] = useMemo(() => tryCompile(ruleText || '0', NaN), [ruleText]);
+  const rule = spec.widget === 'epsilon_delta' && linked && !ruleErr ? (e) => ruleFn({ ...values, eps: e }) : null;
+  const delta = rule ? rule(values.eps) : values.delta;
   const ready = W_ && !errs.length && (FIELDS[spec.widget] || []).every((f) => fns[f] || f === 'target' || f === 'tmin' || f === 'tmax');
 
   useEffect(() => { setValues(Object.fromEntries((spec.params || []).map((p) => [p.name, p.value]))); setFlows([]); }, [spec]);
@@ -367,9 +420,12 @@ export default function MathSim({ spec, editable = false }) {
     frameRef.current = F;
     drawGrid(ctx, F, W, H, pal);
     try {
-      setReadouts(W_.draw(ctx, F, W, H, pal, fns, scope, spec, { method, hoverX: hover?.x, hoverY: hover?.y, flows }) || []);
+      setReadouts(W_.draw(ctx, F, W, H, pal, fns, scope, spec, {
+        method, hoverX: hover?.x, hoverY: hover?.y, flows, delta, rule, ruleText,
+        cacheKey: `${overrides.f ?? spec.f}|${JSON.stringify(values, (k, v) => (k === 'eps' || k === 'delta' ? undefined : v))}`,
+      }) || []);
     } catch (e) { setReadouts([`Could not draw: ${e.message}`]); }
-  }, [ready, view, spec, fns, scope, method, hover, flows, W_]);
+  }, [ready, view, spec, fns, scope, method, hover, flows, W_, delta, linked, ruleText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -447,6 +503,20 @@ export default function MathSim({ spec, editable = false }) {
         onPointerMove={onMove} onPointerLeave={() => setHover(null)} onClick={onClick} />
 
 
+      {spec.widget === 'epsilon_delta' && (
+        <div className="btn-row" style={{ alignItems: 'center' }}>
+          <label className="check-row"><input type="checkbox" checked={linked} onChange={(e) => setLinked(e.target.checked)} /> Link δ to ε with a rule</label>
+          {linked && (
+            <>
+              <span className="mono hint">δ(ε) =</span>
+              <input className="input mono" style={{ width: 180 }} value={ruleText} spellCheck={false} aria-label="Rule for delta in terms of eps"
+                aria-invalid={Boolean(ruleErr)} onChange={(e) => setRuleText(e.target.value)} />
+              <span className="hint">{ruleErr ? 'Use eps, numbers and functions, e.g. min(1, eps/5)' : 'Now shrink ε (or press Animate): δ follows your rule.'}</span>
+            </>
+          )}
+        </div>
+      )}
+
       {spec.widget === 'riemann' && (
         <div className="btn-row" role="group" aria-label="Rule">
           {['left', 'right', 'mid', 'trap'].map((m) => (
@@ -461,8 +531,8 @@ export default function MathSim({ spec, editable = false }) {
         <div className="sliders">
           {spec.params.map((p) => (
             <div key={p.name} className="slider">
-              <label htmlFor={`ms-${p.name}`}><span>{p.label || p.name}</span><b className="num">{fmt(values[p.name] ?? p.value)}{p.unit ? ` ${p.unit}` : ''}</b></label>
-              <input id={`ms-${p.name}`} type="range" min={p.min} max={p.max} step={p.step || (p.max - p.min) / 200}
+              <label htmlFor={`ms-${p.name}`}><span>{p.label || p.name}{rule && p.name === 'delta' ? ' (from your rule)' : ''}</span><b className="num">{fmt(rule && p.name === 'delta' ? delta : values[p.name] ?? p.value)}{p.unit ? ` ${p.unit}` : ''}</b></label>
+              <input id={`ms-${p.name}`} disabled={Boolean(rule) && p.name === 'delta'} type="range" min={p.min} max={p.max} step={p.step || (p.max - p.min) / 200}
                 value={values[p.name] ?? p.value} onChange={(e) => { setPlaying(false); setValues((v) => ({ ...v, [p.name]: Number(e.target.value) })); }} />
             </div>
           ))}

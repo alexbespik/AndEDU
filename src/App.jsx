@@ -19,8 +19,18 @@ const MathLab = lazy(() => import('./components/MathLab'));
 
 const FALLBACK_TOPICS = [rollingTopic, billiardTopic, lagrangianTopic];
 
-/** Where a topic opens: course classes by their course's subject (math | code | lab); the library is Lab. */
-const workspaceOf = (t) => (t?.source?.courseId ? (t.source.workspace || 'lab') : 'lab');
+/**
+ * Where a topic opens. Course classes: their course's workspace (the server always sets source.workspace).
+ * Library topics: an explicit `workspace`, or Math for a math-kit simulation; otherwise Lab. No guessing from
+ * text here: physics lessons mention geometry, integrals and vectors too.
+ */
+export const workspaceOf = (t) => {
+  if (!t) return 'lab';
+  if (t.source?.workspace) return t.source.workspace;
+  if (t.workspace) return t.workspace;
+  if (!t.source?.courseId && t.simulation?.kind === 'math') return 'math';
+  return 'lab';
+};
 
 export default function App() {
   const [user, setUser] = useState(loadProfile);
@@ -37,7 +47,8 @@ export default function App() {
   const [agyCli, setAgyCli] = useState(false);
   const [ideRequest, setIdeRequest] = useState(null); // a practice set asked for in My courses
   const [homePreset, setHomePreset] = useState(null);
-  const [progress, setProgress] = useState(null); // streak, daily goal, quests (engage.py)  // e.g. the IDE's "New practice set" opens the hub on Coding practice
+  const [progress, setProgress] = useState(null); // streak, daily goal, quests (engage.py)
+  const [mathPush, setMathPush] = useState(null);  // functions or a widget sent by the assistant / MCP tools
 
   useEffect(() => {
     api('/api/status').then((st) => setAgyCli(Boolean(st.agy_cli_enabled))).catch(() => {});
@@ -110,6 +121,12 @@ export default function App() {
         break;
       case 'SWITCH_TAB':
         if (p.tab) { setActiveTab(p.tab); setMode((m) => (m === 'class' ? 'class' : 'physics')); }
+        break;
+      case 'MATH_GRAPH':
+        setMathPush({ graph: p, at: evt.seq }); setMode('math');
+        break;
+      case 'MATH_PREVIEW':
+        setMathPush({ spec: p.spec, at: evt.seq }); setMode('math');
         break;
       case 'SWITCH_STUDIO_MODE':
         if (p.mode) setMode(p.mode);
@@ -235,7 +252,7 @@ export default function App() {
           )}
           {mode === 'math' && (
             <Suspense fallback={<div className="page"><p className="hint">Loading Math…</p></div>}>
-              <MathLab user={user} classTopic={mathClass} mathTopics={mathTopics} onOpenTopic={(id) => openTopic(id)}
+              <MathLab user={user} classTopic={mathClass} mathTopics={mathTopics} onOpenTopic={(id) => openTopic(id)} push={mathPush}
                 renderClass={(t) => (
                   <TopicViewer key={t.id} embedded topic={t} activeTab={activeTab} setActiveTab={setActiveTab}
                     liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(t)} />

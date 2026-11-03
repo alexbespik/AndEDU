@@ -57,7 +57,7 @@ export default function LoginPage({ onSignedIn }) {
       <section className="signin-story">
         <p className="monogram" aria-hidden="true">&amp;</p>
         <h1>Turn your course materials into a course that adapts to you.</h1>
-        <p>Upload notes, slides or a problem set. &amp;.edu LAB tests what you already know, then writes your classes in order, each one shaped by how you did on the last.</p>
+        <p>Upload notes, slides or a problem set. &amp;.edu tests what you already know, then writes your classes in order, each one shaped by how you did on the last.</p>
         <ol className="signin-steps">
           <li><b>1</b><span>Add materials and say what you want to learn.</span></li>
           <li><b>2</b><span>Take a short diagnostic quiz.</span></li>

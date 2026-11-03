@@ -38,7 +38,7 @@ else:
 api_key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
 client = genai.Client(api_key=api_key) if api_key else None
 
-app = FastAPI(title="&.edu LAB Backend")
+app = FastAPI(title="&.edu Backend")
 
 # Local-only service: the Vite dev server proxies /api, so only its origin needs CORS.
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
@@ -2952,7 +2952,7 @@ async def author_simulation(context: str, focus: str = "", attempts: int = 3, ma
     """Asks Gemini for a SimSpec and feeds validator errors back until it passes."""
     if math:
         prompt = f"""
-You design interactive math visualisations for &.edu LAB. Output ONE JSON object of kind "math" and nothing
+You design interactive math visualisations for &.edu. Output ONE JSON object of kind "math" and nothing
 else: pick the widget that makes this class's key idea visible and set its functions so the picture is
 interesting (for limits use a function and point where the epsilon-delta picture is clear). Add at most 2 extra
 sliders. The description must tell the student what to drag and what to notice.
@@ -2966,7 +2966,7 @@ FOCUS FOR THIS VISUALISATION: {focus or 'the central concept of the topic'}
 """
     else:
         prompt = f"""
-You design interactive teaching simulations for &.edu LAB. Output ONE JSON object in the SimSpec v1
+You design interactive teaching simulations for &.edu. Output ONE JSON object in the SimSpec v1
 format below and nothing else. Choose "particles" for anything that moves (mechanics, orbits, charges in
 fields, oscillators, collisions, fluids as particles) and "graph" for relationships and fields (waves,
 interference, gas laws, distributions, circuits over time, any y=f(x,t)). Give 2-5 sliders for the
@@ -3062,11 +3062,84 @@ def get_notes_file(topic_id: str):
         raise HTTPException(status_code=404, detail="No notes file for this topic")
     return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=path.name)
 
+# ---------------------------------------------------------------- creative tools (assistant, MCP, agents)
+class SpecBody(BaseModel):
+    spec: Dict[str, Any]
+
+class ItemsBody(BaseModel):
+    items: List[Dict[str, Any]]
+
+class GraphBody(BaseModel):
+    functions: List[str]
+    params: Optional[Dict[str, float]] = None
+
+def _load_topic_or_404(topic_id: str) -> Dict[str, Any]:
+    path = topic_path(topic_id)
+    topic = load_json_file(path, None) if path.exists() else None
+    if not topic or not topic_visible(topic):
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return topic
+
+@app.post("/api/topics/{topic_id}/simulation")
+def attach_simulation(topic_id: str, body: SpecBody):
+    """Attach a hand-written SimSpec (any kind) to a topic after validation; errors come back precisely."""
+    rate_limit("simulation")
+    topic = _load_topic_or_404(topic_id)
+    spec, errors = validate_spec(body.spec)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    topic["simulation"] = spec
+    save_topic(topic, auto_select=False)
+    return {"status": "attached", "topicId": topic_id, "simulation": spec}
+
+@app.post("/api/topics/{topic_id}/quiz")
+def add_quiz_questions(topic_id: str, body: ItemsBody):
+    """Append quiz questions (normalized like generated ones); returns how many were kept."""
+    topic = _load_topic_or_404(topic_id)
+    quiz = list(topic.get("quiz") or [])
+    added = 0
+    for q in body.items[:20]:
+        nq = normalize_quiz_item(q, len(quiz)) if isinstance(q, dict) else None
+        if nq:
+            nq["id"] = f"q{len(quiz) + 1}"
+            quiz.append(nq)
+            added += 1
+    topic["quiz"] = quiz
+    save_topic(topic, auto_select=False)
+    return {"added": added, "rejected": len(body.items[:20]) - added, "total": len(quiz)}
+
+@app.post("/api/topics/{topic_id}/practice")
+def add_practice_items(topic_id: str, body: ItemsBody):
+    topic = _load_topic_or_404(topic_id)
+    existing = list(topic.get("practice") or [])
+    new = normalize_practice([{**p, "id": f"p{len(existing) + i + 1}"} for i, p in enumerate(body.items[:20]) if isinstance(p, dict)])
+    topic["practice"] = existing + new
+    save_topic(topic, auto_select=False)
+    return {"added": len(new), "rejected": len(body.items[:20]) - len(new), "total": len(topic["practice"])}
+
+@app.post("/api/ui/graph")
+def show_on_graph(body: GraphBody):
+    """Opens Math > Graph on the student's screen with these functions (letters other than x become sliders)."""
+    fns = [str(f)[:200] for f in body.functions[:6]]
+    emit_event("MATH_GRAPH", {"functions": fns, "params": {k: float(v) for k, v in (body.params or {}).items()}})
+    return {"status": "shown", "functions": fns}
+
+@app.post("/api/ui/math-sim")
+def preview_math_sim(body: SpecBody):
+    """Shows a math-kit widget in Math > Sim kit without saving it to a topic."""
+    spec, errors = validate_spec({**body.spec, "kind": "math"})
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    emit_event("MATH_PREVIEW", {"spec": spec})
+    return {"status": "shown", "spec": spec}
+
+
 class SimulationRequest(BaseModel):
     topicId: str
     focus: Optional[str] = ""
+    kind: Optional[str] = "auto"   # auto (by workspace) | math | physics
 
-def queue_simulation_job(topic_id: str, focus: str = "") -> Dict[str, Any]:
+def queue_simulation_job(topic_id: str, focus: str = "", kind: str = "auto") -> Dict[str, Any]:
     path = topic_path(topic_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -3074,7 +3147,7 @@ def queue_simulation_job(topic_id: str, focus: str = "") -> Dict[str, Any]:
     async def work(job):
         topic = load_json_file(path, {})
         _job_update(job, step=f"Designing a simulation for {topic.get('title', topic_id)}", progress=0.2)
-        is_math = with_workspace(topic).get("source", {}).get("workspace") == "math"
+        is_math = kind == "math" or (kind == "auto" and with_workspace(topic).get("source", {}).get("workspace") == "math")
         spec = await author_simulation(_topic_brief(topic), focus, math=is_math)
         topic = load_json_file(path, topic)  # re-read: the topic may have been edited meanwhile
         topic["simulation"] = spec
@@ -3086,7 +3159,7 @@ def queue_simulation_job(topic_id: str, focus: str = "") -> Dict[str, Any]:
 @app.post("/api/simulations/generate")
 def generate_simulation(req: SimulationRequest):
     rate_limit("simulation")
-    return queue_simulation_job(req.topicId, req.focus or "")
+    return queue_simulation_job(req.topicId, req.focus or "", req.kind or "auto")
 
 @app.post("/api/simulations/backfill")
 def backfill_simulations():
@@ -3983,6 +4056,7 @@ agy_create_simulation_tool = types.FunctionDeclaration(
         properties={
             "topic_id": types.Schema(type="STRING", description="Existing topic ID to attach the simulation to"),
             "focus": types.Schema(type="STRING", description="What the simulation should let the student explore, e.g. 'how damping changes the decay of a spring-mass oscillator'"),
+            "kind": types.Schema(type="STRING", description="'math' for the math kit (epsilon-delta, Riemann sums, Taylor series, unit circle, vector fields, matrices...), 'physics' for moving bodies and graphs, or 'auto'"),
         },
         required=["topic_id", "focus"]
     )
@@ -4003,13 +4077,13 @@ agy_adjust_class_tool = types.FunctionDeclaration(
 
 agy_switch_page_tool = types.FunctionDeclaration(
     name="switch_page",
-    description="Changes the active view in &.edu LAB, navigating to a specific topic, opening a simulation tab, switching to the quiz, or switching between Study Builder, Physics Studio, Code IDE, and Math Mode.",
+    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math).",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "topic_id": types.Schema(type="STRING", description="Target topic ID to navigate to, e.g. 'billiard-ball-collisions'"),
             "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', 'practice' or 'agent'"),
-            "mode": types.Schema(type="STRING", description="'home', 'physics', 'code', or 'math'")
+            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), or 'math' (Math)")
         }
     )
 )
@@ -4042,8 +4116,33 @@ agy_execute_code_tool = types.FunctionDeclaration(
     )
 )
 
+agy_show_graph_tool = types.FunctionDeclaration(
+    name="show_on_graph",
+    description="Opens Math > Graph on the student's screen with functions of x, e.g. to compare f and its derivative or show a family of curves. Letters other than x become sliders.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={"functions": types.Schema(type="ARRAY", items=types.Schema(type="STRING"), description="Up to 6 functions, e.g. ['sin(k*x)', 'k*cos(k*x)']")},
+        required=["functions"]
+    )
+)
+
+agy_preview_math_tool = types.FunctionDeclaration(
+    name="show_math_widget",
+    description="Shows an interactive math-kit widget on the student's screen right now (not saved). Pass a JSON object as a string with "
+                "'widget' and its fields, e.g. {\"widget\":\"epsilon_delta\",\"f\":\"x^2\",\"a\":2,\"L\":4,\"delta_rule\":\"min(1, eps/5)\"} or "
+                "{\"widget\":\"riemann\",\"f\":\"sin(x)\",\"a\":0,\"b\":\"pi\"}. Widgets: epsilon_delta, epsilon_n, secant_tangent, riemann, series, "
+                "unit_circle, parametric, vector_field, transform2d.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={"spec_json": types.Schema(type="STRING", description="The widget spec as a JSON string")},
+        required=["spec_json"]
+    )
+)
+
 agy_agent_tools = types.Tool(
     function_declarations=[
+        agy_show_graph_tool,
+        agy_preview_math_tool,
         agy_create_lesson_tool,
         agy_create_simulation_tool,
         agy_adjust_class_tool,
@@ -4101,7 +4200,7 @@ async def _run_agy_process(prompt: str) -> str:
     return stdout.decode("utf-8", errors="replace").strip() if proc.returncode == 0 else ""
 
 AGY_SYSTEM_PROMPT = (
-    "You are the AGY Autonomous Physics & STEM Assistant embedded inside &.edu LAB. "
+    "You are the AGY Autonomous Physics & STEM Assistant embedded inside &.edu. "
     "You can change the workspace directly with your tools, and you should use them instead of only describing changes:\n"
     "- `create_simulation` builds a brand-new interactive simulation for ANY topic (pendulums, orbits, waves, fields, gas laws, circuits...).\n"
     "- `create_or_update_lesson` writes lessons with KaTeX derivations, cheat sheets and quizzes (matching simulation is built automatically).\n"
@@ -4182,10 +4281,28 @@ async def post_user_prompt(data: AgyPromptModel):
                 elif call.name == "create_simulation":
                     tid = args.get("topic_id") or data.topicId
                     try:
-                        queue_simulation_job(tid, args.get("focus", ""))
+                        queue_simulation_job(tid, args.get("focus", ""), args.get("kind") if args.get("kind") in ("math", "physics") else "auto")
                         reply_content = f"Building a new simulation for **{tid}** focused on: _{args.get('focus', 'the core concept')}_. It appears in the Simulation tab in about 20–40 seconds."
                     except HTTPException:
                         reply_content = f"I couldn't find a topic called `{tid}`. Ask me to create the lesson first."
+                    break
+
+                elif call.name == "show_on_graph":
+                    fns = [str(f)[:200] for f in (args.get("functions") or [])][:6]
+                    emit_event("MATH_GRAPH", {"functions": fns, "params": {}})
+                    reply_content = "On your Math graph now: " + ", ".join(f"`{f}`" for f in fns) + ". Drag the sliders to explore."
+                    break
+
+                elif call.name == "show_math_widget":
+                    try:
+                        spec, errors = validate_spec({**json.loads(args.get("spec_json") or "{}"), "kind": "math"})
+                    except json.JSONDecodeError:
+                        spec, errors = {}, ["spec_json was not valid JSON"]
+                    if errors:
+                        reply_content = "I couldn't build that widget: " + "; ".join(errors[:3])
+                    else:
+                        emit_event("MATH_PREVIEW", {"spec": spec})
+                        reply_content = f"Opened **{spec['title']}** in Math > Sim kit. {spec.get('description', '')}"
                     break
 
                 elif call.name == "adjust_class":
@@ -4291,5 +4408,5 @@ if __name__ == "__main__":
     if host not in ("127.0.0.1", "localhost", "::1") and not AUTH_REQUIRED:
         sys.exit("Refusing to listen on {} without accounts: set SCIEDU_AUTH=1 (and SCIEDU_ALLOWED_HOSTS) "
                  "before serving other machines.".format(host))
-    print(f"Starting &.edu LAB backend on http://{host}:{port} ...")
+    print(f"Starting &.edu backend on http://{host}:{port} ...")
     uvicorn.run(app, host=host, port=port)

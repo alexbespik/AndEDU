@@ -13,9 +13,9 @@ const MODES = [
 export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut, online, panelOpen, onTogglePanel, onOpenTopics, assistantName = 'Assistant', streakChip }) {
   return (
     <header className="masthead">
-      <button type="button" className="brand" onClick={() => onSwitchStudioMode('home')} aria-label="&.edu LAB, go to my courses">
+      <button type="button" className="brand" onClick={() => onSwitchStudioMode('home')} aria-label="&.edu, go to my courses">
         <span className="brand-monogram" aria-hidden="true">&amp;</span>
-        <span className="brand-mark">.edu LAB</span>
+        <span className="brand-mark">.edu</span>
       </button>
 
       <nav className="modes" aria-label="Workspace">
