@@ -338,6 +338,31 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .course-card h3 { font-family: var(--font-display); font-size: 1.2rem; }
 .course-card .meta { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); font-size: 0.88rem; color: var(--muted); }
 .course-card .status { align-self: flex-start; }
+.course-card { cursor: default; }
+.card-link { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.card-link:hover { text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 4px; }
+.status-gold { background: var(--ink); color: var(--gold); }
+.section-h { font-size: 1.2rem; margin-top: var(--space-4); }
+
+/* ---------- Study hub (materials in, one intent out) ---------- */
+.hub { border-top: 3px solid var(--gold); }
+.dropzone-lg { padding: var(--space-6, 32px) var(--space-5); }
+.dropzone-lg .dz-icon { color: var(--gold-text); }
+.intents { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-3); }
+.intents legend { margin-bottom: var(--space-2); }
+.intent {
+  position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--space-1) var(--space-2); align-items: center;
+  padding: var(--space-4); border: 1px solid var(--rule-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer;
+}
+.intent input { position: absolute; opacity: 0; pointer-events: none; }
+.intent svg { color: var(--accent); }
+.intent .intent-title { font-weight: 600; }
+.intent .hint { grid-column: 1 / -1; }
+.intent:hover { border-color: var(--accent); }
+.intent[data-checked="true"] { border-color: var(--ink); box-shadow: inset 0 -3px 0 var(--gold); background: var(--accent-tint); }
+.intent:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.intent[data-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.hub-more summary { cursor: pointer; color: var(--accent); font-size: 0.92rem; }
 
 /* ---------- Classes (syllabus) ---------- */
 .syllabus { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
@@ -521,3 +546,24 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .slider label { display: flex; justify-content: space-between; gap: var(--space-2); font-size: 0.92rem; color: var(--ink); }
 .slider label b { font-family: var(--font-mono); font-weight: 600; color: var(--gold-text); white-space: nowrap; }
 .slider input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+/* ---------- Math workspace ---------- */
+.math-graph { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: var(--space-5); align-items: start; margin-top: var(--space-4); }
+.math-canvas { width: 100%; height: min(70vh, 620px); border: 1px solid var(--rule-strong); border-radius: var(--radius); background: var(--surface); touch-action: none; cursor: crosshair; }
+.formula-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); align-items: center; }
+.formula-row .hint { grid-column: 2 / -1; font-size: 0.82rem; }
+.formula-row .err { color: var(--bad-ink); }
+.formula-row .input[aria-invalid="true"] { border-color: var(--bad); }
+.swatch { width: 12px; height: 12px; border-radius: 2px; }
+.mono { font-family: var(--font-mono); }
+.range-edit { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.range-edit .input { padding: 2px var(--space-2); min-height: 0; font-size: 0.82rem; }
+.math-notebook { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-5); }
+.math-notebook .textarea { min-height: 460px; font-size: 0.9rem; }
+.math-preview { min-height: 460px; max-height: 70vh; overflow: auto; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (max-width: 860px) {
+  .math-graph, .math-notebook { grid-template-columns: minmax(0, 1fr); }
+  .math-canvas { height: 60vh; }
+  .math-notebook .textarea, .math-preview { min-height: 260px; }
+}

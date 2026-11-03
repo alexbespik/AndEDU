@@ -121,6 +121,8 @@ MIGRATIONS = [
     ("courses", "plan_questions", "INTEGER"),      # remembered so interrupted planning can be redone
     ("courses", "plan_classes", "INTEGER"),
     ("classes", "opened_at", "REAL"),              # first time the student opened the lesson
+    ("courses", "mode", "TEXT NOT NULL DEFAULT 'learn'"),  # learn | test_prep
+    ("courses", "exam_date", "TEXT"),
 ]
 
 
@@ -185,13 +187,14 @@ def list_users() -> List[Dict[str, Any]]:
 
 
 # ---- courses ----
-def create_course(user_id: str, title: str, goal: str, materials_text: str, filenames: List[str]) -> Dict[str, Any]:
+def create_course(user_id: str, title: str, goal: str, materials_text: str, filenames: List[str],
+                  mode: str = "learn", exam_date: Optional[str] = None) -> Dict[str, Any]:
     now = time.time()
     cid = _new_id("course")
     conn().execute(
-        "INSERT INTO courses (id, user_id, title, goal, status, materials_text, filenames, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, 'planning', ?, ?, ?, ?)",
-        (cid, user_id, title, goal, materials_text, json.dumps(filenames), now, now))
+        "INSERT INTO courses (id, user_id, title, goal, status, materials_text, filenames, mode, exam_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, 'planning', ?, ?, ?, ?, ?, ?)",
+        (cid, user_id, title, goal, materials_text, json.dumps(filenames), mode, exam_date, now, now))
     conn().commit()
     return get_course(cid)
 
@@ -212,7 +215,7 @@ def get_course(course_id: str) -> Optional[Dict[str, Any]]:
 
 def list_courses(user_id: str) -> List[Dict[str, Any]]:
     rows = conn().execute("""
-        SELECT c.id, c.title, c.subject, c.goal, c.status, c.error, c.job_id, c.created_at, c.updated_at,
+        SELECT c.id, c.title, c.subject, c.goal, c.status, c.error, c.job_id, c.mode, c.exam_date, c.created_at, c.updated_at,
                COUNT(k.id) AS class_count,
                SUM(k.status = 'ready') AS ready_count,
                SUM(k.completed) AS completed_count,
@@ -239,6 +242,20 @@ def replace_classes(course_id: str, outline: List[Dict[str, Any]]):
             (_new_id("class"), course_id, seq, item["title"], json.dumps(item.get("objectives", [])),
              json.dumps(item.get("concepts", [])), now))
     c.commit()
+
+
+def append_classes(course_id: str, outline: List[Dict[str, Any]]) -> int:
+    """Adds classes after the last one; returns the first new seq."""
+    now = time.time()
+    c = conn()
+    start = (c.execute("SELECT MAX(seq) FROM classes WHERE course_id = ?", (course_id,)).fetchone()[0] or 0) + 1
+    for seq, item in enumerate(outline, start=start):
+        c.execute(
+            "INSERT INTO classes (id, course_id, seq, title, objectives, concepts, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (_new_id("class"), course_id, seq, item["title"], json.dumps(item.get("objectives", [])),
+             json.dumps(item.get("concepts", [])), now))
+    c.commit()
+    return start
 
 
 def list_classes(course_id: str) -> List[Dict[str, Any]]:

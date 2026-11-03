@@ -232,6 +232,62 @@ class Api(unittest.TestCase):
         course = db.create_course(user["id"], "Interrupted", "goal", "materials", [])
         self.assertIn(course["id"], [c["id"] for c in db.interrupted_planning()])
 
+    def test_test_prep_mode_reaches_the_prompts(self):
+        user = db.get_or_create_user("Prep Tester")
+        server.start_plan_job, real = (lambda *a: {"id": "job-x"}), server.start_plan_job
+        try:
+            r = self.c.post("/api/courses", json={"userId": user["id"], "goal": "Chem 121 final on stoichiometry and gases",
+                                                  "mode": "test_prep", "exam_date": "2026-12-10"}).json()
+        finally:
+            server.start_plan_job = real
+        course = db.get_course(r["course"]["id"])
+        self.assertEqual((course["mode"], course["exam_date"]), ("test_prep", "2026-12-10"))
+        self.assertIn("Mock exam", server.mode_rules(course))
+        self.assertIn("MOCK EXAM", server.mode_adjustment(course, {"title": "Mock exam: Chemistry"}))
+        self.assertEqual(server.mode_rules({"mode": "learn"}), "")
+
+    def test_continue_course_appends_classes(self):
+        user = db.get_or_create_user("Extend Tester")
+        course = db.create_course(user["id"], "Course", "goal", "old notes", [])
+        db.update_course(course["id"], status="ready", concepts=[{"id": "c1", "name": "One", "summary": ""}])
+        db.replace_classes(course["id"], [{"title": "One"}, {"title": "Two"}])
+
+        async def fake_plan(prompt, role=None):
+            self.assertIn("1. One", prompt)
+            return {"concepts": [{"id": "c2", "name": "Two b"}], "classes": [{"title": "Three", "concepts": ["c2", "zz"]}]}
+        server.gemini_json, real = fake_plan, server.gemini_json
+        server.queue_course_generation, real_q = (lambda cid: None), server.queue_course_generation
+        try:
+            r = self.c.post(f"/api/courses/{course['id']}/extend", json={"materials_text": "new chapter on angular momentum"})
+            self.assertEqual(r.status_code, 200)
+            for _ in range(50):
+                if server.JOBS[r.json()["job"]["id"]]["status"] in ("done", "error"):
+                    break
+                import time; time.sleep(0.05)
+        finally:
+            server.gemini_json, server.queue_course_generation = real, real_q
+        classes = db.list_classes(course["id"])
+        self.assertEqual([(k["seq"], k["title"]) for k in classes][-1], (3, "Three"))
+        self.assertEqual(classes[-1]["concepts"], ["c2"])
+        updated = db.get_course(course["id"])
+        self.assertTrue(updated["materials_text"].startswith("--- Added"))
+        self.assertEqual([c["id"] for c in updated["concepts"]], ["c1", "c2"])
+
+    def test_math_answers_are_recomputed(self):
+        async def fake(prompt, role=None):
+            return {"title": "t", "practice": [
+                {"type": "numeric", "prompt": "right", "answer": 4.24, "compute": "3*sqrt(2)", "explanation": ""},
+                {"type": "numeric", "prompt": "wrong key", "answer": 5, "compute": "2+2", "explanation": ""},
+                {"type": "numeric", "prompt": "sneaky", "answer": 1, "compute": "__import__('os')", "explanation": ""}]}
+        server.gemini_json, real = fake, server.gemini_json
+        try:
+            r = self.c.post("/api/math/practice", json={"topic": "radicals"}).json()
+        finally:
+            server.gemini_json = real
+        self.assertEqual([i["prompt"] for i in r["items"]], ["right"])
+        self.assertAlmostEqual(r["items"][0]["answer"], 4.242641, places=5)
+        self.assertEqual(r["dropped"], 2)
+
     def test_accounts_keep_courses_private(self):
         server.AUTH_REQUIRED = True
         self.assertEqual(self.c.get("/api/topics").status_code, 401)

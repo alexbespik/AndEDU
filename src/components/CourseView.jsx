@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, ArrowRight, RefreshCw, Trash2 } from 'lucide-react';
+import { Loader2, ArrowRight, RefreshCw, Trash2, ListPlus, Target } from 'lucide-react';
 import Md, { MdInline } from './Md';
 import { api, useAgyEvents } from '../lib/api';
-import { STATUS } from './CoursesHome';
+import { STATUS, StudyHub } from './CoursesHome';
 
 const LETTERS = 'ABCDEFGH';
 const CLASS_STATUS = {
@@ -156,6 +156,7 @@ function Graded({ graded, course }) {
 export default function CourseView({ courseId, onOpenTopic, onBack }) {
   const [course, setCourse] = useState(null);
   const [graded, setGraded] = useState(null);
+  const [adding, setAdding] = useState(false);
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -184,17 +185,33 @@ export default function CourseView({ courseId, onOpenTopic, onBack }) {
   const [label, cls] = STATUS[course.status] || [course.status, 'status-pending'];
   const classes = course.classes || [];
   const showSyllabus = classes.length > 0 && course.status !== 'diagnostic_ready';
+  const jobBusy = course.job && ['queued', 'running'].includes(course.job.status);
+  const canExtend = showSyllabus && !jobBusy && course.status !== 'planning';
 
   return (
     <div className="page">
-      <nav className="crumbs" aria-label="Breadcrumb"><button type="button" onClick={onBack}>Your courses</button></nav>
+      <nav className="crumbs" aria-label="Breadcrumb"><button type="button" onClick={onBack}>My courses</button></nav>
       <div className="page-head">
         <div>
           <h1>{course.title}</h1>
           {course.goal && course.goal !== course.title && <p>{course.goal}</p>}
         </div>
-        <span className={`status ${cls}`}>{label}</span>
+        <div className="btn-row" style={{ gap: 'var(--space-2)' }}>
+          {course.mode === 'test_prep' && (
+            <span className="status status-gold"><Target size={12} aria-hidden="true" /> Test prep{course.exam_date ? ` · exam ${course.exam_date}` : ''}</span>
+          )}
+          <span className={`status ${cls}`}>{label}</span>
+          {canExtend && (
+            <button type="button" className="btn btn-secondary btn-sm" aria-expanded={adding} onClick={() => setAdding((a) => !a)}>
+              <ListPlus size={14} aria-hidden="true" /> {adding ? 'Close' : 'Add materials'}
+            </button>
+          )}
+        </div>
       </div>
+      {adding && canExtend && (
+        <StudyHub lockIntent courses={[{ ...course, class_count: classes.length }]} preset={{ intent: 'continue', courseId }}
+          onOpened={() => { setAdding(false); load(); }} />
+      )}
 
       <JobProgress job={course.job} />
       {course.status === 'error' && course.error && (

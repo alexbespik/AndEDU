@@ -8,11 +8,14 @@ import rehypeKatex from 'rehype-katex';
 const REMARK = [remarkMath, remarkGfm];
 const REHYPE = [rehypeKatex];
 
+// remark-math renders "$$x$$" written on one line as inline math; a line holding only $$...$$ is meant as display math
+const displayMath = (text) => text.replace(/^[ \t]*\$\$([^\n$]+?)\$\$[ \t]*$/gm, '$$$$\n$1\n$$$$');
+
 export default function Md({ children, className }) {
   return (
     <div className={className}>
       <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE}>
-        {String(children ?? '')}
+        {displayMath(String(children ?? ''))}
       </ReactMarkdown>
     </div>
   );
