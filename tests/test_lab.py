@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -548,3 +549,25 @@ class AccountsSecurity(unittest.TestCase):
         self.assertEqual(self.c.get("/api/agy/messages", headers=self.a).json(), [])
         self.assertEqual(self.c.post("/api/advisor/catalog/import", json={"text": "ABCD 101. X. (3 Credits)"}, headers=self.a).status_code, 403)
         self.assertEqual(self.c.post("/api/execute-code", json={"code": "print(1)"}, headers=self.a).status_code, 403)
+
+    def test_quiz_sims_and_jobs_stay_with_their_owner(self):
+        course = db.create_course(self.a_id, "Alice quiz course", "g", "", [])
+        db.replace_classes(course["id"], [{"title": "C1", "objective": "o"}])
+        klass = db.list_classes(course["id"])[0]
+        server.AUTH_REQUIRED = False
+        self.c.post("/api/topics", json=topic("alice-quiz-class", source={"courseId": course["id"]}))
+        self.c.post("/api/topics", json=topic("shared-sim-lib"))
+        server.AUTH_REQUIRED = True
+        db.update_class(klass["id"], topic_id="alice-quiz-class")
+        answer = {"topicId": "alice-quiz-class", "questionId": "q1", "selected": 0, "isCorrect": False}
+        self.assertEqual(self.c.post("/api/quiz/submit", json=answer, headers=self.b).status_code, 404)
+        self.assertEqual(self.c.post("/api/simulations/generate", json={"topicId": "alice-quiz-class"}, headers=self.b).status_code, 404)
+        self.assertEqual(self.c.post("/api/simulations/generate", json={"topicId": "shared-sim-lib"}, headers=self.b).status_code, 403)
+        self.assertEqual(self.c.post("/api/simulations/backfill", headers=self.b).status_code, 403)
+        server.JOBS["job-sec-test"] = {"id": "job-sec-test", "kind": "course", "created": time.time(), "owner": self.a_id, "result": {"secret": 1}}
+        try:
+            self.assertEqual(self.c.get("/api/jobs/job-sec-test", headers=self.b).status_code, 404)
+            self.assertNotIn("job-sec-test", [j["id"] for j in self.c.get("/api/jobs", headers=self.b).json()["jobs"]])
+            self.assertEqual(self.c.get("/api/jobs/job-sec-test", headers=self.a).status_code, 200)
+        finally:
+            server.JOBS.pop("job-sec-test", None)
