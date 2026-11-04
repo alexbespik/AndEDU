@@ -140,7 +140,7 @@ When a user asks the AGY companion in chat (e.g. *"remove the friction"*, *"set 
 ## 6. Directory Structure & File Map
 
 ```
-
+SciEdu-Studio/
 ├── index.html                  # HTML entry point, KaTeX CSS, Mermaid script, Inter/JetBrains fonts
 ├── package.json                # Dependencies: React 19, Lucide, KaTeX, ReactMarkdown, Remark, Rehype
 ├── vite.config.js              # Vite bundler configuration (dev server on port 5173)
@@ -213,14 +213,14 @@ SciEdu Studio uses the signature **Monokai Black & Forest Pine** theme:
 
 1. **Start the Frontend (Vite Dev Server)**:
    ```bash
-   cd ~/SciEdu-Studio
+   cd SciEdu-Studio
    npx vite --port 5173
    ```
    Access in browser: `http://localhost:5173/`
 
 2. **Start the Backend Server (FastAPI)**:
    ```bash
-   ~/AndEDU/AndEdu/bin/python server.py
+   .venv/bin/python server.py
    ```
    API runs at: `http://localhost:8090/`
    Interactive docs: `http://localhost:8090/docs`

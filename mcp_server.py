@@ -78,7 +78,7 @@ TOOLS = [
      S(topic_id=STR("topic id"), spec=OBJ("SimSpec JSON")), lambda a: call("POST", f"/api/topics/{q(a['topic_id'])}/simulation", {"spec": a["spec"]})),
     ("generate_simulation", "Have the app's model design a simulation for a lesson in the background (20-40 s, uses Gemini quota).",
      S(topic_id=STR("topic id"), focus=STR("what the student should explore", optional=True),
-       kind=STR("auto (by workspace) | math | physics", optional=True, enum=["auto", "math", "physics"])),
+       kind=STR("auto (by workspace) | math | physics | chem", optional=True, enum=["auto", "math", "physics", "chem"])),
      lambda a: call("POST", "/api/simulations/generate", {"topicId": a["topic_id"], "focus": a.get("focus", ""), "kind": a.get("kind", "auto")})),
     ("add_quiz_questions", "Append multiple-choice questions to a lesson: {question, options[4], correctAnswer (0-based), hint, explanation}. LaTeX in $...$.",
      S(topic_id=STR("topic id"), questions=ARR("questions")), lambda a: call("POST", f"/api/topics/{q(a['topic_id'])}/quiz", {"items": a["questions"]})),

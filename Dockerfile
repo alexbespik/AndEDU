@@ -19,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py db.py simspec.py backend_puzzles.py ./
+COPY server.py db.py simspec.py chemspec.py engage.py advisor.py backend_puzzles.py ./
 COPY scripts ./scripts
 COPY content/topics ./seed/topics
 COPY --from=web /web/dist ./dist

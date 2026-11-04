@@ -96,9 +96,9 @@ and shows up live in the UI. 28 tools, including: `simulation_guide`, `list_topi
 `add_completed_courses`, `recommend_courses`, `check_readiness`, `create_readiness_course`.
 Register it with your client (the backend must be running on 127.0.0.1:8090):
 ```json
-{"mcpServers": {"andedu": {"command": "python3", "args": ["mcp_server.py"]}}}
+{"mcpServers": {"andedu": {"command": "python3", "args": ["/absolute/path/to/SciEdu-Studio/mcp_server.py"]}}}
 ```
-Claude Code: `claude mcp add andedu -- python3 mcp_server.py`.
+Claude Code (from the repo root): `claude mcp add andedu -- python3 "$PWD/mcp_server.py"`.
 Accounts mode: set `ANDEDU_TOKEN` to a session token; another host: `ANDEDU_API`.
 
 ### Writing precise math simulations
@@ -111,6 +111,7 @@ For proofs give the exact rule the lesson uses, e.g. epsilon-delta for f(x) = 2x
 ```bash
 python3 scripts/agent_add_topic.py --file my_topic.json   # validate + save a topic
 python3 scripts/agent_add_topic.py --template             # starter topic
+.venv/bin/python -m unittest discover -s tests   # tests: use the project venv (.venv, or a link to it); system python3 may lack httpx
 ```
 | Method & path | Purpose |
 | --- | --- |
@@ -162,5 +163,8 @@ The companion uses Gemini tools by default and receives the course the student h
 "make class 2 easier" calls its `adjust_class` tool. To route prompts through the Antigravity CLI instead (personal machine only: agy runs on your own
 Antigravity subscription, which is for your own supervised work; the server never runs it when
 `SCIEDU_AUTH=1`, and caps it with `AGY_DAILY_RUNS`):
-`AGY_CLI=1` (and only if you accept that it edits files without asking, `AGY_SKIP_PERMISSIONS=1`).
-Prompts can come from uploaded documents, so keep skip-permissions off unless you trust every input.
+`AGY_CLI=1`. Prompts come from the page (and uploaded documents), so agy runs fenced: the `andedu-companion`
+agent (`.agents/agents/`) ignores your global agy rules and agent team, has no commands or web, may write only
+`content/agy_drafts/<id>.json` (per-run permission list). The server then runs the read-only `page-guard` agent on
+each draft (injection, wrong answer keys, HTML/links, broken JSON/LaTeX, dropped sections; anything but ALLOW is
+deleted) and imports the rest through `save_topic`, keeping each lesson's `id` and `source`. `--dangerously-skip-permissions` is never passed.

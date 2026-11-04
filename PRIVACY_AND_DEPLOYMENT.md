@@ -52,7 +52,7 @@ Logged 2026-11-03.
 - **MCP server** (`mcp_server.py`) is local-only and trusts its caller. Never expose it over a network; on an
   accounts server, it needs a per-user token (`ANDEDU_TOKEN`) and only that user's data.
 - Done: `/api/execute-code` and the assistant's server-side Python are refused when `SCIEDU_AUTH=1`.
-- Security review: see `AGY_TASK_security.md` (accounts-mode authorization, events, chats, catalog, uploads fixed).
+- Security review: accounts-mode authorization, events, chats, catalog and uploads were reviewed and fixed (tests: `AccountsSecurity` in `tests/test_lab.py`).
 - **ElevenLabs** voice is off by default (`SCIEDU_ELEVENLABS=1`); if enabled, lesson text goes to ElevenLabs:
   disclose it.
 

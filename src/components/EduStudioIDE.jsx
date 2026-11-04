@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { reportXp } from '../lib/engage';
+import { reportXp, emitRewards } from '../lib/engage';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -21,7 +21,7 @@ const STORAGE_KEY = 'andedu_studio_v5';
 
 // Shared &.edu LAB (William & Mary) palette
 import { theme } from '../theme';
-import { authFetch } from '../lib/api';
+import { authFetch, api, loadProfile } from '../lib/api';
 import { runPython } from '../lib/pyodide';
 
 // ---------------------------------------------------------------------------
@@ -544,6 +544,135 @@ $$\\int u \\, dv = u v - \\int v \\, du$$
 DEFAULT_CODE_CURRICULUM.problems = DEFAULT_CODE_CURRICULUM.chapters.flatMap(ch => ch.problems);
 DEFAULT_MATH_CURRICULUM.problems = DEFAULT_MATH_CURRICULUM.chapters.flatMap(ch => ch.problems);
 
+/** Turns a Pyodide traceback into what a student needs: which test failed, or the error and its line. */
+export function explainError(raw, script, userLines) {
+  if (!raw) return '';
+  const lines = raw.split('\n').map((l) => l.trimEnd()).filter(Boolean);
+  const last = lines[lines.length - 1] || raw;
+  const frames = [...raw.matchAll(/File "<exec>", line (\d+)/g)];
+  const n = frames.length ? Number(frames[frames.length - 1][1]) : null;
+  const src = n ? (script.split('\n')[n - 1] || '').trim() : '';
+  if (/^AssertionError/.test(last) && n && n > userLines) return `Failed: ${src}${last.length > 15 ? `\n${last}` : ''}`;
+  return n && n <= userLines ? `${last}\n(your code, line ${n}: ${src})` : last;
+}
+
+/** Helper to resolve correct answer index from quiz question format */
+function quizAnswerIndex(q) {
+  const v = q?.correctAnswer ?? q?.correct;
+  const n = typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
+  return Number.isInteger(n) && n >= 0 && n < (q?.options?.length || 0) ? n : null;
+}
+
+/** Builds an IDE curriculum dynamically from a course class topic */
+export function buildCurriculumFromClassTopic(topic) {
+  if (!topic) return null;
+  const problems = [];
+  let gIdx = 0;
+
+  // 1. Practice items of type 'code' (or items with starter + tests)
+  const practiceItems = (topic.practice || []).filter(
+    (p) => p && (p.type === 'code' || (p.starter !== undefined && p.tests !== undefined))
+  );
+
+  practiceItems.forEach((item, idx) => {
+    problems.push({
+      id: item.id || `practice_${idx + 1}`,
+      chapter_id: 1,
+      global_index: gIdx++,
+      title: item.title || item.name || `exercise_${idx + 1}.py`,
+      difficulty: item.difficulty || 'Moderate',
+      type: 'code',
+      mode: 'code',
+      guiding_question: item.prompt || item.instructions || item.question || item.description || 'Write and verify your algorithmic solution.',
+      starter_code: item.starter || '',
+      starter: item.starter || '',
+      test_code: item.tests || '',
+      tests: item.tests || '',
+      test_cases: item.tests
+        ? item.tests.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('assert'))
+        : ['[TEST] All assertions pass'],
+      solution: item.solution,
+      concept_hint: item.hint || 'Check loop boundaries, data types, and base conditions.',
+      explanation: item.explanation || 'Solution verified via the WebAssembly Python kernel.',
+      _rawItem: item,
+    });
+  });
+
+  // 2. Quiz items
+  const quizItems = (topic.quiz || []).filter((q) => q && q.question && (q.options?.length > 0));
+
+  quizItems.forEach((q, idx) => {
+    let corrAns = '';
+    const n = quizAnswerIndex(q);
+    if (n !== null) {
+      corrAns = q.options[n];
+    } else if (typeof q.correctAnswer === 'string') {
+      corrAns = q.correctAnswer;
+    } else if (typeof q.correct === 'string') {
+      corrAns = q.correct;
+    }
+
+    problems.push({
+      id: q.id ?? `quiz_${idx + 1}`,
+      chapter_id: 1,
+      global_index: gIdx++,
+      title: q.title || `diagnostic_${idx + 1}.md`,
+      difficulty: q.difficulty || 'Moderate',
+      type: 'question',
+      mode: 'code',
+      guiding_question: q.question,
+      question_text: q.question,
+      concept_hint: q.hint || '',
+      explanation: q.explanation || '',
+      options: q.options || [],
+      correct_answer: corrAns,
+      _correctIndex: n !== null ? n : undefined,
+      test_cases: ['[DIAGNOSTIC] Conceptual invariant verified.'],
+      _isQuizItem: true,
+      _rawQuiz: q,
+      _quizIndex: idx,
+    });
+  });
+
+  if (problems.length === 0) {
+    problems.push({
+      id: 1,
+      chapter_id: 1,
+      global_index: 0,
+      title: 'scratchpad.py',
+      difficulty: 'Easy',
+      type: 'code',
+      mode: 'code',
+      guiding_question: topic.summary || 'Write and run Python code in your browser.',
+      starter_code: '# Write Python code here\n',
+      test_code: '',
+      test_cases: [],
+      concept_hint: '',
+      explanation: '',
+    });
+  }
+
+  const chapter = {
+    id: 1,
+    title: topic.title || 'Class Lesson',
+    summary: topic.summary || '',
+    estimated_time_minutes: 20,
+    content_markdown: topic.markdownContent || '# Lesson Notes\n\nNo content provided.',
+    problems,
+  };
+
+  return {
+    course_title: topic.source?.courseTitle || topic.title || 'Programming Track',
+    domain: 'Computer Science',
+    mode: 'code',
+    level_num: topic.source?.classSeq || 1,
+    level_title: topic.title || 'Class',
+    overview: topic.summary || '',
+    chapters: [chapter],
+    problems,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // RESILIENT KATEX MATH EQUATION & INLINE FORMULA RENDERER
 // ---------------------------------------------------------------------------
@@ -804,18 +933,30 @@ const VSCodeMarkdown = ({ content }) => {
 // ---------------------------------------------------------------------------
 // MAIN EDU IDE COMPONENT (3-PANEL HIGH-CONTRAST ALIGNMENT)
 // ---------------------------------------------------------------------------
-const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNewPracticeSet }) => {
+const EduIDE = ({
+  onSwitchToPhysics,
+  initialMode = "code",
+  request = null,
+  onNewPracticeSet,
+  classTopic = null,
+  prevClass = null,
+  nextClass = null,
+  onOpenClass = null,
+  onHome = null,
+  userId = null,
+}) => {
   // App Mode: 'code' | 'math'
   const [appMode, setAppMode] = useState(initialMode || "code");
 
   // Runs on mount too: the curriculum state starts as the code course, so Math must load its own.
   const initializedModeRef = useRef(null);  // StrictMode runs effects twice; set the mode up once
   useEffect(() => {
+    if (classTopic) return;
     if ((initialMode === "code" || initialMode === "math") && initializedModeRef.current !== initialMode) {
       initializedModeRef.current = initialMode;
       handleModeChange(initialMode);
     }
-  }, [initialMode]);
+  }, [initialMode, classTopic]);
 
   // Ingestion & File Inputs (Multiple Files Support)
   const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -825,7 +966,9 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
   const [escalating, setEscalating] = useState(false);
 
   // Curriculum State
-  const [curriculum, setCurriculum] = useState(() => (initialMode === 'math' ? DEFAULT_MATH_CURRICULUM : DEFAULT_CODE_CURRICULUM));
+  const [curriculum, setCurriculum] = useState(() => (
+    classTopic ? buildCurriculumFromClassTopic(classTopic) : (initialMode === 'math' ? DEFAULT_MATH_CURRICULUM : DEFAULT_CODE_CURRICULUM)
+  ));
   const [activeChapterId, setActiveChapterId] = useState(1);
   const [activeProblemIndex, setActiveProblemIndex] = useState(0);
   const [activeTab, setActiveTab] = useState("editor"); // 'editor' | 'docs'
@@ -835,7 +978,57 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
   const [currentLevel, setCurrentLevel] = useState(1);
   const [totalXp, setTotalXp] = useState(0);
   const [completedProblems, setCompletedProblems] = useState({});
-  const [problemStates, setProblemStates] = useState({});
+  const [problemStates, setProblemStates] = useState(() => {
+    if (classTopic) {
+      const built = buildCurriculumFromClassTopic(classTopic);
+      const states = {};
+      (built.problems || []).forEach((prob, idx) => {
+        states[idx] = {
+          slotChoice: null,
+          assembledBlocks: [],
+          availableBank: prob.blocks_pool ? [...prob.blocks_pool] : [],
+          writtenCode: prob.starter_code !== undefined ? prob.starter_code : (prob.starter !== undefined ? prob.starter : "# Write code here\n"),
+          evaluation: null,
+          quizChoice: null
+        };
+      });
+      return states;
+    }
+    return {};
+  });
+
+  // When classTopic updates (e.g. user navigated to prev/next class)
+  useEffect(() => {
+    if (classTopic) {
+      const built = buildCurriculumFromClassTopic(classTopic);
+      if (built) {
+        setCurriculum(built);
+        initProblemStates(built);
+        setCompletedProblems({});  // keyed by problem index, so class 1's solved items must not carry into class 2
+        setActiveChapterId(1);
+        setActiveProblemIndex(0);
+        setActiveTab("editor");
+        briefedProblemsRef.current.clear();
+      }
+    }
+  }, [classTopic?.id]);
+
+  // Inform server that topic was opened (so background adaptation doesn't rewrite it while reading)
+  useEffect(() => {
+    if (classTopic?.source?.courseId && classTopic?.id) {
+      api(`/api/topics/${classTopic.id}/opened`, { method: 'POST' }).catch(() => {});
+    }
+  }, [classTopic?.id, classTopic?.source?.courseId]);
+
+  // XP for spending time reading the lesson docs tab
+  useEffect(() => {
+    if (activeTab === 'docs' && classTopic?.id) {
+      const t = setTimeout(() => {
+        if (!document.hidden) reportXp('lesson_read', classTopic.id);
+      }, 90000);
+      return () => clearTimeout(t);
+    }
+  }, [activeTab, classTopic?.id]);
 
   // Pyodide WebAssembly Kernel State
   const [kernelStatus, setKernelStatus] = useState("loading");
@@ -849,6 +1042,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
 
   // Socratic Mentor with Theory-First Briefings
   const briefedProblemsRef = useRef(new Set());
+  const submittedQuizRef = useRef(new Set());  // "<topicId>:<questionId>" already sent to /api/quiz/submit
   const currentBriefKeyRef = useRef(null);  // a briefing that returns after the problem changed is dropped
   const [briefLoading, setBriefLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState([
@@ -1072,7 +1266,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
         slotChoice: null,
         assembledBlocks: [],
         availableBank: prob.blocks_pool ? [...prob.blocks_pool] : [],
-        writtenCode: prob.starter_code || "# Write code here\n",
+        writtenCode: prob.starter_code !== undefined ? prob.starter_code : (prob.starter !== undefined ? prob.starter : "# Write code here\n"),
         evaluation: null,
         quizChoice: null
       };
@@ -1680,9 +1874,16 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
   // ---------------------------------------------------------------------------
   const checkIsOptionCorrect = (selected, problem, optIndex) => {
     if (!selected || !problem) return false;
-    const correct = (problem.correct_answer || problem.correctAnswer || problem.answer || problem.solution || "").trim();
-    const sel = selected.trim();
-    if (!correct) return false;
+
+    if (optIndex !== undefined && optIndex !== null) {
+      if (typeof problem.correctAnswer === 'number' && problem.correctAnswer === optIndex) return true;
+      if (typeof problem.correct === 'number' && problem.correct === optIndex) return true;
+      if (problem._correctIndex !== undefined && problem._correctIndex === optIndex) return true;
+    }
+    const rawCorrect = problem.correct_answer ?? problem.correctAnswer ?? problem.answer ?? problem.solution ?? "";
+    const correct = String(rawCorrect).trim();
+    const sel = String(selected || "").trim();
+    if (!correct && !sel) return false;
 
     // 1. Direct exact match
     if (sel === correct) return true;
@@ -1752,9 +1953,28 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
     });
 
     const letter = String.fromCharCode(65 + (optIdx || 0));
+    const alreadySolved = completedProblems[activeProblemIndex];
+
+    // Only the first answer to each question goes to the API, right or wrong (like QuizEngine): the class score
+    // uses each question's latest attempt, so recording retries would let click-through guessing reach 100%
+    // and adapt_next_class would never ease off. Misses feed spaced review. Retries stay local.
+    const questionId = currentProblem._rawQuiz?.id ?? currentProblem.id;
+    const submitKey = `${classTopic?.id}:${questionId}`;
+    if (classTopic?.id && (currentProblem._isQuizItem || currentProblem._rawQuiz) && !submittedQuizRef.current.has(submitKey)) {
+      submittedQuizRef.current.add(submitKey);
+      const record = {
+        userId: userId || loadProfile()?.id,
+        topicId: classTopic.id,
+        questionId,
+        selected: optIdx,
+        isCorrect: Boolean(isCorrect)
+      };
+      api('/api/quiz/submit', { method: 'POST', body: record })
+        .then(r => emitRewards(r?.rewards))
+        .catch(() => {});
+    }
 
     if (isCorrect) {
-      const alreadySolved = completedProblems[activeProblemIndex];
       if (!alreadySolved) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
         reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
@@ -1854,8 +2074,9 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
   // 8. REAL PYODIDE KERNEL RUNNER (FRONT-END IN-BROWSER EXECUTION)
   // ---------------------------------------------------------------------------
   const handleRunInPyodideKernel = async (testMode = false) => {
-    const code = activeState.writtenCode || currentProblem?.starter_code || "";
-    const testCode = testMode ? (currentProblem?.test_code || "") : "";
+    const code = activeState.writtenCode !== undefined ? activeState.writtenCode : (currentProblem?.starter_code ?? currentProblem?.starter ?? "");
+    const testCode = currentProblem?.test_code || currentProblem?.tests || "";
+    const shouldRunTests = Boolean(testMode && testCode);
     const marker = "__ALL_TESTS_PASSED__";
 
     setExecutingCode(true);
@@ -1863,28 +2084,36 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
 
     // Same runner as course exercises: never on the server, stopped after a few seconds if stuck,
     // and a crash can't leave the interpreter in a broken state for the next run.
-    const script = testCode ? `${code}\n\n${testCode}\nprint("${marker}")` : code;
+    const script = shouldRunTests ? `${code}\n\n${testCode}\nprint("${marker}")` : code;
     const res = await runPython(script);
-    const output = (res.output || "").replace(`${marker}\n`, "").trim();
-    const testsPassed = Boolean(testCode) && res.ok && (res.output || "").includes(marker);
+    const output = (res.output || "").replace(`${marker}\n`, "").replace(`${marker}`, "").trim();
+    const testsPassed = shouldRunTests && res.ok && (res.output || "").includes(marker);
 
-    if (testsPassed && testMode) {
+    if (testsPassed) {
       if (!completedProblems[activeProblemIndex]) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
         reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
         setTotalXp(prev => prev + 100);
       }
       updateActiveState({ evaluation: 'correct' });
+    } else if (!testMode) {
+      // Ordinary run: output shown in terminal, evaluation unchanged unless testing
+      updateActiveState({ evaluation: null });
+    } else if (res.ok && !testCode) {
+      updateActiveState({ evaluation: 'correct' });
+    } else {
+      updateActiveState({ evaluation: 'wrong' });
     }
 
-    const errorTail = res.error ? res.error.split("\n").filter(Boolean).slice(-3).join("\n") : "";
+    const userLineCount = (code || '').split('\n').length;
+    const cleanErr = res.timedOut ? res.error : explainError(res.error, script, userLineCount);
     setTerminalOutput(prev => [
       ...prev,
       output ? `[STDOUT]\n${output}` : "[STDOUT] (No output printed)",
-      res.timedOut ? `[STOPPED] ${res.error}` : errorTail ? `[ERROR]\n${errorTail}` : "",
-      testMode
-        ? (testsPassed ? "[TEST REPORT] All assertions passed (+100 XP)" : "[TEST REPORT] A test failed or the code raised an error.")
-        : (res.ok ? "[STATUS] Finished." : "[STATUS] Finished with an error.")
+      cleanErr ? `[ERROR]\n${cleanErr}` : "",
+      testsPassed
+        ? "[TEST REPORT] All assertions passed (+100 XP) [PASS]"
+        : (testCode ? "[TEST REPORT] A test failed or the code raised an error." : (res.ok ? "[STATUS] Finished." : "[STATUS] Finished with an error."))
     ].filter(Boolean));
     setExecutingCode(false);
   };
@@ -2523,17 +2752,119 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
   // ---------------------------------------------------------------------------
   // LAYOUT RENDER (HIGH-CONTRAST 3-PANEL ALIGNMENT)
   // ---------------------------------------------------------------------------
+  const src = classTopic?.source || {};
+
   return (
     <div style={{ 
       display: 'flex', 
+      flexDirection: 'column',
       height: '100%', 
       width: '100%', 
       backgroundColor: theme.bgApp, 
       color: theme.textMain, 
       overflow: 'hidden',
-      userSelect: isDragging ? 'none' : 'auto',
-      cursor: isDragging === 'left' || isDragging === 'right' ? 'col-resize' : isDragging === 'terminal' ? 'row-resize' : 'default'
     }}>
+      {/* Small header strip for course classes: Class N of M · course title with Previous/Next buttons */}
+      {classTopic && (
+        <div style={{
+          height: '42px',
+          backgroundColor: theme.bgCardAlt,
+          borderBottom: `1px solid ${theme.borderContrast}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 16px',
+          flexShrink: 0,
+          zIndex: 20
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            {onHome && (
+              <>
+                <button
+                  type="button"
+                  onClick={onHome}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: theme.accentBlue,
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
+                >
+                  My courses
+                </button>
+                <span style={{ color: theme.textMuted }}>/</span>
+              </>
+            )}
+            <span style={{ color: theme.textMain, fontWeight: 700 }}>
+              Class {src.classSeq || 1}{src.classTotal ? ` of ${src.classTotal}` : ''} · {src.courseTitle || classTopic.title}
+            </span>
+          </div>
+
+          {(onOpenClass && (prevClass || nextClass)) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                disabled={!prevClass}
+                onClick={() => onOpenClass(prevClass.id)}
+                title={prevClass?.title}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: theme.bgCard,
+                  color: prevClass ? theme.textMain : theme.textMuted,
+                  border: `1px solid ${theme.borderContrast}`,
+                  borderRadius: '4px',
+                  padding: '5px 12px',
+                  fontSize: '12px',
+                  cursor: prevClass ? 'pointer' : 'default',
+                  opacity: prevClass ? 1 : 0.4
+                }}
+              >
+                <ArrowLeft size={13} /> Previous class
+              </button>
+              <button
+                type="button"
+                disabled={!nextClass}
+                onClick={() => onOpenClass(nextClass.id)}
+                title={nextClass?.title}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: nextClass ? theme.accentGreen : theme.bgCard,
+                  color: nextClass ? theme.textOnBrand : theme.textMuted,
+                  border: nextClass ? 'none' : `1px solid ${theme.borderContrast}`,
+                  borderRadius: '4px',
+                  padding: '5px 12px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: nextClass ? 'pointer' : 'default',
+                  opacity: nextClass ? 1 : 0.4
+                }}
+              >
+                Next class <ArrowRight size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main 3-Panel High-Contrast Alignment */}
+      <div style={{ 
+        display: 'flex', 
+        flex: 1, 
+        minHeight: 0,
+        width: '100%', 
+        backgroundColor: theme.bgApp, 
+        color: theme.textMain, 
+        overflow: 'hidden',
+        userSelect: isDragging ? 'none' : 'auto',
+        cursor: isDragging === 'left' || isDragging === 'right' ? 'col-resize' : isDragging === 'terminal' ? 'row-resize' : 'default'
+      }}>
       
       {/* 1. LEFT PANEL: INGESTION, MODE SWITCHER, CHAPTER TREE (RESIZABLE) */}
       <aside style={{ 
@@ -2550,46 +2881,52 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
       }}>
         {/* Materials, topic and set size now live in My courses (the one place materials go in) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Practice set</div>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: theme.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {classTopic ? 'Course Class' : 'Practice set'}
+          </div>
           <div style={{ fontSize: '13px', fontWeight: 600, color: theme.textMain, lineHeight: 1.35 }}>
-            {loading ? 'Writing your practice set…' : (curriculum.course_title || curriculum.domain || 'Python practice')}
+            {classTopic ? (classTopic.title || 'Class') : (loading ? 'Writing your practice set…' : (curriculum.course_title || curriculum.domain || 'Python practice'))}
           </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={onNewPracticeSet} disabled={loading}>
-              {loading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} New practice set
-            </button>
-            <button className="btn btn-quiet btn-sm" onClick={handleMakeHarder} disabled={escalating || loading} title="Make this set harder">
-              {escalating ? <Loader2 size={12} className="animate-spin" /> : <Flame size={12} color={theme.accentOrange} />}
-            </button>
-          </div>
+          {!classTopic && (
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={onNewPracticeSet} disabled={loading}>
+                {loading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} New practice set
+              </button>
+              <button className="btn btn-quiet btn-sm" onClick={handleMakeHarder} disabled={escalating || loading} title="Make this set harder">
+                {escalating ? <Loader2 size={12} className="animate-spin" /> : <Flame size={12} color={theme.accentOrange} />}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Chapters & Problem Explorer with Dynamic Chapter Generation */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: '10px', fontWeight: 700, color: theme.accentYellow }}>
-              Multi-Chapter Syllabus ({chapters.length} Chapters)
+              {classTopic ? `Class Exercises (${flatProblems.length})` : `Multi-Chapter Syllabus (${chapters.length} Chapters)`}
             </div>
-            <button
-              onClick={() => setShowAddChapterModal(prev => !prev)}
-              disabled={isGeneratingChapter}
-              title="Generate a new chapter to expand this curriculum"
-              style={{
-                backgroundColor: showAddChapterModal ? theme.accentGreen : theme.bgCardAlt,
-                color: showAddChapterModal ? theme.textOnBrand : theme.accentGreen,
-                border: `1px solid ${theme.accentGreen}`,
-                borderRadius: '3px',
-                padding: '2px 7px',
-                fontSize: '10px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}
-            >
-              <Plus size={11} /> Chapter
-            </button>
+            {!classTopic && (
+              <button
+                onClick={() => setShowAddChapterModal(prev => !prev)}
+                disabled={isGeneratingChapter}
+                title="Generate a new chapter to expand this curriculum"
+                style={{
+                  backgroundColor: showAddChapterModal ? theme.accentGreen : theme.bgCardAlt,
+                  color: showAddChapterModal ? theme.textOnBrand : theme.accentGreen,
+                  border: `1px solid ${theme.accentGreen}`,
+                  borderRadius: '3px',
+                  padding: '2px 7px',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <Plus size={11} /> Chapter
+              </button>
+            )}
           </div>
 
           {/* Expandable New Chapter Generator Panel */}
@@ -2699,67 +3036,69 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ch.title}</span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleGenerateProblem(ch.id, 'code_blank'); }}
-                      disabled={isGeneratingProblem}
-                      title={`Generate a Hard Blank Coding Task for ${ch.title}`}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        border: `1px solid ${theme.borderContrast}`,
-                        color: theme.accentGold,
-                        borderRadius: '3px',
-                        padding: '2px 5px',
-                        fontSize: '9px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '2px'
-                      }}
-                    >
-                      <Zap size={8} color={theme.accentGold} />
-                      <span>Blank</span>
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleGenerateProblem(ch.id, 'code_partial'); }}
-                      disabled={isGeneratingProblem}
-                      title={`Generate a Partially Coded Scaffold for ${ch.title}`}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        border: `1px solid ${theme.borderContrast}`,
-                        color: theme.accentGreen,
-                        borderRadius: '3px',
-                        padding: '2px 5px',
-                        fontSize: '9px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '2px'
-                      }}
-                    >
-                      <Plus size={8} color={theme.accentGreen} />
-                      <span>Partial</span>
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleGenerateProblem(ch.id, 'auto'); }}
-                      disabled={isGeneratingProblem}
-                      title={`Generate an Extra Practice Drill for ${ch.title}`}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        border: `1px solid ${theme.borderContrast}`,
-                        color: theme.accentBlue,
-                        borderRadius: '3px',
-                        padding: '2px 5px',
-                        fontSize: '9px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '2px'
-                      }}
-                    >
-                      <span>Drill</span>
-                    </button>
-                  </div>
+                  {!classTopic && (
+                    <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleGenerateProblem(ch.id, 'code_blank'); }}
+                        disabled={isGeneratingProblem}
+                        title={`Generate a Hard Blank Coding Task for ${ch.title}`}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          border: `1px solid ${theme.borderContrast}`,
+                          color: theme.accentGold,
+                          borderRadius: '3px',
+                          padding: '2px 5px',
+                          fontSize: '9px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                      >
+                        <Zap size={8} color={theme.accentGold} />
+                        <span>Blank</span>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleGenerateProblem(ch.id, 'code_partial'); }}
+                        disabled={isGeneratingProblem}
+                        title={`Generate a Partially Coded Scaffold for ${ch.title}`}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          border: `1px solid ${theme.borderContrast}`,
+                          color: theme.accentGreen,
+                          borderRadius: '3px',
+                          padding: '2px 5px',
+                          fontSize: '9px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                      >
+                        <Plus size={8} color={theme.accentGreen} />
+                        <span>Partial</span>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleGenerateProblem(ch.id, 'auto'); }}
+                        disabled={isGeneratingProblem}
+                        title={`Generate an Extra Practice Drill for ${ch.title}`}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          border: `1px solid ${theme.borderContrast}`,
+                          color: theme.accentBlue,
+                          borderRadius: '3px',
+                          padding: '2px 5px',
+                          fontSize: '9px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                      >
+                        <span>Drill</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {!isCollapsed && (
@@ -2975,115 +3314,117 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
                   </div>
 
                   {/* Professorial Lesson Action Bar */}
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                  {!classTopic && (
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'code_blank')}
+                        disabled={isGeneratingProblem}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          color: theme.accentGold,
+                          border: `1px solid ${theme.borderContrast}`,
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Zap size={12} color={theme.accentGold} />
+                        <span>+ Blank Code (Hard)</span>
+                      </button>
 
+                      <button
+                        onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'code_partial')}
+                        disabled={isGeneratingProblem}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          color: theme.accentGreen,
+                          border: `1px solid ${theme.borderContrast}`,
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Code2 size={12} color={theme.accentGreen} />
+                        <span>+ Partial Scaffold</span>
+                      </button>
 
-                    <button
-                      onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'code_blank')}
-                      disabled={isGeneratingProblem}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        color: theme.accentGold,
-                        border: `1px solid ${theme.borderContrast}`,
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <Zap size={12} color={theme.accentGold} />
-                      <span>+ Blank Code (Hard)</span>
-                    </button>
+                      <button
+                        onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'auto')}
+                        disabled={isGeneratingProblem}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          color: theme.accentBlue,
+                          border: `1px solid ${theme.borderContrast}`,
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        {isGeneratingProblem ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                        <span>+ Extra Drill</span>
+                      </button>
 
-                    <button
-                      onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'code_partial')}
-                      disabled={isGeneratingProblem}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        color: theme.accentGreen,
-                        border: `1px solid ${theme.borderContrast}`,
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <Code2 size={12} color={theme.accentGreen} />
-                      <span>+ Partial Scaffold</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleGenerateProblem(currentChapter?.id || 1, 'auto')}
-                      disabled={isGeneratingProblem}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        color: theme.accentBlue,
-                        border: `1px solid ${theme.borderContrast}`,
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      {isGeneratingProblem ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                      <span>+ Extra Drill</span>
-                    </button>
-
-                    <button
-                      onClick={() => setShowAddChapterModal(true)}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        color: theme.accentYellow,
-                        border: `1px solid ${theme.borderContrast}`,
-                        padding: '6px 12px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <Sparkles size={12} color={theme.accentYellow} />
-                      <span>Generate Next Chapter</span>
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => setShowAddChapterModal(true)}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          color: theme.accentYellow,
+                          border: `1px solid ${theme.borderContrast}`,
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Sparkles size={12} color={theme.accentYellow} />
+                        <span>Generate Next Chapter</span>
+                      </button>
+                    </div>
+                  )}
 
                   <VSCodeMarkdown content={currentChapter?.content_markdown || "# Notes"} />
 
-                  <div style={{ marginTop: '32px', paddingTop: '20px', borderTop: `1px solid ${theme.borderContrast}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <button
-                      onClick={() => setShowAddChapterModal(true)}
-                      style={{
-                        backgroundColor: theme.bgCardAlt,
-                        color: theme.accentYellow,
-                        border: `1px solid ${theme.borderContrast}`,
-                        padding: '10px 16px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                      }}
-                    >
-                      <Plus size={14} />
-                      <span>Generate Next Chapter in Syllabus</span>
-                    </button>
+                  <div style={{ marginTop: '32px', paddingTop: '20px', borderTop: `1px solid ${theme.borderContrast}`, display: 'flex', justifyContent: classTopic ? 'flex-end' : 'space-between', alignItems: 'center' }}>
+                    {!classTopic && (
+                      <button
+                        onClick={() => setShowAddChapterModal(true)}
+                        style={{
+                          backgroundColor: theme.bgCardAlt,
+                          color: theme.accentYellow,
+                          border: `1px solid ${theme.borderContrast}`,
+                          padding: '10px 16px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <Plus size={14} />
+                        <span>Generate Next Chapter in Syllabus</span>
+                      </button>
+                    )}
 
                     <button
                       onClick={() => {
@@ -3286,6 +3627,7 @@ const EduIDE = ({ onSwitchToPhysics, initialMode = "code", request = null, onNew
         </form>
       </section>
 
+      </div>
     </div>
   );
 };

@@ -5,6 +5,7 @@ lesson snapshots and quiz attempts. Uses only the standard library.
 Topic JSON files in content/topics stay the live format agents write to; every save is also
 recorded in `lessons` so courses keep their history even if a file is edited or removed.
 """
+import atexit
 import hashlib
 import hmac
 import json
@@ -21,6 +22,8 @@ from typing import Any, Dict, List, Optional
 CONTENT_ROOT = Path(os.environ.get("SCIEDU_CONTENT_DIR") or Path(__file__).parent / "content")
 DB_PATH = CONTENT_ROOT / "edu_studio.db"
 _local = threading.local()
+_open_connections = set()
+_conn_lock = threading.Lock()
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -104,13 +107,49 @@ JSON_COLUMNS = {"filenames", "concepts", "diagnostic", "answers", "mastery", "ob
 def conn() -> sqlite3.Connection:
     """One connection per thread (FastAPI runs sync handlers in a thread pool)."""
     c = getattr(_local, "conn", None)
+    if c is not None:
+        try:
+            c.total_changes
+        except Exception:
+            c = None
     if c is None:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         c = sqlite3.connect(DB_PATH, timeout=10)
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA foreign_keys = ON")
         _local.conn = c
+        with _conn_lock:
+            _open_connections.add(c)
     return c
+
+
+def close_conn():
+    """Closes the current thread's connection."""
+    c = getattr(_local, "conn", None)
+    if c is not None:
+        try:
+            c.close()
+        except Exception:
+            pass
+        with _conn_lock:
+            _open_connections.discard(c)
+        delattr(_local, "conn")
+
+
+def close_all():
+    """Closes all tracked SQLite connections across all threads."""
+    with _conn_lock:
+        for c in list(_open_connections):
+            try:
+                c.close()
+            except Exception:
+                pass
+        _open_connections.clear()
+    if hasattr(_local, "conn"):
+        delattr(_local, "conn")
+
+
+atexit.register(close_all)
 
 
 MIGRATIONS = [
