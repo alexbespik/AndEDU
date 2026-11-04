@@ -509,3 +509,42 @@ class LatexRepair(unittest.TestCase):
         self.assertEqual(server.repair_latex("\x0crac{1}{2} \tau \x07lpha \\right"), "\\frac{1}{2} \\tau \\alpha \\right")
         self.assertEqual(server.repair_latex("so \\(v = \\frac{d}{t}\\) and \\[x^2\\]"), "so $v = \\frac{d}{t}$ and $$x^2$$")
         self.assertEqual(server.repair_latex("plain\ttext\nlines"), "plain\ttext\nlines")  # real tabs/newlines untouched
+
+
+class AccountsSecurity(unittest.TestCase):
+    """With SCIEDU_AUTH=1 users must not touch each other's lessons, events, chats or the shared catalog."""
+    def setUp(self):
+        server.AUTH_REQUIRED = True
+        self.ctx = TestClient(server.app, base_url=LOCAL); self.c = self.ctx.__enter__()
+        def acct(name):
+            r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True}).json()
+            return {"Authorization": f"Bearer {r['token']}"}, r["user"]["id"]
+        import uuid
+        tag = uuid.uuid4().hex[:6]
+        self.a, self.a_id = acct(f"Sec Alice {tag}")
+        self.b, self.b_id = acct(f"Sec Bob {tag}")
+
+    def tearDown(self):
+        server.AUTH_REQUIRED = False
+        self.ctx.__exit__(None, None, None)
+
+    def test_cannot_write_someone_elses_lesson_or_the_library(self):
+        course = db.create_course(self.a_id, "Alice course", "g", "", [])
+        server.AUTH_REQUIRED = False
+        self.c.post("/api/topics", json=topic("alice-class", source={"courseId": course["id"]}))
+        self.c.post("/api/topics", json=topic("shared-lib"))
+        server.AUTH_REQUIRED = True
+        evil = topic("alice-class", source={"courseId": course["id"]}, quiz=[{"question": "q", "options": ["a", "b"], "correctAnswer": 1}])
+        self.assertEqual(self.c.post("/api/topics", json=evil, headers=self.b).status_code, 404)
+        self.assertEqual(self.c.post("/api/topics/alice-class/quiz", json={"items": []}, headers=self.b).status_code, 404)
+        self.assertEqual(self.c.post("/api/topics/shared-lib/flashcards", json={"items": []}, headers=self.b).status_code, 403)
+        self.assertEqual(self.c.post("/api/topics/alice-class/flashcards", json={"items": []}, headers=self.a).status_code, 200)
+
+    def test_events_chats_catalog_and_code_are_private_or_off(self):
+        cur = self.c.get("/api/agy/events", headers=self.b).json()["cursor"]
+        self.c.post("/api/ui/graph", json={"functions": ["x^2"]}, headers=self.a)
+        self.assertEqual(self.c.get(f"/api/agy/events?since={cur}", headers=self.b).json()["events"], [])
+        self.assertEqual(len(self.c.get(f"/api/agy/events?since={cur}", headers=self.a).json()["events"]), 1)
+        self.assertEqual(self.c.get("/api/agy/messages", headers=self.a).json(), [])
+        self.assertEqual(self.c.post("/api/advisor/catalog/import", json={"text": "ABCD 101. X. (3 Credits)"}, headers=self.a).status_code, 403)
+        self.assertEqual(self.c.post("/api/execute-code", json={"code": "print(1)"}, headers=self.a).status_code, 403)

@@ -40,8 +40,8 @@ Logged 2026-11-03.
 - Hosted: keys only in the server environment or a secret manager, never in the frontend or the repo.
 
 ### 5. Data files in the repository and in logs
-- `content/agy_messages.json` (assistant chat) and `content/quiz_results.json` (answers) are **tracked by git**:
-  untrack them and add them to `.gitignore`.
+- Done 2026-11-03: `content/agy_messages.json` (assistant chat) and `content/quiz_results.json` (answers) are
+  untracked and ignored. (They remain in earlier git history.)
 - `server.log` can contain prompts and errors with user content: rotate it, keep it short, and keep it out of backups.
 - SQLite (`content/edu_studio.db`) is unencrypted: on a server, use an encrypted disk, restricted file
   permissions and encrypted backups.
@@ -51,8 +51,8 @@ Logged 2026-11-03.
   the server already refuses it when `SCIEDU_AUTH=1`.
 - **MCP server** (`mcp_server.py`) is local-only and trusts its caller. Never expose it over a network; on an
   accounts server, it needs a per-user token (`ANDEDU_TOKEN`) and only that user's data.
-- `/api/execute-code` (assistant's server-side Python) must be disabled when `SCIEDU_AUTH=1`; exercises already
-  run in the browser.
+- Done: `/api/execute-code` and the assistant's server-side Python are refused when `SCIEDU_AUTH=1`.
+- Security review: see `AGY_TASK_security.md` (accounts-mode authorization, events, chats, catalog, uploads fixed).
 - **ElevenLabs** voice is off by default (`SCIEDU_ELEVENLABS=1`); if enabled, lesson text goes to ElevenLabs:
   disclose it.
 

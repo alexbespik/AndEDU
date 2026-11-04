@@ -1752,7 +1752,11 @@ def run_python_sandboxed(code: str, test_code: str = "") -> Dict[str, Any]:
 
 @app.post("/api/execute-code")
 def execute_code(payload: ExecuteCodePayload):
-    """Sync handler on purpose: FastAPI runs it in a worker thread so the event loop stays free."""
+    """Sync handler on purpose: FastAPI runs it in a worker thread so the event loop stays free.
+    Runs as the server's user, so it is refused with accounts on: exercises run in the browser (Pyodide)."""
+    if AUTH_REQUIRED:
+        raise HTTPException(status_code=403, detail="Server-side code execution is disabled on shared servers; code runs in your browser.")
+    rate_limit("ide")
     return run_python_sandboxed(payload.code, payload.test_code or "")
 
 @app.post("/api/generate-puzzle")
@@ -1767,6 +1771,9 @@ async def generate_puzzle(payload: GeneratePayload):
             "problems": curriculum.get("problems")
         }
     return curriculum
+
+MAX_UPLOAD_BYTES = 25_000_000
+MAX_UPLOAD_FILES = 12
 
 @app.post("/api/upload-multimodal")
 async def upload_multimodal(
@@ -1783,13 +1790,17 @@ async def upload_multimodal(
 
     if not target_files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
+    if len(target_files) > MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=413, detail=f"Upload at most {MAX_UPLOAD_FILES} files at a time.")
 
     extracted_parts = []
     processed_names = []
 
     for f in target_files:
         try:
-            file_bytes = await f.read()
+            file_bytes = await f.read(MAX_UPLOAD_BYTES + 1)  # never read more than the limit into memory
+            if len(file_bytes) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail=f"{f.filename} is larger than {MAX_UPLOAD_BYTES // 1_000_000} MB.")
             filename = f.filename or "uploaded_file"
             ext = filename.lower().split('.')[-1]
 
@@ -1817,6 +1828,8 @@ async def upload_multimodal(
 
             extracted_parts.append(f"=== DOCUMENT: {filename} ===\n{text_content}\n=== END DOCUMENT ===")
             processed_names.append(filename)
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"[ERROR parsing file {f.filename}]:", e)
 
@@ -2400,13 +2413,16 @@ def require_topic_id(topic_id: str) -> str:
 def topic_path(topic_id: str) -> Path:
     return TOPICS_DIR / f"{require_topic_id(topic_id)}.json"
 
-def emit_event(event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Appends a UI event with a strictly increasing sequence number (clients poll with ?since=<seq>)."""
+def emit_event(event_type: str, payload: Dict[str, Any], owner: Optional[str] = None) -> Dict[str, Any]:
+    """Appends a UI event with a strictly increasing sequence number (clients poll with ?since=<seq>).
+    With accounts on, an event belongs to the user who caused it (or `owner`) and only they receive it."""
     global _event_seq
+    if owner is None and CURRENT_USER.get():
+        owner = CURRENT_USER.get()["id"]
     with _events_lock:
         _event_seq += 1
         event = {"id": f"evt-{_event_seq}", "seq": _event_seq, "type": event_type,
-                 "payload": payload, "timestamp": time.time()}
+                 "payload": payload, "timestamp": time.time(), "owner": owner}
         ui_events_queue.append(event)
         del ui_events_queue[:-MAX_EVENTS]
     return event
@@ -2580,6 +2596,31 @@ class AgyPromptModel(BaseModel):
     topicId: Optional[str] = "rolling-without-slipping"
     courseId: Optional[str] = None
 
+ADMINS = {n.strip().lower() for n in os.environ.get("SCIEDU_ADMINS", "").split(",") if n.strip()}
+
+def is_admin() -> bool:
+    me = CURRENT_USER.get()
+    return not AUTH_REQUIRED or bool(me and (me.get("name") or "").lower() in ADMINS)
+
+def require_topic_write(topic_id: str, incoming: Optional[Dict[str, Any]] = None):
+    """Accounts mode: a course lesson may be changed only by its course's owner; the shared library and anything
+    that isn't a course lesson only by an admin (SCIEDU_ADMINS). Personal machine: anything goes."""
+    if not AUTH_REQUIRED:
+        return
+    me = CURRENT_USER.get()
+    path = topic_path(topic_id)
+    existing = load_json_file(path, None) if path.exists() else None
+    for t in (existing, incoming):
+        cid = ((t or {}).get("source") or {}).get("courseId")
+        if t is None:
+            continue
+        if cid:
+            course = db.get_course(cid)
+            if not (course and me and course["user_id"] == me["id"]):
+                raise HTTPException(status_code=404, detail="Topic not found")
+        elif not is_admin():
+            raise HTTPException(status_code=403, detail="Only an administrator can change shared library lessons.")
+
 def topic_visible(topic: Dict[str, Any]) -> bool:
     """With accounts on, a lesson generated for someone's course is visible only to that person;
     library topics (no course) stay shared."""
@@ -2622,7 +2663,9 @@ def get_topic(topic_id: str):
 
 @app.post("/api/topics")
 def create_or_update_topic(topic: TopicModel):
-    saved, warnings = save_topic(topic.model_dump())
+    data = topic.model_dump()
+    require_topic_write(require_topic_id(data.get("id") or slugify(data.get("title", ""))), data)
+    saved, warnings = save_topic(data)
     return {"status": "success", "id": saved["id"], "path": str(topic_path(saved["id"])), "warnings": warnings}
 
 @app.post("/api/topics/{topic_id}/opened")
@@ -2906,7 +2949,14 @@ def get_agy_events(since: int = -1):
     with _events_lock:
         cursor = _event_seq
         events = [] if since < 0 else [e for e in ui_events_queue if e["seq"] > since]
-    return {"events": events, "cursor": cursor, "timestamp": time.time()}
+    if AUTH_REQUIRED:
+        me = (CURRENT_USER.get() or {}).get("id")
+        # library-wide events (no owner) are shared; anything tied to a user goes only to that user
+        events = [e for e in events if e.get("owner") in (None, me) and not (e.get("owner") is None and e["type"] in PRIVATE_EVENT_TYPES)]
+    return {"events": [{k: v for k, v in e.items() if k != "owner"} for e in events], "cursor": cursor, "timestamp": time.time()}
+
+PRIVATE_EVENT_TYPES = {"COURSE_UPDATED", "CLASS_ADAPTED", "NEW_MESSAGE", "JOB_UPDATE", "SWITCH_TOPIC", "SWITCH_TAB",
+                       "SWITCH_STUDIO_MODE", "SET_SIM_CONFIG", "MATH_GRAPH", "MATH_PREVIEW", "QUIZ_SUBMITTED"}
 
 @app.post("/api/agy/events")
 def push_agy_event(event: AgyEventModel):
@@ -2914,6 +2964,8 @@ def push_agy_event(event: AgyEventModel):
 
 @app.get("/api/agy/messages")
 def get_messages():
+    if AUTH_REQUIRED:
+        return []  # one shared history file: never hand other users' chats out (per-user history is a TODO)
     return load_json_file(MESSAGES_FILE, [])
 
 # ---------------------------------------------------------------------------
@@ -2926,12 +2978,14 @@ _background_tasks: set = set()
 
 def _job_update(job: Dict[str, Any], **changes):
     job.update(changes, updated=time.time())
-    emit_event("JOB_UPDATE", {k: job[k] for k in ("id", "kind", "status", "step", "progress", "error", "result") if k in job})
+    emit_event("JOB_UPDATE", {k: job[k] for k in ("id", "kind", "status", "step", "progress", "error", "result") if k in job},
+               owner=job.get("owner"))
 
 def start_job(kind: str, label: str, work) -> Dict[str, Any]:
     """Schedules `work(job)` (an async function) and returns the job record immediately."""
     job = {"id": f"job-{int(time.time() * 1000)}-{len(JOBS)}", "kind": kind, "label": label,
-           "status": "queued", "step": "Queued", "progress": 0.0, "created": time.time()}
+           "status": "queued", "step": "Queued", "progress": 0.0, "created": time.time(),
+           "owner": (CURRENT_USER.get() or {}).get("id")}  # its progress events go to whoever started it
     JOBS[job["id"]] = job
     for old in sorted(JOBS, key=lambda k: JOBS[k]["created"])[:-MAX_JOBS]:
         JOBS.pop(old, None)
@@ -3164,6 +3218,7 @@ class GraphBody(BaseModel):
     params: Optional[Dict[str, float]] = None
 
 def _load_topic_or_404(topic_id: str) -> Dict[str, Any]:
+    require_topic_write(topic_id)
     path = topic_path(topic_id)
     topic = load_json_file(path, None) if path.exists() else None
     if not topic or not topic_visible(topic):
@@ -3279,6 +3334,8 @@ async def catalog_import(body: CatalogImport):
     """Rows as JSON, or catalog text (a PDF or page the student's browser could open); optionally the model reads
     text the parser can't."""
     rate_limit("upload")
+    if not is_admin():
+        raise HTTPException(status_code=403, detail="Only an administrator can change the shared catalog.")
     rows = list(body.rows or [])
     text = (body.text or "")[:400000]
     if text:
@@ -3560,7 +3617,7 @@ def public_course(course: Dict[str, Any]) -> Dict[str, Any]:
 def course_event(course_id: str):
     course = db.get_course(course_id)
     if course:
-        emit_event("COURSE_UPDATED", {"courseId": course_id, "status": course["status"]})
+        emit_event("COURSE_UPDATED", {"courseId": course_id, "status": course["status"]}, owner=course["user_id"])
 
 DIAGNOSTIC_PROMPT = """
 You are an expert assessment designer. From the student's study materials and goal, build a DIAGNOSTIC quiz
@@ -4634,6 +4691,10 @@ async def post_user_prompt(data: AgyPromptModel):
                     mode = args.get("mode", "physics")
                     emit_event("SWITCH_TOPIC", {"topicId": tid, "tab": tab, "mode": mode})
                     reply_content = f"Switched workspace view to **{tid or mode}** ({tab} tab)."
+                    break
+
+                elif call.name == "execute_python_code" and AUTH_REQUIRED:
+                    reply_content = "Running code on the server is disabled here; use the IDE, which runs Python in your browser."
                     break
 
                 elif call.name == "execute_python_code":
