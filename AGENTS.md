@@ -10,7 +10,8 @@ Seven tabs: My courses, Lab, IDE, Math, **History** (timeline, all flashcards), 
 pronunciation, IPA), **Advisor** (course record, catalog, readiness). Course `workspace` values: math | code | lab | history | language.
 Lesson activities (any subject): Flashcards (`flashcards`), Speed round (Kahoot-style, from `quiz`), Timeline (`timeline`,
 with an ordering challenge), practice type `match_pairs`. Course advisor data: `advisor.py` (catalog_courses,
-completed_courses); catalog.wm.edu blocks scripts, so catalogs are imported from text/PDF/JSON.
+completed_courses); catalog.wm.edu blocks scripts, so catalogs come from `scripts/import_wm_catalog_wayback.py`
+(Internet Archive snapshots, e.g. the 2023-24 catalog) or are imported from text/PDF/JSON.
 My courses (one place to add materials: learn, test prep, continue a course, coding practice) ·
 **Lab** (physics and chemistry library and lab-course classes; internal mode id `physics`) ·
 **IDE** (code, `EduStudioIDE.jsx`) · **Math** (`MathLab.jsx`: Class, Courses, Graph, Notebook, Practice, Sim kit).
