@@ -14,3 +14,5 @@ content/*.tmp
 content/topics/course-*.json
 content/notes/
 content/catalog_cache/
+content/agy_messages.json
+content/quiz_results.json

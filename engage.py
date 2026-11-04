@@ -78,6 +78,7 @@ SOURCES = {
     "quests_bonus": (15, "day"),
 }
 CLIENT_SOURCES = {"practice_correct", "math_correct", "ide_solved", "sim_explored", "lesson_read"}
+CLIENT_DAILY_CAP = 60  # per client-reported source per day
 CORRECT_SOURCES = ("quiz_correct", "practice_correct", "math_correct", "review_correct")
 GOALS = (10, 20, 30, 50)                    # casual, regular, serious, intense
 REVIEW_INTERVALS = (1, 3, 7, 14, 30)        # days until the next review, by Leitner box
@@ -217,6 +218,9 @@ def award(user_id: str, day: str, source: str, ref: str = "") -> Dict[str, Any]:
         dup = c.execute("SELECT COUNT(*) FROM xp_events WHERE user_id = ? AND source = ? AND day = ?", (user_id, source, day)).fetchone()[0] >= scope[1]
     if dup:
         return {"xp": 0}
+    if source in CLIENT_SOURCES and c.execute("SELECT COUNT(*) FROM xp_events WHERE user_id = ? AND source = ? AND day = ?",
+                                              (user_id, source, day)).fetchone()[0] >= CLIENT_DAILY_CAP:
+        return {"xp": 0}  # invented references can't farm XP
 
     p = prefs(user_id)
     before_today = _xp_today(user_id, day)
