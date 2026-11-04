@@ -44,7 +44,7 @@ function LessonTab({ topic }) {
             {topic.cheatSheet.map((item, i) => (
               <div key={i} className="formula">
                 <div style={{ minWidth: 0 }}>
-                  {(item.label || item.name) && <span className="lbl">{item.label || item.name}</span>}
+                  {(item.label || item.name) && <span className="lbl"><MdInline>{item.label || item.name}</MdInline></span>}
                   <div className="tex"><MdInline>{`$${item.formula}$`}</MdInline></div>
                 </div>
                 <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={() => copy(item.formula, i)}

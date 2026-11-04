@@ -796,3 +796,8 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .draw-results { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .draw-results li[data-met="true"] > span:first-child { color: var(--ok); font-weight: 700; }
 .draw-results li[data-met="false"] > span:first-child { color: var(--bad); font-weight: 700; }
+/* long button labels (tutor suggestions, quiz actions) wrap instead of widening the page on phones */
+.btn { max-width: 100%; }
+@media (max-width: 640px) {
+  .btn { white-space: normal; text-align: left; line-height: 1.25; min-height: var(--control-h); height: auto; padding-top: 6px; padding-bottom: 6px; }
+}

@@ -1,0 +1,131 @@
+{
+  "id": "ukrainian-greetings",
+  "title": "Ukrainian: Greetings and First Letters",
+  "category": "Ukrainian",
+  "difficulty": "Beginner",
+  "summary": "Say hello and introduce yourself in Ukrainian, and read the Cyrillic letters that look familiar but sound different.",
+  "simulationType": null,
+  "simulation": null,
+  "cheatSheet": [],
+  "mermaid": null,
+  "markdownContent": "# Ukrainian greetings\n\n| Ukrainian | Transliteration | English | IPA |\n| --- | --- | --- | --- |\n| Привіт! | Pryvit! | Hi! (informal) | /prɪˈʋit/ |\n| Добрий день! | Dobryi den! | Good afternoon / Hello | /ˈdɔbrɪj dɛnʲ/ |\n| Як справи? | Yak spravy? | How are you? | /jak ˈsprawɪ/ |\n| Мене звати… | Mene zvaty… | My name is… | /mɛˈnɛ ˈzʋatɪ/ |\n| Дякую! | Diakuiu! | Thank you! | /ˈdʲakuju/ |\n| До побачення! | Do pobachennia! | Goodbye! | /dɔ pɔˈbatʃɛnʲːa/ |\n\n## Letters that fool English readers\n- **В в** sounds like *v/w* (/ʋ/), not *b*.\n- **Н н** is *n*, **Р р** is a rolled *r*, **С с** is *s*.\n- **И и** is a short /ɪ/, while **І і** is /i/ as in *see*.\n- **Г г** is a soft /ɦ/ (like a voiced *h*); **Ґ ґ** is a hard *g*.\n- **Ь** (soft sign) has no sound: it softens the consonant before it, as in **день**.",
+  "quiz": [
+    {
+      "question": "How do you say 'Thank you' in Ukrainian?",
+      "options": [
+        "Привіт",
+        "Дякую",
+        "Добрий день",
+        "До побачення"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Дякую (diakuiu) means thank you.",
+      "id": "q1"
+    },
+    {
+      "question": "The Ukrainian letter В sounds like…",
+      "options": [
+        "English b",
+        "English v / w",
+        "English g",
+        "English h"
+      ],
+      "correctAnswer": 1,
+      "explanation": "В is /ʋ/, between English v and w.",
+      "id": "q2"
+    },
+    {
+      "question": "Which greeting is informal?",
+      "options": [
+        "Добрий день!",
+        "Привіт!",
+        "До побачення!",
+        "Дякую!"
+      ],
+      "correctAnswer": 1,
+      "explanation": "Привіт is used with friends.",
+      "id": "q3"
+    },
+    {
+      "question": "What does the soft sign Ь do?",
+      "options": [
+        "It is read as 'b'",
+        "It makes a long vowel",
+        "It softens the consonant before it",
+        "It marks a question"
+      ],
+      "correctAnswer": 2,
+      "explanation": "Ь has no sound of its own; it palatalizes the previous consonant.",
+      "id": "q4"
+    }
+  ],
+  "practice": [
+    {
+      "type": "match_pairs",
+      "prompt": "Match the Ukrainian to the English",
+      "pairs": [
+        [
+          "Привіт",
+          "Hi"
+        ],
+        [
+          "Дякую",
+          "Thank you"
+        ],
+        [
+          "Як справи?",
+          "How are you?"
+        ],
+        [
+          "До побачення",
+          "Goodbye"
+        ]
+      ]
+    },
+    {
+      "type": "fill_blank",
+      "prompt": "Мене ___ Оксана. (My name is Oksana.)",
+      "options": [
+        "звати",
+        "дякую",
+        "справи",
+        "день"
+      ],
+      "answer": "звати",
+      "explanation": "Мене звати… = literally 'they call me…'."
+    }
+  ],
+  "workspace": "language",
+  "flashcards": [
+    {
+      "front": "Привіт",
+      "back": "Hi (informal) /prɪˈʋit/",
+      "lang": "uk"
+    },
+    {
+      "front": "Добрий день",
+      "back": "Good afternoon / Hello /ˈdɔbrɪj dɛnʲ/",
+      "lang": "uk"
+    },
+    {
+      "front": "Як справи?",
+      "back": "How are you? /jak ˈsprawɪ/",
+      "lang": "uk"
+    },
+    {
+      "front": "Мене звати Оксана",
+      "back": "My name is Oksana",
+      "lang": "uk"
+    },
+    {
+      "front": "Дякую",
+      "back": "Thank you /ˈdʲakuju/",
+      "lang": "uk"
+    },
+    {
+      "front": "До побачення",
+      "back": "Goodbye /dɔ pɔˈbatʃɛnʲːa/",
+      "lang": "uk"
+    }
+  ]
+}

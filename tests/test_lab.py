@@ -502,3 +502,10 @@ class Drawing(unittest.TestCase):
         with TestClient(server.app, base_url=LOCAL) as c:
             r = c.post("/api/draw/check", json={"image": "hello", "prompt": "p", "criteria": ["x"]})
             self.assertEqual(r.status_code, 422)
+
+
+class LatexRepair(unittest.TestCase):
+    def test_eaten_backslashes_and_delimiters(self):
+        self.assertEqual(server.repair_latex("\x0crac{1}{2} \tau \x07lpha \\right"), "\\frac{1}{2} \\tau \\alpha \\right")
+        self.assertEqual(server.repair_latex("so \\(v = \\frac{d}{t}\\) and \\[x^2\\]"), "so $v = \\frac{d}{t}$ and $$x^2$$")
+        self.assertEqual(server.repair_latex("plain\ttext\nlines"), "plain\ttext\nlines")  # real tabs/newlines untouched
