@@ -62,10 +62,14 @@ Logged 2026-11-03.
 - W&M names and colors: confirm with W&M before presenting this as a W&M service.
 
 ## Course catalog
-- W&M's current catalog (catalog.wm.edu), the Open Course List (courselist.wm.edu) and the SWEM archive
-  (dspace.swem.wm.edu) all refuse automated downloads: challenge pages, 405 responses or connection resets, from
-  both the app's server and a regular Mac. No catalog was downloaded or bundled.
-- The Advisor works on whatever catalog a user imports. It records the catalog year and shows a "may be out of
-  date" notice whenever the catalog is older than the current academic year, or its year is unknown.
+- W&M's live catalog (catalog.wm.edu), the Open Course List (courselist.wm.edu) and the SWEM archive
+  (dspace.swem.wm.edu) refuse automated downloads. The app does not try to get around that protection.
+- **What works:** the Internet Archive (web.archive.org) keeps public snapshots of the catalog's course pages.
+  `scripts/import_wm_catalog_wayback.py` imports them politely (rate-limited, cached in `content/catalog_cache/`).
+  Best coverage: the **2023-2024 undergraduate catalog** (catoid 28, ~836 course pages archived). The 2025-26
+  catalog (catoid 34) has only a few archived pages so far.
+- The Advisor labels the data with its year and shows a "may be out of date" notice while the catalog is older
+  than the current academic year. Students must confirm courses in the live catalog before registering.
 - **Before deployment:** ask W&M (the Registrar or IT) for an official feed or export of the current catalog and
-  course list. Until then, the Advisor is a planning aid, not advice to rely on for registration.
+  course list. Modern Campus/Acalog catalogs have an API, with a key the institution issues, which would give
+  current data legitimately.

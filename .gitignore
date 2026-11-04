@@ -13,3 +13,4 @@ content/*.tmp
 # generated per student: course lessons and their notes stay out of the repo
 content/topics/course-*.json
 content/notes/
+content/catalog_cache/
