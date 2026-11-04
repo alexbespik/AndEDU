@@ -773,3 +773,26 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .assistant-fab svg { color: var(--gold); }
 @media (max-width: 640px) { .assistant-fab span { display: none; } .assistant-fab { padding: 0 var(--space-3); width: 48px; justify-content: center; } }
 .assistant-fab.fab-left { right: auto; left: var(--space-5); }
+
+/* ---------- Drawing board ---------- */
+.board { display: flex; flex-direction: column; border: 1px solid var(--rule-strong); border-radius: var(--radius); overflow: hidden; background: var(--surface); outline: none; }
+.board:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: var(--space-1) var(--space-2); background: var(--sunk); border-bottom: 1px solid var(--rule); }
+.board-tool { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.board-tool:hover:not(:disabled) { background: var(--surface); color: var(--ink); }
+.board-tool[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.board-tool:disabled { opacity: 0.4; cursor: default; }
+.board-dot { display: block; border-radius: 50%; background: currentColor; }
+.board-swatch { width: 24px; height: 24px; margin: 0 2px; border-radius: 50%; border: 2px solid var(--surface); background: var(--sw); box-shadow: 0 0 0 1px var(--rule-strong); cursor: pointer; }
+.board-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--gold); }
+.board-sep { width: 1px; height: 22px; margin: 0 var(--space-1); background: var(--rule-strong); }
+.board-surface { position: relative; }
+.board-surface svg { display: block; width: 100%; height: auto; cursor: crosshair; }
+.board-surface svg[data-tool="select"] { cursor: default; }
+.board-surface svg[data-tool="text"] { cursor: text; }
+.board-surface svg[data-tool="eraser"] { cursor: cell; }
+.board-text { position: absolute; min-width: 160px; padding: 2px 6px; border: 1px dashed var(--accent); border-radius: 4px; background: rgba(255, 255, 255, 0.95); font: 18px 'IBM Plex Sans', Arial, sans-serif; }
+.draw-criteria { margin: var(--space-1) 0 0; padding-left: 1.2em; }
+.draw-results { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.draw-results li[data-met="true"] > span:first-child { color: var(--ok); font-weight: 700; }
+.draw-results li[data-met="false"] > span:first-child { color: var(--bad); font-weight: 700; }

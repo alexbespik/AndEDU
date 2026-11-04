@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ArrowDown, RotateCcw, Play, Loader2 } from 'lucide-react';
 import { runPython } from '../lib/pyodide';
 import Md, { MdInline } from './Md';
 import { MatchPairs } from './Activities';
+import DrawingBoard from './DrawingBoard';
+import { api } from '../lib/api';
 
 const TYPE_LABEL = {
   fill_blank: 'Fill in the blank',
@@ -11,6 +13,7 @@ const TYPE_LABEL = {
   true_false: 'True or false',
   code: 'Write the code',
   match_pairs: 'Match the pairs',
+  draw: 'Draw it',
 };
 
 function seededShuffle(items, seed) {
@@ -219,6 +222,55 @@ function CodeExercise({ item }) {
   );
 }
 
+function DrawExercise({ item }) {
+  const board = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  useReportSolved(Boolean(result?.passed), item);
+  const check = async () => {
+    if (board.current?.isEmpty()) { setError('Draw something first.'); return; }
+    setBusy(true); setError(null);
+    try {
+      const image = await board.current.toPNG();
+      setResult(await api('/api/draw/check', { method: 'POST', body: { image, prompt: item.prompt, criteria: item.criteria, reference: item.reference || '' } }));
+      setDirty(false);
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  return (
+    <div className="stack-sm">
+      <details className="hint" open>
+        <summary style={{ cursor: 'pointer' }}>What the checker looks for</summary>
+        <ul className="draw-criteria">{item.criteria.map((c) => <li key={c}><MdInline>{c}</MdInline></li>)}</ul>
+      </details>
+      <DrawingBoard ref={board} background={item.background || 'grid'} onChange={() => setDirty(true)} />
+      <div className="btn-row">
+        <button type="button" className="btn btn-primary btn-sm" onClick={check} disabled={busy}>
+          {busy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : null} {busy ? 'Checking your drawing…' : result ? 'Check again' : 'Check with AI'}
+        </button>
+        <span className="hint">Your drawing is sent to the AI to be checked. Neatness doesn't count; content does.</span>
+      </div>
+      {error && <p className="notice notice-bad">{error}</p>}
+      {result && (
+        <div className={`feedback ${result.passed ? 'ok' : 'bad'}`} aria-live="polite">
+          <p style={{ fontWeight: 700, marginBottom: 4 }}>
+            {result.passed ? 'Looks right.' : 'Not yet.'} {Math.round(result.score * 100)}% of the criteria met{dirty ? ' (before your latest changes)' : ''}.
+          </p>
+          <ul className="draw-results">
+            {result.criteria.map((c, k) => (
+              <li key={k} data-met={c.met === true}><span aria-hidden="true">{c.met ? '✓' : '✗'}</span> <MdInline>{c.criterion}</MdInline>{c.comment ? <span className="hint"> · {c.comment}</span> : null}</li>
+            ))}
+          </ul>
+          {result.feedback && <p style={{ marginTop: 6 }}><MdInline>{result.feedback}</MdInline></p>}
+          {result.passed && item.explanation && <Md>{item.explanation}</Md>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MatchBody({ item }) {
   const [ok, setOk] = useState(false);
   useReportSolved(ok, item);
@@ -230,7 +282,7 @@ function SolvedReporter({ ok, item }) {
   return null;
 }
 
-const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise, match_pairs: MatchBody };
+const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise, match_pairs: MatchBody, draw: DrawExercise };
 
 export default function PracticeDeck({ items = [], onSolved }) {
   const usable = items.filter((p) => RENDER[p.type]);

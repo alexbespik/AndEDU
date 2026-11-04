@@ -112,6 +112,14 @@ TOOLS = [
        pairs={"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "[[left, right], ...]"},
        explanation=STR("shown after solving", optional=True)),
      lambda a: call("POST", f"/api/topics/{q(a['topic_id'])}/practice", {"items": [{"type": "match_pairs", "prompt": a["prompt"], "pairs": a["pairs"], "explanation": a.get("explanation", "")}]})),
+    ("add_drawing_assignment", "Add a drawing assignment (the student draws on an in-app whiteboard; the AI checks the drawing against "
+     "your criteria): e.g. a free-body diagram, circuit, graph sketch, cell, map or concept map.",
+     S(topic_id=STR("topic id"), prompt=STR("what to draw"),
+       criteria={"type": "array", "items": {"type": "string"}, "description": "3-5 checkable things the drawing must show"},
+       reference=STR("what a correct drawing contains (hidden from the student)", optional=True),
+       background=STR("grid | axes | blank", optional=True, enum=["grid", "axes", "blank"])),
+     lambda a: call("POST", f"/api/topics/{q(a['topic_id'])}/practice", {"items": [{"type": "draw", "prompt": a["prompt"], "criteria": a["criteria"],
+                                                                                   "reference": a.get("reference", ""), "background": a.get("background", "grid")}]})),
     ("start_speed_round", "Open a lesson's Kahoot-style speed round on the student's screen (timed questions, points for speed, streaks). "
      "Add questions first with add_quiz_questions; a round needs at least 3.",
      S(topic_id=STR("topic id")), lambda a: call("POST", "/api/agy/events", {"type": "SWITCH_TOPIC", "payload": {"topicId": a["topic_id"], "tab": "speed"}})),

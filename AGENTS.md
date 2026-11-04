@@ -9,7 +9,8 @@ frontend code.
 Seven tabs: My courses, Lab, IDE, Math, **History** (timeline, all flashcards), **Languages** (flashcards read aloud,
 pronunciation, IPA), **Advisor** (course record, catalog, readiness). Course `workspace` values: math | code | lab | history | language.
 Lesson activities (any subject): Flashcards (`flashcards`), Speed round (Kahoot-style, from `quiz`), Timeline (`timeline`,
-with an ordering challenge), practice type `match_pairs`. Course advisor data: `advisor.py` (catalog_courses,
+with an ordering challenge), practice types `match_pairs` and `draw` (a whiteboard in the app;
+`POST /api/draw/check` grades the drawing against its `criteria` with the vision model). Course advisor data: `advisor.py` (catalog_courses,
 completed_courses); catalog.wm.edu blocks scripts, so catalogs come from `scripts/import_wm_catalog_wayback.py`
 (Internet Archive snapshots, e.g. the 2023-24 catalog) or are imported from text/PDF/JSON.
 My courses (one place to add materials: learn, test prep, continue a course, coding practice) ·

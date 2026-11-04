@@ -159,7 +159,7 @@
     ],
     "series": [],
     "vectors": [],
-    "duration": 0,
+    "duration": 0.0,
     "overlays": {
       "fbd": true,
       "energy": false,
@@ -258,6 +258,22 @@
       "prompt": "The normal force on an object on a level floor is always equal to its weight.",
       "answer": false,
       "explanation": "Only if nothing else pushes vertically and it is not accelerating vertically; pushing down on it increases $N$."
+    },
+    {
+      "id": "p4",
+      "type": "draw",
+      "prompt": "A box rests on a level floor while you push it to the right and it does not move. Draw its free-body diagram.",
+      "explanation": "",
+      "concept": null,
+      "criteria": [
+        "The box is drawn as a single object",
+        "A downward arrow for the weight (W or mg)",
+        "An upward arrow for the normal force (N)",
+        "A rightward arrow for the push",
+        "A leftward arrow for static friction"
+      ],
+      "reference": "Box with W down, N up of equal length, push F right and static friction f left of equal length.",
+      "background": "grid"
     }
   ]
 }
