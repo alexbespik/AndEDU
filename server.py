@@ -2,6 +2,7 @@ import os
 import io
 import math
 import re
+import binascii
 import json
 import asyncio
 import threading
@@ -2379,7 +2380,7 @@ TOPIC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 MAX_EVENTS = 200
 MAX_MESSAGES = 500
 MAX_INBOX_BYTES = 16_000
-PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false", "code", "match_pairs"}
+PRACTICE_TYPES = {"fill_blank", "order_steps", "numeric", "true_false", "code", "match_pairs", "draw"}
 
 _file_lock = threading.Lock()
 _events_lock = threading.Lock()
@@ -3078,6 +3079,12 @@ def normalize_practice(items: Any) -> List[Dict[str, Any]]:
             tol = p.get("tolerance", 0.02)
             clean.append({**base, "answer": ans, "tolerance": float(tol) if isinstance(tol, (int, float)) else 0.02,
                           "unit": str(p.get("unit") or "")})
+        elif t == "draw":
+            # drawn on the in-app canvas and checked by the vision model against these criteria
+            criteria = [str(c)[:200] for c in (p.get("criteria") or []) if str(c).strip()][:8]
+            if criteria:
+                clean.append({**base, "criteria": criteria, "reference": str(p.get("reference") or "")[:1500],
+                              "background": p.get("background") if p.get("background") in ("grid", "axes", "blank") else "grid"})
         elif t == "match_pairs":
             pairs = [[str(a)[:160], str(b)[:160]] for a, b in (pp for pp in (p.get("pairs") or []) if isinstance(pp, (list, tuple)) and len(pp) == 2)]
             if 3 <= len(pairs) <= 8 and len({a for a, _ in pairs}) == len(pairs) and len({b for _, b in pairs}) == len(pairs):
@@ -3317,6 +3324,66 @@ def advisor_readiness_course(user_id: str, body: ReadinessRequest):
     return {"course": public_course(db.get_course(course["id"])), "job": job}
 
 
+class DrawingCheck(BaseModel):
+    image: str                    # data:image/png;base64,... from the canvas
+    prompt: str
+    criteria: List[str]
+    reference: Optional[str] = ""  # what a correct drawing contains (never shown to the student)
+    topicId: Optional[str] = ""
+
+DRAW_CHECK_PROMPT = """
+You are grading a student's hand-made drawing for this assignment:
+{prompt}
+
+Grade it against each criterion. Be fair to rough sketches: judge content and correctness, not neatness.
+Criteria:
+{criteria}
+{reference}
+Return JSON only:
+{{"criteria": [{{"criterion": "<copied>", "met": true|false, "comment": "one sentence: what you see"}}],
+  "score": 0.0-1.0, "feedback": "2-3 sentences to the student: what is right, then the most important fix as a question (Socratic, no full answer)",
+  "describe": "one sentence describing what the drawing shows"}}
+If the drawing is empty or unrelated, every criterion is false and say so kindly.
+"""
+
+@app.post("/api/draw/check")
+async def check_drawing(body: DrawingCheck):
+    """A drawing assignment, checked by the vision model criterion by criterion."""
+    rate_limit("class")
+    m = re.match(r"^data:image/(png|jpeg|webp);base64,(.+)$", body.image or "", re.S)
+    if not m:
+        raise HTTPException(status_code=422, detail="Send the drawing as a PNG data URL.")
+    try:
+        raw = base64.b64decode(m.group(2), validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=422, detail="The drawing could not be read.")
+    if len(raw) > 4_000_000:
+        raise HTTPException(status_code=413, detail="The drawing is too large.")
+    criteria = [str(c)[:200] for c in body.criteria if str(c).strip()][:8]
+    if not criteria:
+        raise HTTPException(status_code=422, detail="This assignment has no criteria to check.")
+    prompt = DRAW_CHECK_PROMPT.format(
+        prompt=body.prompt[:1500], criteria="\n".join(f"- {c}" for c in criteria),
+        reference=f"Reference (what a correct drawing contains; do not quote it): {body.reference[:1500]}\n" if body.reference else "")
+    part = types.Part.from_bytes(data=raw, mime_type=f"image/{m.group(1)}")
+    response = await acall_gemini(contents=[part, prompt], role="lesson",
+                                  config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2))
+    try:
+        data = _parse_json_reply(response.text)
+    except Exception:
+        data = None
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        data = data[0] if "criteria" in data[0] or "score" in data[0] else {"criteria": data}
+    if not isinstance(data, dict):
+        print("[draw check] unusable reply:", (response.text or "")[:400])
+        raise HTTPException(status_code=502, detail="The checker returned nothing usable. Try again.")
+    rows = [c for c in (data.get("criteria") or []) if isinstance(c, dict)]
+    met = sum(1 for c in rows if c.get("met") is True)
+    score = round(met / len(criteria), 3) if rows else 0.0   # computed from the criteria, not the model's own number
+    return {"score": score, "criteria": rows[:len(criteria)], "feedback": str(data.get("feedback") or "")[:800],
+            "describe": str(data.get("describe") or "")[:300], "passed": score >= 0.75}
+
+
 class SimulationRequest(BaseModel):
     topicId: str
     focus: Optional[str] = ""
@@ -3547,6 +3614,9 @@ Return JSON only:
     {{"type": "true_false", "prompt": "a statement targeting a misconception", "answer": false, "explanation": "..."}}
   ]}}
 Write 5 quiz questions that check the objectives (vary the correctAnswer position) and 4-6 practice items using all four types.
+Where drawing shows understanding (free-body diagram, circuit, graph sketch, cell, molecule, map, concept map, timeline),
+add 1 practice item of type "draw": {{"type": "draw", "prompt": "what to draw", "criteria": ["3-5 checkable things the drawing
+must show"], "reference": "what a correct drawing contains (hidden from the student)", "background": "grid|axes|blank"}}.
 Also add "flashcards": 8-12 cards [{{"front": "term or question", "back": "definition or answer", "hint": "optional"}}] for spaced recall.{extras}
 If the course involves programming (Python, algorithms, data), add 1-2 items of type "code":
     {{"type": "code", "prompt": "what to implement", "starter": "def f(x):\\n    # TODO\\n    pass", "tests": "assert f(2) == 4\\nassert f(0) == 0", "solution": "def f(x):\\n    return x * 2", "explanation": "..."}}

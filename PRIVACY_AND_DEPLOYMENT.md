@@ -9,7 +9,7 @@ Logged 2026-11-03.
 ### 1. Gemini API: where student data goes
 - **What is sent to Google:** uploaded notes and slides, photos and PDFs (read by Gemini for OCR), course goals,
   generated lessons, tutor chats with their history, quiz context, and, through the Advisor, **transcript
-  screenshots and PDFs**.
+  screenshots and PDFs**, and **drawings** from drawing assignments (checked by the vision model).
 - **Free-tier risk:** on the free tier, Google may use prompts and responses to improve its products, and people
   may review them. The app runs on a free-tier key now. Student data must not go through it.
 - **Required:** move to a paid Gemini API project or Vertex AI with no-training terms and a data processing

@@ -490,3 +490,15 @@ class SeparateScores(unittest.TestCase):
             self.assertEqual((s["quizScore"], s["activityScore"]), (0.0, 0.75))  # (1.0 + 0.5) / 2
             self.assertEqual(r["activities"]["speed"]["points"], 3900)
             self.assertEqual(c.post(f"/api/activity/{user['id']}/result", json={"topicId": "x", "kind": "bogus", "correct": 1, "total": 1}).status_code, 422)
+
+
+class Drawing(unittest.TestCase):
+    def test_draw_items_need_criteria(self):
+        ok = server.normalize_practice([{"type": "draw", "prompt": "Draw the forces", "criteria": ["weight", "normal force"], "background": "axes"}])
+        self.assertEqual((len(ok), ok[0]["background"]), (1, "axes"))
+        self.assertEqual(server.normalize_practice([{"type": "draw", "prompt": "Draw", "criteria": []}]), [])
+
+    def test_check_rejects_non_images(self):
+        with TestClient(server.app, base_url=LOCAL) as c:
+            r = c.post("/api/draw/check", json={"image": "hello", "prompt": "p", "criteria": ["x"]})
+            self.assertEqual(r.status_code, 422)
