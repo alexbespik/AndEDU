@@ -11,6 +11,7 @@ import RewardLayer, { StreakChip } from './components/Rewards';
 import rollingTopic from '../content/topics/rolling-without-slipping.json';
 import lagrangianTopic from '../content/topics/lagrangian-mechanics.json';
 import billiardTopic from '../content/topics/billiard-ball-collisions.json';
+import { MessageSquare } from 'lucide-react';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
 
 // The IDE and the math workspace load on demand
@@ -284,6 +285,11 @@ export default function App() {
           courseId={mode === 'course' ? courseId : viewedTopic?.source?.courseId} />
       </div>
 
+      {!panelOpen && (
+        <button type="button" className={`assistant-fab${mode === 'code' || mode === 'class' ? ' fab-left' : ''}`} onClick={() => setPanelOpen(true)} aria-label={agyCli ? 'Ask AGY' : 'Open the assistant'}>
+          <MessageSquare size={20} aria-hidden="true" /><span>{agyCli ? 'Ask AGY' : 'Assistant'}</span>
+        </button>
+      )}
       <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />
       <div className="toast-region" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}

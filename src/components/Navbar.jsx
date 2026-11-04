@@ -1,6 +1,6 @@
 import React from 'react';
-import { GraduationCap, FlaskConical, Code2, Sigma, MessageSquare, LogOut, Menu, Landmark, Languages, Compass } from 'lucide-react';
-import ThemeSwitch from './ThemeSwitch';
+import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass } from 'lucide-react';
+import AccountMenu from './AccountMenu';
 
 const MODES = [
   { id: 'home', label: 'My courses', icon: GraduationCap },
@@ -36,21 +36,7 @@ export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut
 
       <div className="masthead-right">
         {streakChip}
-        <ThemeSwitch />
-        <span className="conn" data-state={online ? 'online' : 'offline'} role="status">
-          {online ? 'Connected' : 'Backend offline'}
-        </span>
-        <button type="button" className="btn btn-quiet btn-sm" aria-pressed={panelOpen} onClick={onTogglePanel}>
-          <MessageSquare size={15} aria-hidden="true" /> {panelOpen ? `Hide ${assistantName}` : assistantName === 'AGY' ? 'Ask AGY' : 'Assistant'}
-        </button>
-        {user && (
-          <>
-            <span className="conn">Signed in as {user.name}</span>
-            <button type="button" className="btn btn-quiet btn-sm" onClick={onSignOut}>
-              <LogOut size={15} aria-hidden="true" /> Sign out
-            </button>
-          </>
-        )}
+        <AccountMenu user={user} online={online} onSignOut={onSignOut} />
       </div>
     </header>
   );
