@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange } from 'lucide-react';
 import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
 import BilliardSim from '../simulations/BilliardSim';
 import SpecSim from '../simulations/SpecSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
-import { FlashcardDeck, SpeedRound, TimelineView } from './Activities';
-import { reportXp } from '../lib/engage';
+import { FlashcardDeck, SpeedRound, TimelineView, ScoreStrip } from './Activities';
+import { reportXp, reportActivity } from '../lib/engage';
 import MermaidViewer from './MermaidViewer';
 import Md, { MdInline } from './Md';
 import { api } from '../lib/api';
@@ -64,6 +64,8 @@ function LessonTab({ topic }) {
 
 export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse, onHome, prevClass, nextClass, onOpenClass, embedded = false }) {
   const [tutorFocus, setTutorFocus] = useState(null);
+  const solvedRef = useRef(new Set());  // practice items solved in this visit (for the practice & games score)
+  useEffect(() => { solvedRef.current = new Set(); }, [topic?.id]);
 
   // Opening a course class tells the server, so adaptation never rewrites a lesson you're reading.
   useEffect(() => {
@@ -125,6 +127,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
         </div>
         {topic.summary && <p className="summary"><MdInline>{topic.summary}</MdInline></p>}
         <MoreMenu key={topic.id} topic={topic} courseTitle={course?.title || src.courseTitle} />
+        <ScoreStrip topicId={topic.id} userId={userId} />
         <div className="tabs" role="tablist" aria-label="Topic sections">
           {tabs.map(({ id, label, icon: Icon, count, note }) => (
             <button key={id} type="button" role="tab" id={`tab-${id}`} aria-selected={tab === id} aria-controls={`panel-${id}`}
@@ -148,7 +151,11 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
         {tab === 'cards' && <FlashcardDeck key={topic.id} cards={topic.flashcards} topicId={topic.id} />}
         {tab === 'speed' && <SpeedRound key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId} />}
         {tab === 'timeline' && <TimelineView key={topic.id} events={topic.timeline} topicId={topic.id} />}
-        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} onSolved={(item) => reportXp('practice_correct', `${topic.id}:${item.id}`)} />}
+        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} onSolved={(item) => {
+          reportXp('practice_correct', `${topic.id}:${item.id}`);
+          solvedRef.current.add(item.id);
+          reportActivity(topic.id, 'practice', solvedRef.current.size, (topic.practice || []).length);
+        }} />}
       </div>
     </div>
   );

@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, Volume2, Check, X, Zap, Trophy, Timer, ArrowUp, ArrowDown, Shuffle } from 'lucide-react';
 import Md, { MdInline } from './Md';
-import { api } from '../lib/api';
-import { emitRewards, reportXp } from '../lib/engage';
+import { reportActivity, reportXp } from '../lib/engage';
 import { answerIndex } from './QuizEngine';
 
 const store = {
@@ -27,6 +26,7 @@ export function FlashcardDeck({ cards = [], topicId }) {
   const [known, setKnown] = useState(0);
   const [misses, setMisses] = useState(0);
   const card = pile[0];
+  useEffect(() => { if (!card && cards.length) reportActivity(topicId, 'flashcards', cards.length, cards.length + misses); }, [card]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const answer = (gotIt) => {
     setFlipped(false);
@@ -121,14 +121,16 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
     const pts = ok ? Math.round(1000 * (1 - Math.min(t, SECONDS) / SECONDS / 2)) + Math.min(streak, 5) * 100 : 0;
     setPick(choice); setGain(pts); setScore((s) => s + pts); setStreak((s) => (ok ? s + 1 : 0)); setRight((r) => r + (ok ? 1 : 0));
     setPhase('reveal');
-    if (choice !== null && userId) {
-      api('/api/quiz/submit', { method: 'POST', body: { userId, topicId, questionId: q.id ?? i, selected: choice, isCorrect: ok } })
-        .then((r) => emitRewards(r?.rewards)).catch(() => {});
-    }
+    // games never change the class quiz score: XP here, and the round's result goes to the practice & games score
+    if (ok) reportXp('practice_correct', `${topicId}:speed:${q.id ?? i}`);
   };
   const next = () => {
     if (i + 1 < qs.length) begin(i + 1);
-    else { setPhase('done'); if (score > store.get(bestKey, 0)) store.set(bestKey, score); }
+    else {
+      setPhase('done');
+      if (score > store.get(bestKey, 0)) store.set(bestKey, score);
+      reportActivity(topicId, 'speed', right, qs.length, score);
+    }
   };
 
   if (qs.length < 3) return <div className="panel"><p>A speed round needs at least 3 quiz questions.</p></div>;
@@ -138,6 +140,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
         <Zap size={36} className="trophy" aria-hidden="true" />
         <h2>Speed round</h2>
         <p className="hint">{qs.length} questions · {SECONDS} seconds each · faster answers score more · streaks add bonus points.</p>
+        <p className="hint">Counts toward your practice &amp; games score, not your quiz score.</p>
         {store.get(bestKey, 0) > 0 && <p>Your best: <b className="num">{store.get(bestKey, 0)}</b></p>}
         <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); begin(0); }}>Start</button></div>
       </div>
@@ -230,7 +233,12 @@ export function TimelineView({ events = [], topicId }) {
             ))}
           </ol>
           <div className="btn-row">
-            {!checked ? <button type="button" className="btn btn-primary" onClick={() => { setChecked(true); if (order.every((e, k) => k === 0 || order[k - 1].year <= e.year)) reportXp('practice_correct', `${topicId}:timeline`); }}>Check order</button>
+            {!checked ? <button type="button" className="btn btn-primary" onClick={() => {
+              setChecked(true);
+              const inPlace = order.filter((e, k) => k === 0 || order[k - 1].year <= e.year).length;
+              reportActivity(topicId, 'timeline', inPlace, order.length);
+              if (inPlace === order.length) reportXp('practice_correct', `${topicId}:timeline`);
+            }}>Check order</button>
               : <button type="button" className="btn btn-quiet" onClick={() => { setMode('view'); setTimeout(() => setMode('challenge'), 0); }}><RotateCcw size={14} /> New set</button>}
             {checked && <span className={correct ? 'speed-gain' : 'hint'}>{correct ? 'All in order.' : 'Some events are out of order: the red ones.'}</span>}
           </div>
@@ -273,6 +281,44 @@ export function MatchPairs({ item, onSolved }) {
         </div>
       </div>
       {done && <div className="feedback ok"><p style={{ fontWeight: 700 }}>All matched.</p>{item.explanation && <Md>{item.explanation}</Md>}</div>}
+    </div>
+  );
+}
+
+const KIND_LABEL = { speed: 'Speed round', flashcards: 'Flashcards', timeline: 'Timeline', practice: 'Practice' };
+
+/** Quiz score (counts for the class) and the separate practice & games score, side by side. */
+export function ScoreStrip({ topicId, userId }) {
+  const [s, setS] = useState(null);
+  useEffect(() => {
+    if (!userId || !topicId) return undefined;
+    let live = true;
+    import('../lib/api').then(({ api }) => api(`/api/activity/${userId}/topic/${encodeURIComponent(topicId)}`)).then((d) => live && setS(d)).catch(() => {});
+    const on = (e) => { if (e.detail?.topicId === topicId) setS(e.detail); };
+    window.addEventListener('andedu:activity', on);
+    return () => { live = false; window.removeEventListener('andedu:activity', on); };
+  }, [topicId, userId]);
+  if (!s || (s.quizScore === null && s.activityScore === null && !s.quizCounts)) return null;
+  const pct = (v) => (v === null || v === undefined ? '–' : `${Math.round(v * 100)}%`);
+  return (
+    <div className="score-strip" role="group" aria-label="Scores">
+      {s.quizCounts && (
+        <div className="score-box">
+          <span className="score-val num">{pct(s.quizScore)}</span>
+          <span className="hint">Quiz score · counts toward this class and how the next class adapts</span>
+        </div>
+      )}
+      <div className="score-box score-box-alt">
+        <span className="score-val num">{pct(s.activityScore)}</span>
+        <span className="hint">Practice &amp; games · separate, never changes your quiz score</span>
+        {Object.keys(s.activities || {}).length > 0 && (
+          <span className="score-kinds">
+            {Object.entries(s.activities).map(([k, v]) => (
+              <span key={k} className="chip">{KIND_LABEL[k] || k} {pct(v.best)}{k === 'speed' && v.points ? ` · ${v.points} pts` : ''}</span>
+            ))}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

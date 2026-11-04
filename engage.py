@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS freeze_days (
     day     TEXT NOT NULL,
     PRIMARY KEY (user_id, day)
 );
+CREATE TABLE IF NOT EXISTS activity_results (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    topic_id   TEXT NOT NULL,
+    kind       TEXT NOT NULL,              -- speed | flashcards | timeline | practice
+    correct    INTEGER NOT NULL,
+    total      INTEGER NOT NULL,
+    points     INTEGER NOT NULL DEFAULT 0, -- speed-round points
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS activity_user_topic ON activity_results (user_id, topic_id);
 CREATE TABLE IF NOT EXISTS review_items (
     user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     topic_id    TEXT NOT NULL,
@@ -381,3 +392,30 @@ def progress(user_id: str, day: str) -> Dict[str, Any]:
         "reviewDue": due_count(user_id, day), "nextReview": next_due(user_id),
         "continue": continue_target(user_id), "focusMode": bool(p["focus_mode"]),
     }
+
+
+# ---------------------------------------------------------------- practice & games score (separate from the quiz)
+# Speed rounds, flashcards, timeline ordering and practice puzzles are recorded here and NEVER touch the class quiz
+# score (classes.score), which is what adaptation and course progress read.
+ACTIVITY_KINDS = ("speed", "flashcards", "timeline", "practice")
+
+
+def record_activity(user_id: str, topic_id: str, kind: str, correct: int, total: int, points: int = 0) -> Dict[str, Any]:
+    if kind not in ACTIVITY_KINDS or total <= 0:
+        raise ValueError("unknown activity or empty result")
+    correct = max(0, min(int(correct), int(total)))
+    db.conn().execute("INSERT INTO activity_results (user_id, topic_id, kind, correct, total, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (user_id, str(topic_id)[:120], kind, correct, int(total), max(0, int(points)), time.time()))
+    db.conn().commit()
+    return activity_summary(user_id, topic_id)
+
+
+def activity_summary(user_id: str, topic_id: str) -> Dict[str, Any]:
+    """Best result per activity and their average: the 'practice & games' score shown next to the quiz score."""
+    rows = db.conn().execute("""SELECT kind, MAX(CAST(correct AS REAL) / total) AS best, MAX(points) AS points, COUNT(*) AS plays
+                                FROM activity_results WHERE user_id = ? AND topic_id = ? GROUP BY kind""", (user_id, topic_id)).fetchall()
+    kinds = {r["kind"]: {"best": round(r["best"], 3), "points": r["points"], "plays": r["plays"]} for r in rows}
+    score = round(sum(k["best"] for k in kinds.values()) / len(kinds), 3) if kinds else None
+    klass = db.class_for_topic(topic_id)
+    return {"topicId": topic_id, "activityScore": score, "activities": kinds,
+            "quizScore": klass.get("score") if klass else None, "quizCounts": bool(klass)}

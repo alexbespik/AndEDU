@@ -14,3 +14,12 @@ export function reportXp(source, ref) {
     .then((r) => { emitRewards(r); return r; })
     .catch(() => null);
 }
+
+/** Practice & games result (speed round, flashcards, timeline, practice). Kept apart from the class quiz score. */
+export function reportActivity(topicId, kind, correct, total, points = 0) {
+  const user = loadProfile();
+  if (!user?.id || !topicId || !total) return Promise.resolve(null);
+  return api(`/api/activity/${user.id}/result`, { method: 'POST', body: { topicId, kind, correct, total, points } })
+    .then((r) => { window.dispatchEvent(new CustomEvent('andedu:activity', { detail: r })); return r; })
+    .catch(() => null);
+}
