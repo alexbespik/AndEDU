@@ -2453,10 +2453,34 @@ def normalize_quiz_item(q: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]
     item.update(id=q.get("id") or f"q{idx + 1}", question=question, options=options, correctAnswer=answer)
     return item
 
+_CONTROL_LATEX = {"\f": "\\f", "\b": "\\b", "\a": "\\a", "\v": "\\v"}
+
+def repair_latex(text: str) -> str:
+    """Undoes JSON escapes that ate LaTeX backslashes (\\frac -> form feed + 'rac', \\theta -> tab + 'heta') and converts
+    \\( \\) / \\[ \\] delimiters to the $ / $$ the renderer understands."""
+    if not isinstance(text, str) or not text:
+        return text
+    t = re.sub(r"[\f\b\a\v](?=[a-z])", lambda m: _CONTROL_LATEX[m.group(0)], text)
+    t = re.sub(r"\t(?=(?:heta|au|imes|ext|an(?![a-z])))", r"\\t", t)
+    t = re.sub(r"\r(?=(?:ight|ho\b))", r"\\r", t)
+    t = re.sub(r"(?m)^([ \t]*\$\$[^$\n]+)\$[|<>][ \t]*$", r"\1$$", t)  # model typo: $$x$| or $$x$< closing a display formula
+    t = re.sub(r"\\\[(.+?)\\\]", lambda m: f"$${m.group(1)}$$", t, flags=re.S)
+    t = re.sub(r"\\\((.+?)\\\)", lambda m: f"${m.group(1).strip()}$", t, flags=re.S)
+    return t
+
+def _repair_all(value: Any) -> Any:
+    if isinstance(value, str):
+        return repair_latex(value)
+    if isinstance(value, list):
+        return [_repair_all(v) for v in value]
+    if isinstance(value, dict):
+        return {k: (v if k in ("simulation", "source", "id") else _repair_all(v)) for k, v in value.items()}
+    return value
+
 def normalize_topic(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """Brings a topic from any author (UI, agy CLI, Gemini tools) to the schema the frontend reads."""
     warnings: List[str] = []
-    topic = dict(data)
+    topic = _repair_all(dict(data))
     topic["id"] = require_topic_id(topic.get("id") or slugify(topic.get("title", "")))
     topic.setdefault("difficulty", "Undergraduate")
     topic.setdefault("summary", "")
@@ -3645,7 +3669,7 @@ HISTORY CLASS: add "timeline": 6-12 events [{"year": 1789, "date": "14 July 1789
 quiz questions that ask about causes, consequences and sources, not only dates.''',
     "language": '''
 LANGUAGE/LINGUISTICS CLASS: flashcards carry "lang" (BCP-47 such as "es", "fr", "de", "ja") when the front is in the target
-language so the app can read it aloud; include IPA in the back where pronunciation matters. Add one "match_pairs" practice item
+language so the app can read it aloud (e.g. "uk" for Ukrainian); put IPA in the back, never on the front, where pronunciation matters. Add one "match_pairs" practice item
 (word to meaning, term to example, or sound to IPA symbol), and fill_blank items for grammar (conjugation, agreement, word order).''',
 }
 
@@ -3715,7 +3739,7 @@ _CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure
 _MATH_RE = re.compile(r"math|calculus|algebra|geometry|trigonometr|statistic|probabilit|\blimits?\b|epsilon|delta|derivative|integra|proof|number theory|"
                       r"differential equation|real analysis|topology|combinatoric|precalc|matri|vector space|sequence|series", re.I)
 
-_LANG_RE = re.compile(r"linguistic|language|spanish|french|german|italian|chinese|mandarin|japanese|korean|arabic|russian|latin|greek|"
+_LANG_RE = re.compile(r"linguistic|language|ukrainian|polish|spanish|french|german|italian|chinese|mandarin|japanese|korean|arabic|russian|latin|greek|"
                       r"grammar|phonetic|phonolog|morpholog|semantics|vocabulary|conjugat|pronunciation", re.I)
 _HIST_RE = re.compile(r"histor|civilization|\bwar\b|revolution|ancient|medieval|empire|dynasty|century|colonial|renaissance|reformation", re.I)
 

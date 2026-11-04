@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal, Headphones, Download, Square, Loader2 } from 'lucide-react';
 import { api, downloadFile } from '../lib/api';
+import { pickVoice } from '../lib/speech';
 
 /**
  * Secondary topic actions. The spoken lecture from &EDU lives here, out of the main flow.
@@ -11,6 +12,8 @@ export default function MoreMenu({ topic, courseTitle }) {
   const [lecture, setLecture] = useState('idle'); // idle | loading | playing
   const [error, setError] = useState(null);
   const audioRef = useRef(null);
+  const enVoice = useRef(null);  // a real English voice, not whatever the browser defaults to
+  useEffect(() => { pickVoice('en').then((v) => { enVoice.current = v; }); }, []);
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -33,6 +36,7 @@ export default function MoreMenu({ topic, courseTitle }) {
   const speak = (script) => {
     if (!window.speechSynthesis) throw new Error('This browser cannot read text aloud.');
     const u = new SpeechSynthesisUtterance(script);
+    if (enVoice.current) { u.voice = enVoice.current; u.lang = enVoice.current.lang; }
     u.rate = 0.96;
     u.onend = () => setLecture('idle');
     window.speechSynthesis.cancel();

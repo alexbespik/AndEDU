@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, Volume2, Check, X, Zap, Trophy, Timer, ArrowUp, ArrowDown, Shuffle } from 'lucide-react';
 import Md, { MdInline } from './Md';
 import { reportActivity, reportXp } from '../lib/engage';
+import { speak, noVoiceHelp } from '../lib/speech';
 import { answerIndex } from './QuizEngine';
 
 const store = {
@@ -10,14 +11,6 @@ const store = {
 };
 const shuffle = (a) => { const o = [...a]; for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; } return o; };
 
-function speak(text, lang) {
-  if (!window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(String(text).replace(/\$[^$]*\$/g, ''));
-  if (lang) u.lang = lang;
-  u.rate = 0.9;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
 
 /** Flashcards: flip, then "Again" (back into the pile) or "Got it". Cards you miss come back until you know them. */
 export function FlashcardDeck({ cards = [], topicId }) {
@@ -25,7 +18,9 @@ export function FlashcardDeck({ cards = [], topicId }) {
   const [flipped, setFlipped] = useState(false);
   const [known, setKnown] = useState(0);
   const [misses, setMisses] = useState(0);
+  const [voiceNote, setVoiceNote] = useState(null);
   const card = pile[0];
+  const listen = (text, lang) => speak(text, lang).then((r) => setVoiceNote(r.ok ? null : r.reason === 'no-voice' ? noVoiceHelp(r.language) : 'This browser cannot read text aloud.'));
   useEffect(() => { if (!card && cards.length) reportActivity(topicId, 'flashcards', cards.length, cards.length + misses); }, [card]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const answer = (gotIt) => {
@@ -70,9 +65,10 @@ export function FlashcardDeck({ cards = [], topicId }) {
         <div className="flash-text">{flipped ? <Md>{card.back}</Md> : <Md>{card.front}</Md>}</div>
         {!flipped && card.hint && <span className="hint">Hint: {card.hint}</span>}
       </button>
+      {voiceNote && <p className="notice notice-info">{voiceNote}</p>}
       <div className="btn-row">
         {card.lang && (
-          <button type="button" className="btn btn-quiet" onClick={() => speak(card.front, card.lang)}><Volume2 size={15} /> Listen</button>
+          <button type="button" className="btn btn-quiet" onClick={() => listen(card.front, card.lang)}><Volume2 size={15} /> Listen</button>
         )}
         {flipped ? (
           <>
