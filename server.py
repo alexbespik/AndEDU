@@ -6,7 +6,10 @@ import base64
 import subprocess
 import httpx
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import JSONResponse
+import asyncio
+import tempfile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -22,13 +25,30 @@ api_key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
 client = genai.Client(api_key=api_key)
 
 app = FastAPI(title="&edu Educational Studio Backend")
+# --- Security --------------------------------------------------------------------------------------------
+# Only the local frontend may call this API from a browser (any website could otherwise drive it), and the
+# server answers only to localhost names (blocks DNS rebinding). Override with comma-separated env vars.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "ANDEDU_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:4173,http://127.0.0.1:4173",
+).split(",") if o.strip()]
+ALLOWED_HOSTS = {h.strip().lower() for h in os.environ.get("ANDEDU_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()}
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
+@app.middleware("http")
+async def reject_foreign_hosts(request: Request, call_next):
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
+    if host not in ALLOWED_HOSTS:
+        return JSONResponse({"detail": "Forbidden host"}, status_code=403)
+    return await call_next(request)
 
 # Models in order of quota resilience & latency
 CANDIDATE_MODELS = [
@@ -1530,16 +1550,27 @@ async def make_harder(payload: MakeHarderPayload):
         mode=payload.mode
     ))
 
+def _child_env() -> Dict[str, str]:
+    """The student's code must never see API keys: pass only what Python needs to start."""
+    keep = ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "TEMP", "TMP")
+    return {k: v for k, v in os.environ.items() if k in keep}
+
 @app.post("/api/execute-code")
-async def execute_code(payload: ExecuteCodePayload):
+async def execute_code(payload: ExecuteCodePayload, request: Request):
     """
     Executes student Python code in an isolated subprocess with a 5-second timeout.
     Appends test assertions if provided and captures stdout / stderr / assertion failures.
     """
+    # Running code is only allowed for a browser on this same computer: the keyword list below is NOT a
+    # sandbox (it is trivially bypassed), so the real protection is that nobody else can reach this endpoint.
+    if (request.client.host if request.client else "") not in LOOPBACK:
+        raise HTTPException(status_code=403, detail="Code can only be run from this computer.")
     user_code = payload.code.strip()
     test_code = (payload.test_code or "").strip()
-    
-    # Block dangerous system calls
+    if len(user_code) + len(test_code) > 50_000:
+        raise HTTPException(status_code=413, detail="That code is too long to run here.")
+
+    # Block obviously dangerous calls (a speed bump for mistakes, not a security boundary)
     dangerous_keywords = ["import os", "import subprocess", "import shutil", "import sys", "__import__", "eval(", "exec("]
     for kw in dangerous_keywords:
         if kw in user_code:
@@ -1560,14 +1591,14 @@ async def execute_code(payload: ExecuteCodePayload):
     combined_script = "\n".join(script_parts)
 
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", combined_script],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        stdout = proc.stdout
-        stderr = proc.stderr
+        with tempfile.TemporaryDirectory(prefix="andedu-run-") as work_dir:
+            proc = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-I", "-c", combined_script],  # -I: ignore env vars and the user's site-packages
+                capture_output=True, text=True, timeout=5, cwd=work_dir, env=_child_env(),
+            )
+        stdout = proc.stdout[-20000:]
+        stderr = proc.stderr[-20000:]
         success = (proc.returncode == 0)
         tests_passed = success and ("[TEST_REPORT]" in stdout or not test_code)
 
@@ -1608,6 +1639,9 @@ async def generate_puzzle(payload: GeneratePayload):
         }
     return curriculum
 
+MAX_UPLOAD_BYTES = 25_000_000
+MAX_UPLOAD_FILES = 12
+
 @app.post("/api/upload-multimodal")
 async def upload_multimodal(
     files: Optional[List[UploadFile]] = File(None),
@@ -1622,13 +1656,17 @@ async def upload_multimodal(
 
     if not target_files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
+    if len(target_files) > MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=413, detail=f"Upload at most {MAX_UPLOAD_FILES} files at a time.")
 
     extracted_parts = []
     processed_names = []
 
     for f in target_files:
         try:
-            file_bytes = await f.read()
+            file_bytes = await f.read(MAX_UPLOAD_BYTES + 1)  # never read more than the limit into memory
+            if len(file_bytes) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail=f"{f.filename} is larger than {MAX_UPLOAD_BYTES // 1_000_000} MB.")
             filename = f.filename or "uploaded_file"
             ext = filename.lower().split('.')[-1]
 
@@ -1647,6 +1685,8 @@ async def upload_multimodal(
 
             extracted_parts.append(f"=== DOCUMENT: {filename} ===\n{text_content}\n=== END DOCUMENT ===")
             processed_names.append(filename)
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"[ERROR parsing file {f.filename}]:", e)
 
@@ -2187,4 +2227,10 @@ async def elevenlabs_voiceover(payload: VoiceoverPayload):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    # Localhost only: this server runs student code and spends your API keys, so it must not be reachable from
+    # the network. Set ANDEDU_HOST only behind real authentication; ANDEDU_DEV=1 enables auto-reload.
+    host = os.environ.get("ANDEDU_HOST", "127.0.0.1")
+    if host not in LOOPBACK:
+        print(f"WARNING: listening on {host}. Anyone who can reach it can run code on this machine.")
+    uvicorn.run("server:app", host=host, port=int(os.environ.get("ANDEDU_PORT", "8000")),
+                reload=os.environ.get("ANDEDU_DEV") == "1")
