@@ -4,8 +4,8 @@
 cd "$(dirname "$0")/.."
 
 echo "⚡ Starting SciEdu Studio Backend API on port 8090..."
-if [ -f "~/AndEDU/AndEdu/bin/python" ]; then
-    ~/AndEDU/AndEdu/bin/python server.py &
+if [ -x ".venv/bin/python" ]; then
+    .venv/bin/python server.py &
 else
     python3 server.py &
 fi

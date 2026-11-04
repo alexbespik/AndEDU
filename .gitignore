@@ -2,8 +2,9 @@ node_modules
 dist
 .env
 __pycache__
+.venv
 *.pyc
-*.log
+*.log*
 .DS_Store
 
 # runtime data (profiles, courses, attempts)
@@ -16,3 +17,12 @@ content/notes/
 content/catalog_cache/
 content/agy_messages.json
 content/quiz_results.json
+content/agy_drafts/
+
+# internal agent/model working files: task briefs, coordination notes, audits, generated design docs
+AGY_TASK_*.md
+COLLABORATION.md
+NEXT_STEPS.md
+SECURITY_FINDINGS*.md
+# personal agent links; the app's own agents (andedu-companion, page-guard) stay tracked
+.agents/agents/security
