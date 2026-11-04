@@ -2793,6 +2793,28 @@ def _review_question(topic_id: str, question_id: str) -> Optional[Dict[str, Any]
         q = quiz[int(question_id)]
     return {**q, "topicTitle": topic.get("title", "")} if q else None
 
+class ActivityResult(BaseModel):
+    topicId: str
+    kind: str
+    correct: int
+    total: int
+    points: Optional[int] = 0
+
+@app.post("/api/activity/{user_id}/result")
+def activity_result(user_id: str, body: ActivityResult):
+    """Practice and games keep their own score; the class quiz score is only changed by /api/quiz/submit."""
+    rate_limit("chat")
+    require_user(user_id)
+    try:
+        return engage.record_activity(user_id, body.topicId, body.kind, body.correct, body.total, body.points or 0)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+@app.get("/api/activity/{user_id}/topic/{topic_id}")
+def activity_scores(user_id: str, topic_id: str):
+    require_user(user_id)
+    return engage.activity_summary(user_id, topic_id)
+
 @app.get("/api/review/{user_id}/session")
 def review_session(user_id: str):
     """Up to 10 questions the student missed before, due today (spaced: 1, 3, 7, 14, 30 days)."""

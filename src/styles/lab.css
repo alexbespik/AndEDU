@@ -722,3 +722,10 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
   .masthead { gap: var(--space-2) var(--space-3); }
 }
 .timeline li { grid-template-columns: 170px minmax(0, 1fr); }
+
+.score-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--space-3); }
+.score-box { display: flex; flex-direction: column; gap: 4px; padding: var(--space-3) var(--space-4); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: var(--radius-sm); background: var(--surface); }
+.score-box-alt { border-left-color: var(--gold); }
+.score-val { font: 700 1.5rem/1 var(--font-display); color: var(--ink); }
+.score-kinds { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: 2px; }
+.score-kinds .chip { padding: 1px var(--space-2); font-size: 0.78rem; }

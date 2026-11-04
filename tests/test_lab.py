@@ -469,3 +469,24 @@ Limits, derivatives and integrals.
         self.assertEqual(len(mp), 1)
         self.assertEqual(server.guess_workspace("European History"), "history")
         self.assertEqual(server.guess_workspace("Introduction to Linguistics"), "language")
+
+
+class SeparateScores(unittest.TestCase):
+    def test_games_never_change_the_quiz_score(self):
+        with TestClient(server.app, base_url=LOCAL) as c:
+            user = db.get_or_create_user("Score Tester")
+            course = db.create_course(user["id"], "Course", "goal", "", [])
+            db.replace_classes(course["id"], [{"title": "One"}])
+            k = db.list_classes(course["id"])[0]
+            c.post("/api/topics", json=topic("score-one", quiz=[{"question": "q", "options": ["a", "b"], "correctAnswer": 0}],
+                                             source={"courseId": course["id"]}))
+            db.update_class(k["id"], status="ready", topic_id="score-one")
+            c.post("/api/quiz/submit", json={"userId": user["id"], "topicId": "score-one", "questionId": "q1", "selected": 1, "isCorrect": False})
+            before = db.list_classes(course["id"])[0]["score"]
+            r = c.post(f"/api/activity/{user['id']}/result", json={"topicId": "score-one", "kind": "speed", "correct": 4, "total": 4, "points": 3900}).json()
+            c.post(f"/api/activity/{user['id']}/result", json={"topicId": "score-one", "kind": "flashcards", "correct": 5, "total": 10})
+            self.assertEqual(db.list_classes(course["id"])[0]["score"], before)   # quiz score untouched
+            s = c.get(f"/api/activity/{user['id']}/topic/score-one").json()
+            self.assertEqual((s["quizScore"], s["activityScore"]), (0.0, 0.75))  # (1.0 + 0.5) / 2
+            self.assertEqual(r["activities"]["speed"]["points"], 3900)
+            self.assertEqual(c.post(f"/api/activity/{user['id']}/result", json={"topicId": "x", "kind": "bogus", "correct": 1, "total": 1}).status_code, 422)
