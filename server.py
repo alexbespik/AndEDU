@@ -2768,6 +2768,10 @@ def simulation_guide():
 def submit_quiz_answer(sub: QuizSubmission):
     if AUTH_REQUIRED:
         sub.userId = CURRENT_USER.get()["id"]
+        # an answer to someone else's class must not change their score or adapt their course
+        klass = db.class_for_topic(sub.topicId)
+        if klass:
+            require_course(klass["course_id"])
     record = sub.model_dump()
     record["timestamp"] = time.time()
     with _file_lock, open(RESULTS_FILE, "a", encoding="utf-8") as f:
@@ -3020,13 +3024,17 @@ def friendly_ai_error(e: Exception) -> str:
         return "Gemini quota exhausted for every fallback model. Try again in a minute."
     return text[:300]
 
+def _job_visible(job: Dict[str, Any]) -> bool:
+    """With accounts on, a job (its course plan, excerpts, results) is visible only to whoever started it."""
+    return not AUTH_REQUIRED or job.get("owner") == (CURRENT_USER.get() or {}).get("id", object())
+
 @app.get("/api/jobs")
 def list_jobs():
-    return {"jobs": sorted(JOBS.values(), key=lambda j: j["created"], reverse=True)[:30]}
+    return {"jobs": sorted((j for j in JOBS.values() if _job_visible(j)), key=lambda j: j["created"], reverse=True)[:30]}
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str):
-    if job_id not in JOBS:
+    if job_id not in JOBS or not _job_visible(JOBS[job_id]):
         raise HTTPException(status_code=404, detail="Job not found")
     return JOBS[job_id]
 
@@ -3474,6 +3482,7 @@ def queue_simulation_job(topic_id: str, focus: str = "", kind: str = "auto") -> 
     path = topic_path(topic_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Topic not found")
+    require_topic_write(topic_id)
 
     async def work(job):
         topic = load_json_file(path, {})
@@ -3495,12 +3504,17 @@ def generate_simulation(req: SimulationRequest):
 @app.post("/api/simulations/backfill")
 def backfill_simulations():
     """Queues a simulation for every topic that has neither a built-in nor a generated one."""
+    if not is_admin():
+        raise HTTPException(status_code=403, detail="Only an administrator can backfill simulations.")
     rate_limit("simulation")
     jobs = []
     for path in sorted(TOPICS_DIR.glob("*.json")):
         topic = load_json_file(path, {})
         if topic.get("id") and not topic.get("simulation") and topic.get("simulationType") not in BUILTIN_SIMULATIONS:
-            jobs.append(queue_simulation_job(topic["id"]))
+            try:
+                jobs.append(queue_simulation_job(topic["id"]))
+            except HTTPException:  # accounts mode: students' course lessons stay theirs
+                continue
     return {"queued": len(jobs), "jobs": jobs}
 
 BUILTIN_SIMULATIONS = {"rolling_without_slipping", "billiard_collisions"}
@@ -4633,6 +4647,11 @@ async def post_user_prompt(data: AgyPromptModel):
                 elif call.name == "create_or_update_lesson":
                     args["id"] = slugify(args.get("id") or args.get("title", ""), f"topic-{int(time.time())}")
                     args.setdefault("difficulty", "Undergraduate")
+                    try:
+                        require_topic_write(args["id"], args)
+                    except HTTPException:
+                        reply_content = f"I can't change `{args['id']}`: it belongs to the shared library or someone else's course."
+                        break
                     saved, warnings = save_topic(args, event_type="TOPIC_CREATED")
                     sim_job = queue_simulation_job(saved["id"]) if AUTHOR_SIMS and not saved.get("simulation") else None
                     emit_event("SWITCH_TOPIC", {"topicId": saved["id"], "tab": "theory", "mode": "physics"})
@@ -4649,8 +4668,9 @@ async def post_user_prompt(data: AgyPromptModel):
                     try:
                         queue_simulation_job(tid, args.get("focus", ""), args.get("kind") if args.get("kind") in ("math", "physics") else "auto")
                         reply_content = f"Building a new simulation for **{tid}** focused on: _{args.get('focus', 'the core concept')}_. It appears in the Simulation tab in about 20–40 seconds."
-                    except HTTPException:
-                        reply_content = f"I couldn't find a topic called `{tid}`. Ask me to create the lesson first."
+                    except HTTPException as e:
+                        reply_content = (f"I couldn't find a topic called `{tid}`. Ask me to create the lesson first." if e.status_code == 404
+                                         else f"I can't change `{tid}`: only an administrator can edit shared library lessons.")
                     break
 
                 elif call.name == "show_on_graph":
