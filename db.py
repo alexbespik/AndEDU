@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at  REAL NOT NULL,
     expires_at  REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS lessons_by_course ON lessons(course_id);
+CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions(user_id);
 """
 
 JSON_COLUMNS = {"filenames", "concepts", "diagnostic", "answers", "mastery", "objectives"}
@@ -362,6 +364,29 @@ def get_lesson(topic_id: str) -> Optional[Dict[str, Any]]:
     return json.loads(r["body"]) if r else None
 
 
+def answer_index(q: Any) -> Optional[int]:
+    """Same rule as the quiz player's answerIndex(): an integer (or digit string) index into the options, else None."""
+    if not isinstance(q, dict):
+        return None
+    v = q.get("correctAnswer", q.get("correct"))
+    if isinstance(v, str) and v.isdigit():
+        v = int(v)
+    return v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < len(q.get("options") or []) else None
+
+
+def _gradable(q: Any) -> bool:
+    return answer_index(q) is not None
+
+
+def reset_class_progress(class_id: str, topic_id: Optional[str]):
+    """A rewritten class starts over: its old quiz answers no longer match its questions."""
+    c = conn()
+    if topic_id:
+        c.execute("DELETE FROM quiz_attempts WHERE topic_id = ?", (topic_id,))
+    c.execute("UPDATE classes SET completed = 0, attempts = 0, score = NULL, updated_at = ? WHERE id = ?", (time.time(), class_id))
+    c.commit()
+
+
 def record_attempt(user_id: Optional[str], topic_id: str, question_id: str, selected: int, is_correct: bool):
     c = conn()
     c.execute("INSERT INTO quiz_attempts (user_id, topic_id, question_id, selected, is_correct, created_at) "
@@ -377,7 +402,7 @@ def record_attempt(user_id: Optional[str], topic_id: str, question_id: str, sele
               WHERE topic_id = ? AND (user_id IS ? OR user_id = ?) GROUP BY question_id) l ON a.id = l.last_id
     """, (topic_id, user_id, user_id)).fetchall()
     lesson = get_lesson(topic_id) or {}
-    total = max(len(lesson.get("quiz") or []), len(rows), 1)
+    total = max(sum(map(_gradable, lesson.get("quiz") or [])), len(rows), 1)
     score = sum(r["is_correct"] for r in rows) / total
     completed = int(len(rows) >= total)
     update_class(klass["id"], score=score, attempts=klass["attempts"] + 1, completed=completed)

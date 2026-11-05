@@ -1,0 +1,6 @@
+# CI lint for the Python backend: syntax errors and undefined names only (no style rules).
+# `ruff check .`
+extend-exclude = ["content", "dist", "node_modules", ".venv"]
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]

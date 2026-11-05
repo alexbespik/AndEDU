@@ -149,7 +149,50 @@ TOOLS = [
     ("create_readiness_course", "Build a readiness course for a target course: a diagnostic on its prerequisite knowledge, then bridge classes. Uses Gemini quota.",
      S(user_id=STR("profile id"), code=STR("course code")),
      lambda a: call("POST", f"/api/advisor/{q(a['user_id'])}/readiness-course", {"code": a["code"]})),
+    ("search_sections", "Search for course sections by department code, term or instructor name.",
+     S(query=STR("department code e.g. CSCI, term e.g. Fall2024, or instructor name"),
+       limit={"type": "integer", "description": "max results (default 20)", "optional": True}),
+     lambda a: call("GET", f"/api/advisor/sections?q={q(a['query'])}&limit={int(a.get('limit') or 20)}")),
+    ("get_prerequisite_tree", "Get the full prerequisite chain for a course (all direct and indirect prerequisites).",
+     S(code=STR("course code e.g. CSCI 303")),
+     lambda a: call("GET", f"/api/advisor/catalog/{q(a['code'])}")),
+    ("check_major_requirements", "Check which W&M major requirements a student has met and what's still needed, based on their completed courses.",
+     S(user_id=STR("profile id"), major=STR("major name or keyword e.g. computer science, biology, economics")),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/degree-audit")),
+    ("get_student_degree_audit", "Get the full degree audit for a student: COLL requirements, proficiencies, credits, gaps.",
+     S(user_id=STR("profile id")),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/degree-audit")),
+    ("get_student_readiness", "Check whether a student meets the prerequisites for a given course.",
+     S(user_id=STR("profile id"), code=STR("course code e.g. CSCI 303")),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}")),
+    ("list_completed_courses", "List all courses a student has recorded as completed, with grades.",
+     S(user_id=STR("profile id")),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/completed")),
+    ("add_completed_course", "Record that a student has completed a course (adds to their transcript for advising purposes).",
+     S(user_id=STR("profile id"), code=STR("course code e.g. CSCI 141"),
+       grade=STR("letter grade e.g. A, B+", optional=True)),
+     lambda a: call("POST", f"/api/advisor/{q(a['user_id'])}/completed",
+                    {"code": a["code"], "grade": a.get("grade")})),
+    ("ask_advisor", "Ask the AI academic advisor a question on behalf of a student. Returns a reply with course suggestions.",
+     S(user_id=STR("profile id"), message=STR("the student's question"),
+       history={
+           "type": "array",
+           "items": {"type": "object"},
+           "description": "[{role: 'user'|'advisor', content: str}] prior turns",
+           "optional": True
+       }),
+     lambda a: call("POST", f"/api/advisor/{q(a['user_id'])}/ask",
+                    {"message": a["message"], "history": a.get("history", [])})),
 ]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mcp_tools_history  # noqa: E402  (subject tool modules get the helpers above; see ARCHITECTURE.md §3.1.1)
+import mcp_tools_language  # noqa: E402
+import mcp_tools_language_extra  # noqa: E402
+import mcp_tools_general  # noqa: E402
+import mcp_tools_studio  # noqa: E402
+
+for _mod in (mcp_tools_language, mcp_tools_history, mcp_tools_language_extra, mcp_tools_general, mcp_tools_studio):
+    TOOLS += _mod.tools(call, q, S, STR, OBJ, ARR)
 BY_NAME = {name: (desc, schema, fn) for name, desc, schema, fn in TOOLS}
 
 
@@ -159,7 +202,7 @@ def handle(msg):
         return {"protocolVersion": msg.get("params", {}).get("protocolVersion", PROTOCOL),
                 "capabilities": {"tools": {}}, "serverInfo": {"name": "andedu", "version": "1.0"},
                 "instructions": "Tools for &.edu: author simulations (call simulation_guide first), extend lessons, "
-                                "adjust course classes and show results on the student's screen."}
+                                "build gamified language units and exercises, adjust course classes and show results on the student's screen."}
     if method == "tools/list":
         return {"tools": [{"name": n, "description": d, "inputSchema": s} for n, d, s, _ in TOOLS]}
     if method == "tools/call":

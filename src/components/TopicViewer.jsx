@@ -1,8 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange } from 'lucide-react';
-import RollingWithoutSlippingSim from '../simulations/RollingWithoutSlippingSim';
-import BilliardSim from '../simulations/BilliardSim';
-import SpecSim from '../simulations/SpecSim';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
 import { FlashcardDeck, SpeedRound, TimelineView, ScoreStrip } from './Activities';
@@ -13,16 +10,20 @@ import { api } from '../lib/api';
 import LessonTutor from './LessonTutor';
 import MoreMenu from './MoreMenu';
 
+// simulations load when the Simulation tab opens, not with every lesson
+const RollingWithoutSlippingSim = lazy(() => import('../simulations/RollingWithoutSlippingSim'));
+const BilliardSim = lazy(() => import('../simulations/BilliardSim'));
+const SpecSim = lazy(() => import('../simulations/SpecSim'));
+
 const BUILTIN = {
   rolling_without_slipping: () => <RollingWithoutSlippingSim />,
   billiard_collisions: (cfg) => <BilliardSim config={cfg} />,
 };
 
 function SimulationTab({ topic, liveSimConfig }) {
-  if (topic.simulation) {
-    return <SpecSim spec={topic.simulation} />;
-  }
-  return BUILTIN[topic.simulationType] ? BUILTIN[topic.simulationType](liveSimConfig) : null;
+  const sim = topic.simulation ? <SpecSim spec={topic.simulation} />
+    : BUILTIN[topic.simulationType] ? BUILTIN[topic.simulationType](liveSimConfig) : null;
+  return sim && <Suspense fallback={<p className="hint">Loading the simulation…</p>}>{sim}</Suspense>;
 }
 
 function LessonTab({ topic }) {
@@ -151,7 +152,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
         {tab === 'cards' && <FlashcardDeck key={topic.id} cards={topic.flashcards} topicId={topic.id} />}
         {tab === 'speed' && <SpeedRound key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId} />}
         {tab === 'timeline' && <TimelineView key={topic.id} events={topic.timeline} topicId={topic.id} />}
-        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} onSolved={(item) => {
+        {tab === 'practice' && <PracticeDeck key={topic.id} items={topic.practice} topicId={topic.id} onSolved={(item) => {
           reportXp('practice_correct', `${topic.id}:${item.id}`);
           solvedRef.current.add(item.id);
           reportActivity(topic.id, 'practice', solvedRef.current.size, (topic.practice || []).length);

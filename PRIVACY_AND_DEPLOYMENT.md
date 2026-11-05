@@ -51,7 +51,8 @@ Logged 2026-11-03.
   the server already refuses it when `SCIEDU_AUTH=1`.
 - **MCP server** (`mcp_server.py`) is local-only and trusts its caller. Never expose it over a network; on an
   accounts server, it needs a per-user token (`ANDEDU_TOKEN`) and only that user's data.
-- Done: `/api/execute-code` and the assistant's server-side Python are refused when `SCIEDU_AUTH=1`.
+- Done: `/api/execute-code` is refused when `SCIEDU_AUTH=1`. The assistant never runs code itself: it proposes it
+  (`CODE_PROPOSAL` event) and it runs only if the student clicks Run.
 - Security review: accounts-mode authorization, events, chats, catalog and uploads were reviewed and fixed (tests: `AccountsSecurity` in `tests/test_lab.py`).
 - **ElevenLabs** voice is off by default (`SCIEDU_ELEVENLABS=1`); if enabled, lesson text goes to ElevenLabs:
   disclose it.
@@ -59,6 +60,13 @@ Logged 2026-11-03.
 ### 7. Hosting basics
 - `SCIEDU_AUTH=1`, HTTPS, the real hostname in the allowed hosts and CORS lists, rate limits kept on
   (`SCIEDU_RATE_SCALE`), and a daily model budget (`SCIEDU_DAILY_MODEL_CALLS`) that matches the paid plan.
+- Admins: `SCIEDU_ADMINS` lists user ids (shown in the account menu), not names; the server logs a warning at
+  startup for an entry that matches no user. Sign-up never takes over an existing name, even a password-less one.
+- Sign-in and sign-up are limited to 10 per minute per client IP. Behind a proxy (Caddy), set uvicorn's
+  `FORWARDED_ALLOW_IPS` to the proxy's address so the limit sees the real client instead of the proxy.
+- HTTPS: `docker compose --profile tls up -d` runs Caddy in front of the app with automatic certificates
+  (copy `Caddyfile.example` to `Caddyfile`, set `SCIEDU_DOMAIN` and add it to `SCIEDU_ALLOWED_HOSTS`). The app
+  port itself is bound to 127.0.0.1, so without the tls profile no other machine can reach it.
 - W&M names and colors: confirm with W&M before presenting this as a W&M service.
 
 ## Course catalog

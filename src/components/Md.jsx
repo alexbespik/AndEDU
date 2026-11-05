@@ -22,7 +22,7 @@ const LATEX_NAMES = /^(frac|dfrac|sqrt|sin|cos|tan|log|ln|exp|omega|theta|alpha|
 
 /** A whole string that is just a formula (LaTeX commands, almost no ordinary words) and has no $ markers. */
 function bareFormula(t) {
-  if (t.includes('$') || !/\\[a-zA-Z]+/.test(t) || t.includes('\n') || t.length > 160) return false;
+  if (t.includes('$') || /\\[([]/.test(t) || !/\\[a-zA-Z]+/.test(t) || t.includes('\n') || t.length > 160) return false;  // \( \[ are converted later
   const words = (t.replace(/\\[a-zA-Z]+/g, ' ').match(/[A-Za-z]{4,}/g) || []).filter((w) => !LATEX_NAMES.test(w));
   return words.length === 0;
 }
@@ -46,10 +46,18 @@ export function normalizeMath(text) {
 }
 const displayMath = normalizeMath;
 
-export default function Md({ children, className }) {
+// Markdown + KaTeX parsing is the most expensive thing on most pages: memoized, so a re-render with the same
+// text (a background topics refresh, a timer tick) costs nothing.
+// Images only from this site or inline data: a model-written image URL could otherwise carry page data to another host.
+const localSrc = (src) => typeof src === 'string' && ((src.startsWith('/') && !src.startsWith('//')) || src.startsWith('data:image/'));
+const COMPONENTS = { img: ({ src, alt }) => (localSrc(src) ? <img src={src} alt={alt || ''} /> : null) };
+
+const INLINE_COMPONENTS = { ...COMPONENTS, p: ({ children: c }) => <>{c}</> };
+
+function Md({ children, className }) {
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE}>
+      <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={COMPONENTS}>
         {displayMath(String(children ?? ''))}
       </ReactMarkdown>
     </div>
@@ -57,14 +65,17 @@ export default function Md({ children, className }) {
 }
 
 /** Inline math/markdown without a wrapping block (for option labels and short strings). */
-export function MdInline({ children }) {
+function MdInlineView({ children }) {
   return (
     <ReactMarkdown
       remarkPlugins={REMARK}
       rehypePlugins={REHYPE}
-      components={{ p: ({ children: c }) => <>{c}</> }}
+      components={INLINE_COMPONENTS}
     >
       {normalizeMath(children)}
     </ReactMarkdown>
   );
 }
+
+export default React.memo(Md);
+export const MdInline = React.memo(MdInlineView);

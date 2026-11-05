@@ -19,6 +19,8 @@ os.environ["GEMINI_API_KEY"] = ""
 sys.path.insert(0, str(ROOT))
 
 import db  # noqa: E402
+db.CONTENT_ROOT = Path(TMP.name)
+db.DB_PATH = db.CONTENT_ROOT / "edu_studio.db"
 import engage  # noqa: E402
 import server  # noqa: E402
 
@@ -331,11 +333,17 @@ class Engagement(unittest.TestCase):
         u = self.user("Xp Tester")
         first = engage.award(u, "2026-11-01", "practice_correct", "t:p1")
         again = engage.award(u, "2026-11-01", "practice_correct", "t:p1")
-        self.assertEqual((first["xp"], again["xp"]), (8, 0))
+        self.assertEqual((first["xp"], again["xp"]), (5, 0))
         self.assertTrue(first["streakExtended"])
-        self.assertEqual(engage.award(u, "2026-11-02", "practice_correct", "t:p1")["xp"], 8)  # new day
-        self.assertEqual(engage.award(u, "2026-11-03", "ide_solved", "p")["xp"], 15)
+        self.assertEqual(engage.award(u, "2026-11-02", "practice_correct", "t:p1")["xp"], 5)  # new day
+        self.assertEqual(engage.award(u, "2026-11-03", "ide_solved", "p")["xp"], 20)
         self.assertEqual(engage.award(u, "2026-11-04", "ide_solved", "p")["xp"], 0)       # once ever
+        wrong_quiz = engage.award(u, "2026-11-05", "quiz_attempt", "t:q1")
+        self.assertEqual(wrong_quiz["xp"], 0)
+        self.assertFalse(wrong_quiz["streakExtended"])
+        wrong_rev = engage.award(u, "2026-11-05", "review_attempt", "t:r1")
+        self.assertEqual(wrong_rev["xp"], 0)
+        self.assertFalse(wrong_rev["streakExtended"])
         r = self.c.post(f"/api/engage/{u}/xp", json={"source": "quests_bonus", "ref": "x"})
         self.assertEqual(r.status_code, 422)                                                   # not client-reportable
 
@@ -366,7 +374,7 @@ class Engagement(unittest.TestCase):
         self.c.post("/api/topics", json=topic("review-topic", quiz=[{"id": "q1", "question": "2+2?", "options": ["3", "4"], "correctAnswer": 1}]))
         r = self.c.post("/api/quiz/submit", json={"userId": u, "topicId": "review-topic", "questionId": "q1", "selected": 0, "isCorrect": False},
                         headers={"X-Local-Day": engage.utc_day()}).json()
-        self.assertEqual(r["rewards"]["xp"], 2)
+        self.assertEqual(r["rewards"]["xp"], 0)
         tomorrow = engage._shift(engage.utc_day(), 1)
         self.assertEqual(self.c.get(f"/api/review/{u}/session").json()["questions"], [])     # not due today
         s = self.c.get(f"/api/review/{u}/session", headers={"X-Local-Day": tomorrow}).json()["questions"]
@@ -375,7 +383,7 @@ class Engagement(unittest.TestCase):
                         headers={"X-Local-Day": tomorrow}).json()
         self.assertTrue(a["correct"])
         self.assertEqual(a["nextReview"], engage._shift(tomorrow, 3))
-        self.assertEqual(a["rewards"]["xp"], 6)
+        self.assertEqual(a["rewards"]["xp"], 8)
 
     def test_forged_day_is_ignored(self):
         self.assertEqual(engage.clean_day("1999-01-01"), engage.utc_day())
@@ -463,6 +471,205 @@ Limits, derivatives and integrals.
         self.assertTrue(advisor.readiness(u, "csci241")["met"])  # 'or' prerequisites: one of the group is enough
         self.assertIn("CSCI 241", [c["code"] for c in advisor.recommend(u)])
 
+    def test_catalog_sections_and_api(self):
+        import advisor
+        db.init_db(); advisor.init()
+        sections = [
+            {"school": "wm", "term": "202620", "term_name": "Spring 2026", "crn": "23803",
+             "code": "CSCI 141", "section": "01", "title": "Modern Programming Fundamentls",
+             "instructor": "M. Zhang", "meets": "MWF 10-10:50a", "credits": "4"},
+            {"school": "wm", "term": "202620", "term_name": "Spring 2026", "crn": "23804",
+             "code": "CSCI 141", "section": "02", "title": "Modern Programming Fundamentls",
+             "instructor": "M. Zhang", "meets": "MWF 11-11:50a", "credits": "4"},
+        ]
+        n = advisor.upsert_sections(sections)
+        self.assertEqual(n, 2)
+        res = advisor.list_sections(code="CSCI 141")
+        self.assertGreaterEqual(len(res), 2)
+        self.assertEqual(res[0]["code"], "CSCI 141")
+        st = advisor.stats()
+        self.assertGreaterEqual(st["sections"], 2)
+
+        with TestClient(server.app, base_url=LOCAL) as c:
+            r = c.get("/api/advisor/catalog/CSCI 141/sections")
+            self.assertEqual(r.status_code, 200)
+            self.assertIn("sections", r.json())
+            r2 = c.get("/api/advisor/classes?term=202620")
+            self.assertEqual(r2.status_code, 200)
+            self.assertIn("sections", r2.json())
+            r3 = c.get("/api/advisor/sections?term=202620")
+            self.assertEqual(r3.status_code, 200)
+            self.assertIn("sections", r3.json())
+
+    def test_coll_numbering_rules(self):
+        import advisor
+        self.assertEqual(advisor.coll_by_number("HIST 100"), "COLL 100")
+        self.assertEqual(advisor.coll_by_number("AMST 150W"), "COLL 150")
+        self.assertEqual(advisor.coll_by_number("HIST S150"), "COLL 150")
+        self.assertEqual(advisor.coll_by_number("AMST s150"), "COLL 150")
+        self.assertIsNone(advisor.coll_by_number("COLL 100"))
+        self.assertIsNone(advisor.coll_by_number("COLL 150"))
+        self.assertIsNone(advisor.coll_by_number("HIST 200"))
+
+    def test_upsert_courses_prereqs_protection(self):
+        import advisor
+        db.init_db(); advisor.init()
+        code = "TEST 299"
+        initial = [{
+            "code": code,
+            "title": "Advanced Topics",
+            "credits": "3",
+            "description": "An advanced study course.",
+            "prereqs": "CSCI 141 and MATH 111",
+            "prereq_codes": ["CSCI 141", "MATH 111"],
+        }]
+        advisor.upsert_courses(initial, source="Catalog 2024")
+        c = advisor.get_course(code)
+        self.assertIsNotNone(c)
+        self.assertEqual(c["prereqs"], "CSCI 141 and MATH 111")
+
+        update = [{
+            "code": code,
+            "title": "Advanced Topics (Updated)",
+            "credits": "",
+            "description": "",
+            "prereqs": "",
+            "prereq_codes": [],
+        }]
+        advisor.upsert_courses(update, source="W&M PATH Ingest")
+        c2 = advisor.get_course(code)
+        self.assertEqual(c2["title"], "Advanced Topics (Updated)")
+        self.assertEqual(c2["credits"], "3")
+        self.assertEqual(c2["prereqs"], "CSCI 141 and MATH 111")
+        self.assertEqual(c2["description"], "An advanced study course.")
+
+    def test_prereq_cnf_and_readiness_logic(self):
+        import advisor
+        db.init_db(); advisor.init()
+        # 1. Direct CNF parsing checks
+        cnf1 = advisor.parse_prereq_cnf("CSCI 141 and (MATH 111 or MATH 131)", ["CSCI 141", "MATH 111", "MATH 131"])
+        self.assertEqual(cnf1, [["CSCI 141"], ["MATH 111", "MATH 131"]])
+
+        cnf2 = advisor.parse_prereq_cnf("CSCI 141; MATH 111; DATA 141", ["CSCI 141", "MATH 111", "DATA 141"])
+        self.assertEqual(cnf2, [["CSCI 141"], ["MATH 111"], ["DATA 141"]])
+
+        cnf3 = advisor.parse_prereq_cnf("MATH 111 or MATH 131", ["MATH 111", "MATH 131"])
+        self.assertEqual(cnf3, [["MATH 111", "MATH 131"]])
+
+        # Shorthand expansion
+        cnf_short = advisor.parse_prereq_cnf("MATH 111 or 131")
+        self.assertEqual(cnf_short, [["MATH 111", "MATH 131"]])
+        self.assertEqual(advisor.find_codes("CSCI 141 and MATH 111 or 131"), ["CSCI 141", "MATH 111", "MATH 131"])
+
+        # 2. Readiness with alternative prerequisites
+        courses = [
+            {"code": "CSCI 141", "title": "Intro CS", "credits": "4", "prereqs": "", "prereq_codes": []},
+            {"code": "MATH 111", "title": "Calc I", "credits": "4", "prereqs": "", "prereq_codes": []},
+            {"code": "MATH 131", "title": "Calc I Honors", "credits": "4", "prereqs": "", "prereq_codes": []},
+            {"code": "CSCI 241", "title": "Data Structures", "credits": "3",
+             "prereqs": "CSCI 141 and (MATH 111 or MATH 131)",
+             "prereq_codes": ["CSCI 141", "MATH 111", "MATH 131"]},
+            {"code": "CSCI 303", "title": "Algorithms", "credits": "3", "prereqs": "", "prereq_codes": []},
+        ]
+        advisor.upsert_courses(courses, "test_cnf")
+
+        u1 = db.get_or_create_user("CNF Tester 1")["id"]
+        # Intro course with empty prereqs -> met: True, status: 'none'
+        r_intro = advisor.readiness(u1, "CSCI 141")
+        self.assertTrue(r_intro["met"])
+        self.assertEqual(r_intro["status"], "none")
+
+        # Upper level (300+) with empty prereqs -> met: False, status: 'unknown'
+        r_upper = advisor.readiness(u1, "CSCI 303")
+        self.assertFalse(r_upper["met"])
+        self.assertEqual(r_upper["status"], "unknown")
+        self.assertEqual(r_upper["notes"], "Prerequisites not listed in current catalog data")
+
+        # Only MATH 111 taken -> CSCI 141 missing
+        advisor.add_completed(u1, [{"code": "MATH 111", "grade": "A"}], "test")
+        r1 = advisor.readiness(u1, "CSCI 241")
+        self.assertFalse(r1["met"])
+        self.assertEqual(r1["missing"], ["CSCI 141"])
+
+        u2 = db.get_or_create_user("CNF Tester 2")["id"]
+        # Only CSCI 141 taken -> MATH 111 or MATH 131 missing
+        advisor.add_completed(u2, [{"code": "CSCI 141", "grade": "B+"}], "test")
+        r2 = advisor.readiness(u2, "CSCI 241")
+        self.assertFalse(r2["met"])
+        self.assertEqual(r2["missing"], ["MATH 111 or MATH 131"])
+
+        # Complete MATH 131 (alternative) -> now met!
+        advisor.add_completed(u2, [{"code": "MATH 131", "grade": "A-"}], "test")
+        r2_after = advisor.readiness(u2, "CSCI 241")
+        self.assertTrue(r2_after["met"])
+        self.assertEqual(r2_after["missing"], [])
+
+    def test_degree_audit_coll_curriculum(self):
+        import advisor
+        db.init_db(); advisor.init()
+        courses = [
+            {"code": "COLL 100", "title": "Big Ideas", "credits": "4", "attributes": ["COLL 100"]},
+            {"code": "HIST 150", "title": "First-Year Seminar", "credits": "4", "attributes": ["COLL 150"]},
+            {"code": "PHIL 201", "title": "Ethics", "credits": "3", "attributes": ["COLL 200", "ALV"]},
+            {"code": "SOCL 205", "title": "Global Society", "credits": "3", "attributes": ["COLL 200", "CSI"]},
+            {"code": "BIOL 201", "title": "Ecology", "credits": "3", "attributes": ["COLL 200", "NQR"]},
+            {"code": "PSYC 202", "title": "Psychology", "credits": "3", "attributes": ["COLL 200", "CSI"]},
+            {"code": "ANTH 350", "title": "Global Peoples", "credits": "3", "attributes": ["COLL 300"]},
+            {"code": "CSCI 400", "title": "CS Capstone", "credits": "3", "attributes": ["COLL 400"]},
+            {"code": "MATH 111", "title": "Calculus I", "credits": "4", "attributes": ["MATH", "NQR"]},
+            {"code": "MUSC 101", "title": "Orchestra", "credits": "1", "attributes": ["ARTS", "ACTV"]},
+        ]
+        advisor.upsert_courses(courses, "test_audit")
+
+        u = db.get_or_create_user("COLL Audit Tester")["id"]
+        # Partial progress
+        advisor.add_completed(u, [
+            {"code": "COLL 100", "grade": "A"},
+            {"code": "HIST 150", "grade": "A-"},
+            {"code": "PHIL 201", "grade": "B+"},
+            {"code": "SOCL 205", "grade": "B"},
+            {"code": "BIOL 201", "grade": "A"},
+        ], "test")
+        audit_partial = advisor.degree_audit(u)
+        self.assertTrue(audit_partial["coll"]["coll100"]["met"])
+        self.assertTrue(audit_partial["coll"]["coll150"]["met"])
+        self.assertFalse(audit_partial["coll"]["coll200"]["met"])  # Only 9 cr of 12
+        self.assertFalse(audit_partial["coll"]["coll300"]["met"])
+        self.assertFalse(audit_partial["all_coll_met"])
+
+        # Add remaining courses to satisfy all requirements
+        advisor.add_completed(u, [
+            {"code": "PSYC 202", "grade": "A"},
+            {"code": "ANTH 350", "grade": "A"},
+            {"code": "CSCI 400", "grade": "A"},
+            {"code": "MATH 111", "grade": "A"},
+            {"code": "MUSC 101", "grade": "A"},
+        ], "test")
+
+        audit_full = advisor.degree_audit(u)
+        self.assertTrue(audit_full["coll"]["coll100"]["met"])
+        self.assertTrue(audit_full["coll"]["coll150"]["met"])
+        self.assertTrue(audit_full["coll"]["coll200"]["met"])
+        self.assertEqual(audit_full["coll"]["coll200"]["earned"], 12.0)
+        self.assertEqual(audit_full["coll"]["coll200"]["alv"], 3.0)
+        self.assertEqual(audit_full["coll"]["coll200"]["csi"], 6.0)
+        self.assertEqual(audit_full["coll"]["coll200"]["nqr"], 3.0)
+        self.assertTrue(audit_full["coll"]["coll300"]["met"])
+        self.assertTrue(audit_full["coll"]["coll400"]["met"])
+        self.assertTrue(audit_full["proficiencies"]["math"]["met"])
+        self.assertTrue(audit_full["proficiencies"]["arts"]["met"])
+        self.assertTrue(audit_full["all_coll_met"])
+        self.assertTrue(audit_full["overall_met"])
+        self.assertGreaterEqual(audit_full["total_credits"], 31.0)
+
+        # Test endpoint
+        with TestClient(server.app, base_url=LOCAL) as c:
+            r = c.get(f"/api/advisor/{u}/degree-audit")
+            self.assertEqual(r.status_code, 200)
+            data = r.json()
+            self.assertTrue(data["overall_met"])
+            self.assertEqual(data["coll"]["coll100"]["required"], 4)
+
     def test_new_activity_types_are_normalized(self):
         self.assertEqual(len(server.normalize_flashcards([{"front": "hola", "back": "hello", "lang": "es"}, {"front": "x"}])), 1)
         tl = server.normalize_timeline([{"year": 1789, "title": "Bastille"}, {"year": -44, "title": "Caesar"}, {"title": "no year"}])
@@ -517,6 +724,7 @@ class AccountsSecurity(unittest.TestCase):
     """With SCIEDU_AUTH=1 users must not touch each other's lessons, events, chats or the shared catalog."""
     def setUp(self):
         server.AUTH_REQUIRED = True
+        server._rate_hits.pop(("auth", "testclient"), None)  # every TestClient shares one IP: reset the sign-in limit
         self.ctx = TestClient(server.app, base_url=LOCAL); self.c = self.ctx.__enter__()
         def acct(name):
             r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True}).json()
@@ -651,6 +859,68 @@ class Deployment(unittest.TestCase):
                 self.assertEqual(c.get("/api/topics").status_code, 401)  # real requests still need sign-in
         finally:
             server.AUTH_REQUIRED = False
+
+
+class TestDesmosMathEngine(unittest.TestCase):
+    def test_safe_arith_constants(self):
+        import math
+        self.assertAlmostEqual(server.safe_arith("pi"), math.pi)
+        self.assertAlmostEqual(server.safe_arith("tau"), 2 * math.pi)
+        self.assertAlmostEqual(server.safe_arith("e"), math.e)
+        self.assertAlmostEqual(server.safe_arith("phi"), (1 + math.sqrt(5)) / 2)
+
+    def test_safe_arith_trig(self):
+        import math
+        self.assertAlmostEqual(server.safe_arith("sin(pi / 2)"), 1.0)
+        self.assertAlmostEqual(server.safe_arith("csc(pi / 2)"), 1.0)
+        self.assertAlmostEqual(server.safe_arith("sec(0)"), 1.0)
+        self.assertAlmostEqual(server.safe_arith("cot(pi / 4)"), 1.0)
+
+    def test_safe_arith_roots(self):
+        self.assertAlmostEqual(server.safe_arith("sqrt(16)"), 4.0)
+        self.assertAlmostEqual(server.safe_arith("cbrt(27)"), 3.0)
+        self.assertAlmostEqual(server.safe_arith("cbrt(-8)"), -2.0)
+        self.assertAlmostEqual(server.safe_arith("nthroot(81, 4)"), 3.0)
+
+    def test_safe_arith_logs(self):
+        import math
+        self.assertAlmostEqual(server.safe_arith("ln(e)"), 1.0)
+        self.assertAlmostEqual(server.safe_arith("log2(8)"), 3.0)
+        self.assertAlmostEqual(server.safe_arith("log10(1000)"), 3.0)
+        self.assertAlmostEqual(server.safe_arith("log(100, 10)"), 2.0)
+
+    def test_safe_arith_number_theory(self):
+        self.assertEqual(server.safe_arith("gcd(12, 18)"), 6.0)
+        self.assertEqual(server.safe_arith("lcm(4, 6)"), 12.0)
+        self.assertEqual(server.safe_arith("mod(7, 3)"), 1.0)
+
+    def test_safe_arith_combinatorics(self):
+        import math
+        self.assertEqual(server.safe_arith("fact(5)"), 120.0)
+        self.assertTrue(math.isnan(server.safe_arith("fact(-1)")))
+        self.assertAlmostEqual(server.safe_arith("factorial(0.5)"), math.gamma(1.5))
+        self.assertEqual(server.safe_arith("nCr(5, 2)"), 10.0)
+        self.assertEqual(server.safe_arith("nPr(5, 2)"), 20.0)
+
+    def test_safe_arith_special(self):
+        self.assertAlmostEqual(server.safe_arith("erf(0)"), 0.0)
+        self.assertAlmostEqual(server.safe_arith("gamma(5)"), 24.0)
+        self.assertAlmostEqual(server.safe_arith("sinc(0)"), 1.0)
+
+    def test_simspec_validate_desmos_syntax(self):
+        spec = {
+            "kind": "graph",
+            "x": {"min": -10, "max": 10},
+            "curves": [
+                {"expr": "cbrt(x)"},
+                {"expr": "csc(x)"},
+                {"expr": "ln(x)"},
+                {"expr": "erf(x)"},
+                {"expr": "phi * x"},
+            ],
+        }
+        validated, errors = validate_spec(spec)
+        self.assertEqual(errors, [])
 
 
 def tearDownModule():

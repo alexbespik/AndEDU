@@ -1977,7 +1977,10 @@ const EduIDE = ({
     if (isCorrect) {
       if (!alreadySolved) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
-        reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
+        const isQuiz = Boolean(classTopic?.id && (currentProblem._isQuizItem || currentProblem._rawQuiz));
+        if (!isQuiz) {
+          reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
+        }
         setTotalXp(prev => prev + 25);
       }
       setTerminalOutput(prev => [

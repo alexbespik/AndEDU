@@ -70,7 +70,7 @@ export function speakable(text) {
  * Speaks text in a language with an installed voice of that language.
  * Returns {ok: true, voice} or {ok: false, reason: 'unsupported' | 'no-voice', language}.
  */
-export async function speak(text, lang = 'en', { rate = 0.9 } = {}) {
+export async function speak(text, lang = 'en', { rate = 0.9, pitch = 1 } = {}) {
   if (!window.speechSynthesis) return { ok: false, reason: 'unsupported' };
   const voice = await pickVoice(lang);
   if (!voice) return { ok: false, reason: 'no-voice', language: languageName(lang) };
@@ -78,6 +78,7 @@ export async function speak(text, lang = 'en', { rate = 0.9 } = {}) {
   u.voice = voice;
   u.lang = voice.lang;
   u.rate = rate;
+  u.pitch = pitch;
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(u);
   return { ok: true, voice: voice.name };
@@ -88,4 +89,36 @@ export function noVoiceHelp(language) {
   return mac
     ? `No ${language} voice is installed. On a Mac: System Settings → Accessibility → Spoken Content → System voice → Manage Voices, add a ${language} voice (the "Enhanced" ones sound best), then reload.`
     : `No ${language} voice is installed. Add one in your system's speech or language settings (Windows: Settings → Time & language → Speech), then reload.`;
+}
+
+// ---- speech recognition (Speak exercises). Chrome and Edge send the audio to their maker's servers to turn it
+// into text, Safari uses Apple's; Firefox has none. Start it only from a click, and say so next to the button.
+const REGION = { en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-BR', uk: 'uk-UA', ru: 'ru-RU', pl: 'pl-PL',
+  zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ar: 'ar-SA', hi: 'hi-IN', tr: 'tr-TR', nl: 'nl-NL', sv: 'sv-SE', el: 'el-GR', he: 'he-IL' };
+const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+export const canRecognize = () => !!Recognition();
+export const RECOGNITION_NOTICE = 'Speech recognition runs in your browser, which may send the recording to its maker (Google for Chrome, Apple for Safari) to turn it into text.';
+
+/**
+ * Listens once and resolves {ok: true, transcripts: [best, ...alternatives]} or {ok: false, reason}.
+ * Returns null when the browser cannot recognize speech. Call stop() on the returned handle to finish early.
+ */
+export function recognize(lang, { timeoutMs = 8000 } = {}) {
+  const R = Recognition();
+  if (!R) return null;
+  const rec = new R();
+  rec.lang = String(lang).includes('-') ? lang : (REGION[base(lang)] || lang);
+  rec.interimResults = false;
+  rec.maxAlternatives = 4;
+  const result = new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } };
+    const timer = setTimeout(() => { try { rec.stop(); } catch { /* already stopped */ } finish({ ok: false, reason: 'timeout' }); }, timeoutMs);
+    rec.onresult = (e) => finish({ ok: true, transcripts: Array.from(e.results[0] || []).map((a) => a.transcript) });
+    rec.onerror = (e) => finish({ ok: false, reason: e.error || 'error' });
+    rec.onend = () => finish({ ok: false, reason: 'no-speech' });
+  });
+  try { rec.start(); } catch { return { result: Promise.resolve({ ok: false, reason: 'busy' }), stop() {} }; }
+  return { result, stop: () => { try { rec.stop(); } catch { /* already stopped */ } } };
 }

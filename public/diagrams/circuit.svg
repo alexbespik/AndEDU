@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
+  <title>Series circuit: cell, switch, resistor and lamp (unlabelled)</title>
+  <path d="M60 60 H150 M190 60 H340 V100 M340 160 V200 H250 M190 200 H60 V150 M60 110 V60"/>
+  <path d="M150 60 L185 42"/>
+  <circle cx="150" cy="60" r="4" fill="currentColor"/><circle cx="190" cy="60" r="4" fill="currentColor"/>
+  <path d="M340 100 l-12 6 24 12 -24 12 24 12 -12 6 V160"/>
+  <circle cx="220" cy="200" r="30"/>
+  <path d="M199 179 L241 221 M241 179 L199 221" stroke-width="2"/>
+  <path d="M40 110 H80 M50 150 H70" />
+</svg>

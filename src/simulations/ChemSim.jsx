@@ -39,6 +39,11 @@ export default function ChemSim({ spec }) {
       </div>
     );
   }
+  // hooks live in ChemWidget: an early return before them would break React's hook order
+  return <ChemWidget key={JSON.stringify([spec.widget, spec.params])} spec={spec} />;  // a new spec starts fresh
+}
+
+function ChemWidget({ spec }) {
 
   // Initialize parameters from spec.params
   const initialParams = useMemo(() => {

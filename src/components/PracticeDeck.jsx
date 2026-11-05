@@ -5,6 +5,8 @@ import Md, { MdInline } from './Md';
 import { MatchPairs } from './Activities';
 import DrawingBoard from './DrawingBoard';
 import { api } from '../lib/api';
+import { EXTRA_RENDER, EXTRA_LABEL } from '../practice/registry';
+import { ExplainAnswerButton } from './ExplainDialog';
 
 const TYPE_LABEL = {
   fill_blank: 'Fill in the blank',
@@ -14,6 +16,7 @@ const TYPE_LABEL = {
   code: 'Write the code',
   match_pairs: 'Match the pairs',
   draw: 'Draw it',
+  ...EXTRA_LABEL,
 };
 
 function seededShuffle(items, seed) {
@@ -37,12 +40,23 @@ function useReportSolved(ok, item) {
   useEffect(() => { if (ok && onSolved) onSolved(item); }, [ok]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
-function Feedback({ ok, item, extra }) {
+function Feedback({ ok, item, extra, given, answer }) {
   useReportSolved(ok, item);
   return (
     <div className={`feedback ${ok ? 'ok' : 'bad'}`} aria-live="polite">
       <p style={{ fontWeight: 700, marginBottom: 4 }}>{ok ? 'Correct.' : 'Not yet.'}{extra ? ` ${extra}` : ''}</p>
       {item.explanation && <Md>{item.explanation}</Md>}
+      {!ok && (
+        <div className="btn-row" style={{ marginTop: 6 }}>
+          <ExplainAnswerButton
+            item={item}
+            studentAnswer={given}
+            correctAnswer={answer ?? item.answer ?? (item.steps ? item.steps.join(' -> ') : '')}
+            question={item.prompt}
+            lang={item.lang}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -61,7 +75,7 @@ function FillBlank({ item }) {
           </button>
         ))}
       </div>
-      {done && <Feedback ok={pick === item.answer} item={item} />}
+      {done && <Feedback ok={pick === item.answer} item={item} given={pick} answer={item.answer} />}
       {done && <div className="btn-row"><button type="button" className="btn btn-quiet btn-sm" onClick={() => setPick(null)}><RotateCcw size={14} aria-hidden="true" /> Try again</button></div>}
     </div>
   );
@@ -98,7 +112,7 @@ function OrderSteps({ item }) {
         <button type="button" className="btn btn-primary btn-sm" onClick={() => setChecked(true)}>Check order</button>
         <button type="button" className="btn btn-quiet btn-sm" onClick={() => { setOrder(start); setChecked(false); }}>Reset</button>
       </div>
-      {checked && <Feedback ok={right === item.steps.length} item={item} extra={right === item.steps.length ? '' : `${right} of ${item.steps.length} steps are in the right place.`} />}
+      {checked && <Feedback ok={right === item.steps.length} item={item} extra={right === item.steps.length ? '' : `${right} of ${item.steps.length} steps are in the right place.`} given={order.join(' -> ')} answer={item.steps.join(' -> ')} />}
     </div>
   );
 }
@@ -122,7 +136,7 @@ function Numeric({ item }) {
         {item.unit && <span>{item.unit}</span>}
         <button type="submit" className="btn btn-primary btn-sm">Check</button>
       </div>
-      {result && <Feedback ok={result.ok} item={item} extra={result.ok ? '' : result.extra} />}
+      {result && <Feedback ok={result.ok} item={item} extra={result.ok ? '' : result.extra} given={value} answer={String(item.answer)} />}
     </form>
   );
 }
@@ -137,7 +151,7 @@ function TrueFalse({ item }) {
             aria-pressed={pick === v} onClick={() => setPick(v)}>{v ? 'True' : 'False'}</button>
         ))}
       </div>
-      {pick !== null && <Feedback ok={pick === item.answer} item={item} />}
+      {pick !== null && <Feedback ok={pick === item.answer} item={item} given={String(pick)} answer={String(item.answer)} />}
     </div>
   );
 }
@@ -265,6 +279,16 @@ function DrawExercise({ item }) {
           </ul>
           {result.feedback && <p style={{ marginTop: 6 }}><MdInline>{result.feedback}</MdInline></p>}
           {result.passed && item.explanation && <Md>{item.explanation}</Md>}
+          {!result.passed && (
+            <div className="btn-row" style={{ marginTop: 6 }}>
+              <ExplainAnswerButton
+                item={item}
+                studentAnswer="Drawing submission"
+                correctAnswer={item.criteria ? item.criteria.map((c) => (typeof c === 'string' ? c : (c?.criterion || ''))).join(', ') : ''}
+                question={item.prompt}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -282,10 +306,20 @@ function SolvedReporter({ ok, item }) {
   return null;
 }
 
-const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise, match_pairs: MatchBody, draw: DrawExercise };
+// Registry bodies report through onResult; this adapter turns that into the deck's solved report.
+const fromRegistry = (Body) => function RegistryBody({ item }) {
+  const [ok, setOk] = useState(false);
+  useReportSolved(ok, item);
+  return <Body item={item} onResult={(right) => right && setOk(true)} />;
+};
+const EXTRA = Object.fromEntries(Object.entries(EXTRA_RENDER).map(([t, Body]) => [t, fromRegistry(Body)]));
 
-export default function PracticeDeck({ items = [], onSolved }) {
-  const usable = items.filter((p) => RENDER[p.type]);
+const RENDER = { fill_blank: FillBlank, order_steps: OrderSteps, numeric: Numeric, true_false: TrueFalse, code: CodeExercise, match_pairs: MatchBody, draw: DrawExercise, ...EXTRA };
+
+
+export default function PracticeDeck({ items = [], onSolved, topicId }) {
+  // bodies that call the server for their topic (history roleplay) read item.topicId
+  const usable = useMemo(() => items.filter((p) => RENDER[p.type]).map((p) => (topicId && !p.topicId ? { ...p, topicId } : p)), [items, topicId]);
   if (!usable.length) {
     return <div className="panel"><p>No practice puzzles for this topic yet. Lessons generated in a course come with them.</p></div>;
   }

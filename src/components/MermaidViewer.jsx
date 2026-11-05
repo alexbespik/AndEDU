@@ -1,14 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-let initialized = false;
+let mermaidPromise = null;
 
-function whenMermaidReady(cb) {
-  // mermaid loads with `defer`; wait for it instead of silently rendering nothing
-  if (window.mermaid) return cb(window.mermaid);
-  const t = setInterval(() => {
-    if (window.mermaid) { clearInterval(t); cb(window.mermaid); }
-  }, 150);
-  return () => clearInterval(t);
+// mermaid is large, so it loads on the first diagram only; every viewer shares the one initialized copy
+function loadMermaid() {
+  if (!mermaidPromise) {
+    mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: 'base',
+        themeVariables: {
+          background: '#ffffff',
+          primaryColor: '#e2ebe5',
+          primaryTextColor: '#0b0f0d',
+          primaryBorderColor: '#0e4a37',
+          lineColor: '#6f5114',
+          secondaryColor: '#f7eed6',
+          tertiaryColor: '#f1f0ea',
+          fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
+          fontSize: '15px',
+        },
+      });
+      return mermaid;
+    }).catch((err) => { mermaidPromise = null; throw err; }); // a failed chunk load can be retried
+  }
+  return mermaidPromise;
 }
 
 /**
@@ -42,26 +59,10 @@ export default function MermaidViewer({ chart }) {
     if (!chart) return undefined;
     let cancelled = false;
     setState('loading');
-    const stop = whenMermaidReady(async (mermaid) => {
-      if (!initialized) {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: 'base',
-          themeVariables: {
-            background: '#ffffff',
-            primaryColor: '#e2ebe5',
-            primaryTextColor: '#0b0f0d',
-            primaryBorderColor: '#0e4a37',
-            lineColor: '#6f5114',
-            secondaryColor: '#f7eed6',
-            tertiaryColor: '#f1f0ea',
-            fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
-            fontSize: '15px',
-          },
-        });
-        initialized = true;
-      }
+    (async () => {
+      let mermaid;
+      try { mermaid = await loadMermaid(); } catch { if (!cancelled) setState('skipped'); return; }
+      if (cancelled) return;
       // Try the diagram as written, then the repaired version; parse() with suppressErrors never
       // touches the page, unlike render(), which leaves "Syntax error in text" in the document body.
       let source = null;
@@ -82,8 +83,8 @@ export default function MermaidViewer({ chart }) {
         // render() can leave its temporary container behind on failure
         document.getElementById(`d${id}`)?.remove();
       }
-    });
-    return () => { cancelled = true; if (typeof stop === 'function') stop(); };
+    })();
+    return () => { cancelled = true; };
   }, [chart]);
 
   if (!chart || state === 'skipped') return null; // a broken diagram is left out, not shown as an error

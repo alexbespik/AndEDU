@@ -15,6 +15,21 @@ export default defineConfig({
   resolve: {
     alias: [{ find: /^katex(\/.*)?$/, replacement: `${katexDir}$1` }],
   },
+  build: {
+    chunkSizeWarningLimit: 800,
+    rolldownOptions: {
+      output: {
+        // libraries change far less often than app code: separate chunks stay cached across deploys
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: 'katex', test: /node_modules[\\/]katex[\\/]/ },
+            { name: 'markdown', test: /node_modules[\\/](react-markdown|remark-[^\\/]+|rehype-[^\\/]+|micromark[^\\/]*|mdast-[^\\/]+|hast-[^\\/]+|unist-[^\\/]+|unified|vfile[^\\/]*|property-information|space-separated-tokens|comma-separated-tokens|decode-named-character-reference|character-entities[^\\/]*|html-url-attributes|devlop|bail|trough|is-plain-obj|zwitch|longest-streak|ccount|markdown-table|escape-string-regexp|trim-lines|estree-util-is-identifier-name|style-to-js|style-to-object|inline-style-parser)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     host: '127.0.0.1',

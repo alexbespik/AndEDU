@@ -6,15 +6,116 @@
 //   comparisons < <= > >= == !=, parentheses, function calls.
 // ---------------------------------------------------------------------------
 
-const FUNCS = {
-  sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan,
-  atan2: Math.atan2, sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh, sqrt: Math.sqrt, abs: Math.abs,
-  exp: Math.exp, log: Math.log, log10: Math.log10, min: Math.min, max: Math.max, pow: Math.pow,
-  floor: Math.floor, ceil: Math.ceil, round: Math.round, sign: Math.sign, hypot: Math.hypot,
-  clamp: (v, lo, hi) => Math.min(Math.max(v, lo), hi),
-  fact: (n) => { n = Math.round(n); if (n < 0 || n > 170) return NaN; let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
+export const CONSTS = {
+  pi: Math.PI, PI: Math.PI,
+  tau: 2 * Math.PI, TAU: 2 * Math.PI,
+  e: Math.E, E: Math.E,
+  phi: (1 + Math.sqrt(5)) / 2, PHI: (1 + Math.sqrt(5)) / 2,
+  inf: Infinity, infinity: Infinity, Infinity: Infinity,
 };
-const CONSTS = { pi: Math.PI, tau: 2 * Math.PI, E: Math.E };
+
+export const FUNCS = {
+  // Trigonometric & reciprocal/arc
+  sin: Math.sin, cos: Math.cos, tan: Math.tan,
+  csc: (x) => 1 / Math.sin(x), sec: (x) => 1 / Math.cos(x), cot: (x) => 1 / Math.tan(x),
+  asin: Math.asin, arcsin: Math.asin, acos: Math.acos, arccos: Math.acos, atan: Math.atan, arctan: Math.atan, atan2: Math.atan2,
+  acsc: (x) => Math.asin(1 / x), arccsc: (x) => Math.asin(1 / x),
+  asec: (x) => Math.acos(1 / x), arcsec: (x) => Math.acos(1 / x),
+  acot: (x) => Math.atan(1 / x), arccot: (x) => Math.atan(1 / x),
+
+  // Hyperbolic & reciprocal/arc
+  sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh,
+  csch: (x) => 1 / Math.sinh(x), sech: (x) => 1 / Math.cosh(x), coth: (x) => 1 / Math.tanh(x),
+  asinh: Math.asinh, arcsinh: Math.asinh, acosh: Math.acosh, arccosh: Math.acosh, atanh: Math.atanh, arctanh: Math.atanh,
+  acsch: (x) => Math.asinh(1 / x), arccsch: (x) => Math.asinh(1 / x),
+  asech: (x) => Math.acosh(1 / x), arcsech: (x) => Math.acosh(1 / x),
+  acoth: (x) => Math.atanh(1 / x), arccoth: (x) => Math.atanh(1 / x),
+
+  // Roots, powers, exponentials
+  sqrt: Math.sqrt, cbrt: Math.cbrt,
+  nthroot: (x, n = 2) => {
+    if (x >= 0) return Math.pow(x, 1 / n);
+    const rn = Math.round(n);
+    if (Math.abs(n - rn) < 1e-9 && rn % 2 !== 0) return -Math.pow(-x, 1 / n);
+    return NaN;
+  },
+  exp: Math.exp, pow: Math.pow,
+
+  // Logarithms
+  ln: Math.log, log2: Math.log2, log10: Math.log10,
+  log: (x, b) => (b !== undefined ? Math.log(x) / Math.log(b) : Math.log(x)),
+
+  // Rounding, clamping, number theory
+  abs: Math.abs, sign: Math.sign, sgn: Math.sign,
+  floor: Math.floor, ceil: Math.ceil,
+  round: (x, p = 0) => { const f = 10 ** p; return Math.round(x * f) / f; },
+  trunc: Math.trunc, clamp: (v, lo, hi) => Math.min(Math.max(v, lo), hi), hypot: Math.hypot,
+  mod: (a, b) => ((a % b) + b) % b,
+  gcd: (a, b) => {
+    a = Math.abs(Math.round(a)); b = Math.abs(Math.round(b));
+    while (b) { const t = b; b = a % b; a = t; }
+    return a;
+  },
+  lcm: (a, b) => {
+    a = Math.abs(Math.round(a)); b = Math.abs(Math.round(b));
+    if (!a || !b) return 0;
+    let g = a, tb = b;
+    while (tb) { const t = tb; tb = g % tb; g = t; }
+    return Math.abs((a * b) / g);
+  },
+  min: Math.min, max: Math.max,
+
+  // Combinatorics, statistics, special
+  fact: (n) => { n = Math.round(n); if (!Number.isFinite(n) || n < 0 || n > 170) return NaN; let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
+  factorial: (n) => {
+    if (Number.isInteger(n) && n >= 0 && n <= 170) return FUNCS.fact(n);
+    if (n < 0 && Number.isInteger(n)) return NaN;
+    return FUNCS.gamma(n + 1);
+  },
+  nPr: (n, r) => {
+    n = Math.round(n); r = Math.round(r);
+    if (!Number.isFinite(n) || !Number.isFinite(r) || r < 0 || r > n) return 0;
+    if (n > 170) return Infinity;
+    let res = 1;
+    for (let i = 0; i < r; i++) res *= (n - i);
+    return res;
+  },
+  perm: (n, r) => FUNCS.nPr(n, r),
+  nCr: (n, r) => {
+    n = Math.round(n); r = Math.round(r);
+    if (!Number.isFinite(n) || !Number.isFinite(r) || r < 0 || r > n) return 0;
+    if (r === 0 || r === n) return 1;
+    if (n > 1000) return Infinity;
+    if (r > n / 2) r = n - r;
+    let res = 1;
+    for (let i = 1; i <= r; i++) { res = (res * (n - i + 1)) / i; }
+    return Math.round(res);
+  },
+  comb: (n, r) => FUNCS.nCr(n, r),
+  erf: (x) => {
+    if (x === 0) return 0;
+    const s = x < 0 ? -1 : 1;
+    const ax = Math.abs(x);
+    const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+    const t = 1.0 / (1.0 + p * ax);
+    const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+    return s * y;
+  },
+  gamma: (z) => {
+    if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * FUNCS.gamma(1 - z));
+    z -= 1;
+    const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    let x = c[0];
+    for (let i = 1; i < 9; i++) x += c[i] / (z + i);
+    const t = z + 7.5;
+    return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
+  },
+  sinc: (x) => (x === 0 ? 1 : Math.sin(x) / x),
+  step: (x) => (x < 0 ? 0 : 1),
+  heaviside: (x) => (x < 0 ? 0 : 1),
+  rect: (x) => (Math.abs(x) < 0.5 ? 1 : Math.abs(x) === 0.5 ? 0.5 : 0),
+};
+
 /** Names the compiler treats as functions or constants (everything else is a variable). */
 export const RESERVED_NAMES = new Set([...Object.keys(FUNCS), ...Object.keys(CONSTS), 'if']);
 
@@ -103,7 +204,7 @@ function parse(tokens, src) {
           const [c, a, b] = args;
           return (s) => (c(s) ? a(s) : b(s));
         }
-        const fn = FUNCS[tok.v];
+        const fn = Object.hasOwn(FUNCS, tok.v) ? FUNCS[tok.v] : undefined;
         if (!fn) throw new Error(`Unknown function '${tok.v}' in "${src}"`);
         return (s) => fn(...args.map((a) => a(s)));
       }
@@ -123,15 +224,15 @@ function nameLookup(name) {
     const obj = name.slice(0, dot);
     const field = name.slice(dot + 1);
     return (s) => {
-      const target = Object.hasOwn(s, obj) ? s[obj] : undefined;
+      const target = s != null && Object.hasOwn(s, obj) ? s[obj] : undefined;
       const v = target && Object.hasOwn(target, field) ? target[field] : undefined;
       return typeof v === 'number' ? v : NaN;
     };
   }
   return (s) => {
-    const v = Object.hasOwn(s, name) ? s[name] : undefined;
+    const v = s != null && Object.hasOwn(s, name) ? s[name] : undefined;
     if (typeof v === 'number') return v;
-    return name in CONSTS ? CONSTS[name] : NaN;
+    return Object.hasOwn(CONSTS, name) ? CONSTS[name] : NaN;
   };
 }
 
