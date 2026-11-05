@@ -33,6 +33,7 @@ export default function AccountMenu({ user, online, onSignOut }) {
             <div>
               <strong>{user.name}</strong>
               <span className="hint">{user.local === false ? 'Account' : 'Profile on this computer'}</span>
+              <span className="hint" title="Put this id in SCIEDU_ADMINS to make this account an admin">id <code>{user.id}</code></span>
             </div>
           </div>
           <div className="account-row">

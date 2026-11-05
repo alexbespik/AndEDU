@@ -5,8 +5,8 @@
 # ---- 1. build the React frontend ----
 FROM node:22-alpine AS web
 WORKDIR /web
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY index.html vite.config.js ./
 COPY src ./src
 COPY content/topics ./content/topics
@@ -19,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py db.py simspec.py chemspec.py engage.py advisor.py backend_puzzles.py ./
+COPY server.py db.py simspec.py chemspec.py engage.py advisor.py advisor_chat.py advisor_classifier.py wm_advising.py backend_puzzles.py practice_general.py practice_history.py practice_language_extra.py mcp_server.py mcp_tools_history.py mcp_tools_language.py mcp_tools_language_extra.py mcp_tools_general.py mcp_tools_studio.py ./
 COPY scripts ./scripts
 COPY content/topics ./seed/topics
 COPY --from=web /web/dist ./dist
@@ -30,4 +30,7 @@ RUN printf '#!/bin/sh\nmkdir -p /app/content/topics\n[ -n "$(ls -A /app/content/
 USER lab
 VOLUME ["/app/content"]
 EXPOSE 8090
+# /api/status needs no login; localhost is always an allowed Host, whatever SCIEDU_ALLOWED_HOSTS says
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/status' % os.environ.get('SCIEDU_PORT', '8090'), timeout=4)" || exit 1
 CMD ["/app/entrypoint.sh"]

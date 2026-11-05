@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RotateCcw, Volume2, Check, X, Zap, Trophy, Timer, ArrowUp, ArrowDown, Shuffle } from 'lucide-react';
 import Md, { MdInline } from './Md';
+import { api } from '../lib/api';
 import { reportActivity, reportXp } from '../lib/engage';
 import { speak, noVoiceHelp } from '../lib/speech';
 import { answerIndex } from './QuizEngine';
@@ -21,13 +22,17 @@ export function FlashcardDeck({ cards = [], topicId }) {
   const [voiceNote, setVoiceNote] = useState(null);
   const card = pile[0];
   const listen = (text, lang) => speak(text, lang).then((r) => setVoiceNote(r.ok ? null : r.reason === 'no-voice' ? noVoiceHelp(r.language) : 'This browser cannot read text aloud.'));
-  useEffect(() => { if (!card && cards.length) reportActivity(topicId, 'flashcards', cards.length, cards.length + misses); }, [card]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!card && cards.length) {
+      reportActivity(topicId, 'flashcards', cards.length, cards.length + misses);
+      reportXp('practice_correct', `${topicId}:flashcards_deck`);
+    }
+  }, [card]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const answer = (gotIt) => {
     setFlipped(false);
     if (gotIt) {
       setKnown((k) => k + 1);
-      reportXp('practice_correct', `${topicId}:card:${card.i}`);
       setPile((p) => p.slice(1));
     } else {
       setMisses((m) => m + 1);
@@ -86,7 +91,8 @@ const SECONDS = 20;
 
 /** Kahoot-style speed round: 20 s per question, more points for faster answers, streak bonus, personal best. */
 export function SpeedRound({ quiz = [], topicId, userId }) {
-  const qs = useMemo(() => shuffle(quiz.filter((q) => answerIndex(q) !== null)).slice(0, 10), [quiz]);
+  // keyed on the lesson, not the array: a background topics refresh must not reshuffle a round in progress
+  const qs = useMemo(() => shuffle(quiz.filter((q) => answerIndex(q) !== null)).slice(0, 10), [topicId, quiz.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const bestKey = `andedu_speed_best_${userId}_${topicId}`;
   const [phase, setPhase] = useState('ready'); // ready | question | reveal | done
   const [i, setI] = useState(0);
@@ -189,10 +195,11 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
 const fmtYear = (y) => (y < 0 ? `${Math.abs(Math.round(y))} BCE` : String(Math.round(y)));
 
 /** Timeline: the events in order, and a challenge that shuffles them for the student to put back in order. */
-export function TimelineView({ events = [], topicId }) {
-  const [mode, setMode] = useState('view');
+export function TimelineView({ events = [], topicId, initialMode = 'view', onChecked }) {
+  const [mode, setMode] = useState(initialMode);
   const [order, setOrder] = useState([]);
   const [checked, setChecked] = useState(false);
+  useEffect(() => { if (initialMode) setMode(initialMode); }, [initialMode]);
   const pool = useMemo(() => shuffle(events).slice(0, 7), [events, mode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (mode === 'challenge') { setOrder(pool); setChecked(false); } }, [mode, pool]);
   if (!events.length) return <div className="panel"><p>No timeline for this lesson yet.</p></div>;
@@ -234,6 +241,7 @@ export function TimelineView({ events = [], topicId }) {
               const inPlace = order.filter((e, k) => k === 0 || order[k - 1].year <= e.year).length;
               reportActivity(topicId, 'timeline', inPlace, order.length);
               if (inPlace === order.length) reportXp('practice_correct', `${topicId}:timeline`);
+              onChecked?.(inPlace, order.length);  // optional: History > Games scores the round
             }}>Check order</button>
               : <button type="button" className="btn btn-quiet" onClick={() => { setMode('view'); setTimeout(() => setMode('challenge'), 0); }}><RotateCcw size={14} /> New set</button>}
             {checked && <span className={correct ? 'speed-gain' : 'hint'}>{correct ? 'All in order.' : 'Some events are out of order: the red ones.'}</span>}
@@ -289,7 +297,7 @@ export function ScoreStrip({ topicId, userId }) {
   useEffect(() => {
     if (!userId || !topicId) return undefined;
     let live = true;
-    import('../lib/api').then(({ api }) => api(`/api/activity/${userId}/topic/${encodeURIComponent(topicId)}`)).then((d) => live && setS(d)).catch(() => {});
+    api(`/api/activity/${userId}/topic/${encodeURIComponent(topicId)}`).then((d) => live && setS(d)).catch(() => {});
     const on = (e) => { if (e.detail?.topicId === topicId) setS(e.detail); };
     window.addEventListener('andedu:activity', on);
     return () => { live = false; window.removeEventListener('andedu:activity', on); };

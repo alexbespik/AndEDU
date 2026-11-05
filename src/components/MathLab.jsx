@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LineChart, NotebookPen, Sigma, Plus, X, Loader2, Crosshair, BookOpen, GraduationCap, Shapes } from 'lucide-react';
-import { tryCompile, RESERVED_NAMES } from '../lib/expr';
+import {
+  LineChart, NotebookPen, Sigma, Plus, X, Loader2, Crosshair, BookOpen,
+  GraduationCap, Shapes, ZoomIn, ZoomOut, Keyboard,
+} from 'lucide-react';
+import { tryCompile, CONSTS, FUNCS, RESERVED_NAMES } from '../lib/expr';
 import { canvasPalette } from '../theme';
 import { api } from '../lib/api';
 import { reportXp } from '../lib/engage';
@@ -26,10 +29,10 @@ export function normalizeFormula(src) {
     .replace(/^\s*(?:y|[a-zA-Z]\s*\(\s*x\s*\))\s*=/, '')
     .replace(/(\d)(?![eE][+-]?\d)\s*([A-Za-z(])/g, '$1*$2')
     .replace(/\)\s*([A-Za-z0-9(])/g, ')*$1')
-    // "k x" and "x(x+1)": a variable next to a variable or a bracket multiplies; "sin (x)" stays a call
+    // "k x" and "x(x+1)": a variable or constant next to a variable or bracket multiplies; functions stay calls
     .replace(/([A-Za-z_][A-Za-z0-9_]*)(\s*)(?=[A-Za-z_(])/g, (m, name, space, offset, all) => {
       const next = all[offset + m.length];
-      if (RESERVED_NAMES.has(name)) return next === '(' ? name : m;
+      if (Object.hasOwn(FUNCS, name) || name === 'if') return next === '(' ? name : m;
       return next === '(' || space ? `${name}*` : m;
     })
     .trim();
@@ -44,7 +47,7 @@ export function freeVariables(src) {
   while ((m = re.exec(src))) {
     const after = src.slice(re.lastIndex).trimStart();
     if (after.startsWith('(') && RESERVED_NAMES.has(m[0])) continue; // function call
-    if (m[0] === 'x' || m[0] === 'e' || RESERVED_NAMES.has(m[0])) continue;
+    if (m[0] === 'x' || RESERVED_NAMES.has(m[0])) continue;
     names.add(m[0]);
   }
   return [...names];
@@ -114,6 +117,153 @@ function niceStep(span) {
   return [1, 2, 5, 10].map((k) => k * p).find((s) => s >= raw) || p * 10;
 }
 
+export function MathKeypad({ onInsert, onBackspace, onClose }) {
+  const [tab, setTab] = useState('123');
+
+  const keys123 = [
+    '7', '8', '9', '/', '(', ')',
+    '4', '5', '6', '*', '^', 'x',
+    '1', '2', '3', '-', 'pi', 'y',
+    '0', '.', ',', '+', 'e', '⌫',
+  ];
+
+  const keysTrig = [
+    'sin', 'cos', 'tan', 'csc', 'sec', 'cot',
+    'asin', 'acos', 'atan', 'acsc', 'asec', 'acot',
+    'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth',
+  ];
+
+  const keysFunc = [
+    'sqrt', 'cbrt', 'nthroot', 'abs', 'round', 'clamp',
+    'ln', 'log', 'log10', 'mod', 'gcd', 'lcm',
+    'fact', 'nCr', 'nPr', 'erf', 'gamma', 'sinc',
+  ];
+
+  const currentKeys = tab === '123' ? keys123 : tab === 'Trig' ? keysTrig : keysFunc;
+
+  const handleKey = (k) => {
+    if (k === '⌫') {
+      onBackspace();
+    } else {
+      const isFunc = (tab === 'Trig' || tab === 'Func') && !['pi', 'e', 'x', 'y'].includes(k);
+      onInsert(isFunc ? `${k}(` : k);
+    }
+  };
+
+  return (
+    <div className="math-keypad" role="region" aria-label="Math Virtual Keypad">
+      <div className="keypad-header">
+        <div className="keypad-tabs">
+          <button type="button" className={`keypad-tab-btn ${tab === '123' ? 'active' : ''}`}
+            onMouseDown={(e) => { e.preventDefault(); setTab('123'); }}>123</button>
+          <button type="button" className={`keypad-tab-btn ${tab === 'Trig' ? 'active' : ''}`}
+            onMouseDown={(e) => { e.preventDefault(); setTab('Trig'); }}>Trig</button>
+          <button type="button" className={`keypad-tab-btn ${tab === 'Func' ? 'active' : ''}`}
+            onMouseDown={(e) => { e.preventDefault(); setTab('Func'); }}>Func</button>
+        </div>
+        {onClose && (
+          <button type="button" className="btn btn-quiet btn-sm btn-icon" title="Close keypad"
+            onMouseDown={(e) => { e.preventDefault(); onClose(); }} aria-label="Close keypad">
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      <div className="keypad-grid">
+        {currentKeys.map((k) => (
+          <button key={k} type="button" className={`keypad-btn ${k === '⌫' ? 'action' : ''}`}
+            onMouseDown={(e) => { e.preventDefault(); handleKey(k); }} aria-label={k === '⌫' ? 'Backspace' : k}>
+            {k}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ValuesTable({ curveName, color, tableConfig, setTableConfig, tableRows }) {
+  const [newX, setNewX] = useState('');
+
+  const addCustomPoint = (e) => {
+    e.preventDefault();
+    if (newX.trim() !== '' && Number.isFinite(Number(newX))) {
+      const val = Number(newX.trim());
+      setTableConfig((prev) => ({
+        ...prev,
+        custom: [...(prev.custom || []), val],
+      }));
+      setNewX('');
+    }
+  };
+
+  const removeCustomPoint = (xVal) => {
+    setTableConfig((prev) => ({
+      ...prev,
+      custom: (prev.custom || []).filter((x) => x !== xVal),
+    }));
+  };
+
+  return (
+    <div className="values-table-container">
+      <div className="values-table-controls">
+        <span className="swatch" style={{ background: `var(--${color})` }} aria-hidden="true" />
+        <span className="label" style={{ fontWeight: 600 }}>Table of values: <span className="mono">{curveName}</span></span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+          <label className="hint" htmlFor="vt-start">From</label>
+          <input id="vt-start" className="input num" style={{ width: 54, padding: '2px 4px' }} type="number"
+            value={tableConfig.start ?? -5}
+            onChange={(e) => setTableConfig((c) => ({ ...c, start: Number(e.target.value) }))} />
+          <label className="hint" htmlFor="vt-end">To</label>
+          <input id="vt-end" className="input num" style={{ width: 54, padding: '2px 4px' }} type="number"
+            value={tableConfig.end ?? 5}
+            onChange={(e) => setTableConfig((c) => ({ ...c, end: Number(e.target.value) }))} />
+          <label className="hint" htmlFor="vt-step">Step</label>
+          <input id="vt-step" className="input num" style={{ width: 50, padding: '2px 4px' }} type="number" min="0.01" step="any"
+            value={tableConfig.step ?? 1}
+            onChange={(e) => setTableConfig((c) => ({ ...c, step: Math.max(0.01, Math.abs(Number(e.target.value)) || 1) }))} />
+        </div>
+      </div>
+      <form onSubmit={addCustomPoint} className="btn-row" style={{ alignItems: 'center', gap: 'var(--space-2)' }}>
+        <input className="input mono" style={{ width: 110, padding: '2px 6px', minHeight: 28 }} placeholder="Add x point" value={newX}
+          onChange={(e) => setNewX(e.target.value)} />
+        <button type="submit" className="btn btn-quiet btn-sm" style={{ minHeight: 28 }}><Plus size={13} /> Add point</button>
+        {tableConfig.custom?.length > 0 && (
+          <button type="button" className="btn btn-quiet btn-sm" style={{ minHeight: 28 }}
+            onClick={() => setTableConfig((c) => ({ ...c, custom: [] }))}>
+            Reset custom
+          </button>
+        )}
+      </form>
+      <div className="values-table-scroll">
+        <table className="values-table">
+          <thead>
+            <tr>
+              <th style={{ width: '40%' }}>x</th>
+              <th style={{ width: '45%' }}>y = f(x)</th>
+              <th style={{ width: '15%' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {tableRows.map((r, i) => (
+              <tr key={i}>
+                <td className="mono">{r.x}</td>
+                <td className="mono">{Number.isFinite(r.y) ? r.y : 'undefined'}</td>
+                <td style={{ textAlign: 'right' }}>
+                  {r.isCustom && (
+                    <button type="button" className="btn btn-quiet btn-sm btn-icon" title="Remove custom point"
+                      onClick={() => removeCustomPoint(r.x)}>
+                      <X size={12} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function GraphTab({ userId, incoming }) {
   const key = `andedu_math_graph_${userId}`;
   const [rows, setRows] = useState(() => store.get(key, { list: ['sin(x)', 'a*x^2 + b'], params: {} }));
@@ -124,13 +274,17 @@ function GraphTab({ userId, incoming }) {
   const [view, setView] = useState({ cx: 0, cy: 0, scale: 50 }); // px per unit
   const [hover, setHover] = useState(null);
   const [size, setSize] = useState({ W: 800, H: 600 });
-  const [tools, setTools] = useState(() => store.get(`${key}_tools`, { sel: 0, deriv: false, tangent: true, area: false, a: 0, b: 1 }));
+  const [tools, setTools] = useState(() => store.get(`${key}_tools`, { sel: 0, deriv: false, tangent: true, area: false, table: false, a: 0, b: 1 }));
   const [calc, setCalc] = useState('');
+  const [showKeypad, setShowKeypad] = useState(false);
+  const [tableConfig, setTableConfig] = useState(() => store.get(`${key}_table`, { start: -5, end: 5, step: 1, custom: [] }));
   const canvasRef = useRef(null);
   const dragRef = useRef(null);
+  const lastFocusedRef = useRef(null);
 
   useEffect(() => { store.set(key, rows); }, [key, rows]);
   useEffect(() => { store.set(`${key}_tools`, tools); }, [key, tools]);
+  useEffect(() => { store.set(`${key}_table`, tableConfig); }, [key, tableConfig]);
 
   const curves = useMemo(() => rows.list.map((text) => {
     const src = normalizeFormula(text);
@@ -150,6 +304,32 @@ function GraphTab({ userId, incoming }) {
   const xRange = [view.cx - size.W / 2 / view.scale, view.cx + size.W / 2 / view.scale];
   const facts = useMemo(() => (selFn ? analyze(selFn, xRange[0], xRange[1]) : null), [selFn, xRange[0], xRange[1]]); // eslint-disable-line react-hooks/exhaustive-deps
   const area = useMemo(() => (selFn && tools.area ? integrate(selFn, Number(tools.a), Number(tools.b)) : null), [selFn, tools.area, tools.a, tools.b]);
+
+  const tableRows = useMemo(() => {
+    if (!selFn) return [];
+    const start = Number(tableConfig.start ?? -5);
+    const end = Number(tableConfig.end ?? 5);
+    const step = Math.max(0.0001, Math.abs(Number(tableConfig.step) || 1));
+    const rowsList = [];
+    if (Number.isFinite(start) && Number.isFinite(end) && start <= end) {
+      const count = Math.min(101, Math.floor((end - start) / step + 1e-9) + 1);
+      for (let k = 0; k < count; k++) {
+        const x = Number((start + k * step).toFixed(6));
+        rowsList.push({ x, isCustom: false });
+      }
+    }
+    (tableConfig.custom || []).forEach((c) => {
+      const x = Number(c);
+      if (Number.isFinite(x) && !rowsList.some((r) => Math.abs(r.x - x) < 1e-9)) {
+        rowsList.push({ x, isCustom: true });
+      }
+    });
+    rowsList.sort((a, b) => a.x - b.x);
+    return rowsList.map((r) => {
+      const y = selFn(r.x);
+      return { ...r, y: Number.isFinite(y) ? Number(y.toPrecision(6)) : NaN };
+    });
+  }, [selFn, tableConfig]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -219,6 +399,26 @@ function GraphTab({ userId, incoming }) {
         }
         ctx.stroke(); ctx.setLineDash([]);
       }
+      // discrete table points
+      if (tools.table && tableRows.length) {
+        ctx.font = '10px "IBM Plex Mono", monospace';
+        ctx.textAlign = 'left';
+        tableRows.forEach(({ x, y }) => {
+          if (!Number.isFinite(y)) return;
+          const px = toX(x), py = toY(y);
+          if (px < -30 || px > W + 30 || py < -30 || py > H + 30) return;
+          ctx.beginPath();
+          ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = pal.surface;
+          ctx.stroke();
+
+          ctx.fillStyle = pal.ink;
+          ctx.fillText(`(${fmt(x)}, ${fmt(y)})`, px + 6, py - 6);
+        });
+      }
       // roots and turning points
       if (facts) {
         ctx.font = '11px "IBM Plex Mono", monospace'; ctx.textAlign = 'left';
@@ -256,7 +456,7 @@ function GraphTab({ userId, incoming }) {
         ctx.beginPath(); ctx.arc(hover.px, toY(y), 4, 0, Math.PI * 2); ctx.fill();
       });
     }
-  }, [view, curves, scopeBase, hover, selFn, sel, tools, facts]);
+  }, [view, curves, scopeBase, hover, selFn, sel, tools, facts, tableRows]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -306,10 +506,68 @@ function GraphTab({ userId, incoming }) {
     const v = fn({ ...scopeBase, x: hover ? hover.x : 0 });
     return Number.isFinite(v) ? { v: Number(v.toPrecision(10)) } : { err: 'Not a finite number' };
   }, [calc, scopeBase, hover]);
+
   const setList = (list) => setRows((r) => ({ ...r, list }));
   const setTool = (patch) => setTools((t) => ({ ...t, ...patch }));
   const fmtN = (v) => Number(Number(v).toPrecision(5));
   const setParam = (n, patch) => setRows((r) => ({ ...r, params: { ...r.params, [n]: { ...param(n), ...patch } } }));
+
+  const insertAtCursor = useCallback((text) => {
+    const el = (lastFocusedRef.current?.isConnected ? lastFocusedRef.current : null) || document.getElementById('f-0') || document.getElementById('m-calc');
+    if (!el) return;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const val = el.value || '';
+    const nextVal = val.slice(0, start) + text + val.slice(end);
+    const nextPos = start + text.length;
+
+    if (el.dataset.inputRole === 'formula') {
+      const idx = Number(el.dataset.formulaIdx);
+      setRows((r) => ({
+        ...r,
+        list: r.list.map((item, j) => (j === idx ? nextVal : item)),
+      }));
+    } else if (el.dataset.inputRole === 'calc') {
+      setCalc(nextVal);
+    } else {
+      el.value = nextVal;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    requestAnimationFrame(() => {
+      el.focus();
+      try { el.setSelectionRange(nextPos, nextPos); } catch { /* ignore */ }
+    });
+  }, [setRows, setCalc]);
+
+  const handleBackspace = useCallback(() => {
+    const el = (lastFocusedRef.current?.isConnected ? lastFocusedRef.current : null) || document.getElementById('f-0') || document.getElementById('m-calc');
+    if (!el) return;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const val = el.value || '';
+    if (start === 0 && end === 0) return;
+    const newStart = start === end ? Math.max(0, start - 1) : start;
+    const nextVal = val.slice(0, newStart) + val.slice(end);
+
+    if (el.dataset.inputRole === 'formula') {
+      const idx = Number(el.dataset.formulaIdx);
+      setRows((r) => ({
+        ...r,
+        list: r.list.map((item, j) => (j === idx ? nextVal : item)),
+      }));
+    } else if (el.dataset.inputRole === 'calc') {
+      setCalc(nextVal);
+    } else {
+      el.value = nextVal;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    requestAnimationFrame(() => {
+      el.focus();
+      try { el.setSelectionRange(newStart, newStart); } catch { /* ignore */ }
+    });
+  }, [setRows, setCalc]);
 
   return (
     <div className="math-graph">
@@ -324,6 +582,8 @@ function GraphTab({ userId, incoming }) {
             <span className="swatch" style={{ background: `var(--${CURVE_TOKENS[i % CURVE_TOKENS.length]})` }} aria-hidden="true" />
             <label className="sr-only" htmlFor={`f-${i}`}>Function {i + 1}</label>
             <input id={`f-${i}`} className="input mono" value={c.text} spellCheck={false} placeholder="e.g. x^3 - 2x"
+              data-input-role="formula" data-formula-idx={i}
+              onFocus={(e) => { lastFocusedRef.current = e.target; }}
               onChange={(e) => setList(rows.list.map((t, j) => (j === i ? e.target.value : t)))} aria-invalid={Boolean(c.err)} />
             <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label={`Remove function ${i + 1}`}
               onClick={() => setList(rows.list.filter((_, j) => j !== i))}><X size={14} /></button>
@@ -333,10 +593,20 @@ function GraphTab({ userId, incoming }) {
             )}
           </div>
         ))}
-        {rows.list.length < 6 && (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setList([...rows.list, ''])}>
-            <Plus size={14} aria-hidden="true" /> Add function
+        <div className="btn-row" style={{ gap: 'var(--space-2)' }}>
+          {rows.list.length < 6 && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setList([...rows.list, ''])}>
+              <Plus size={14} aria-hidden="true" /> Add function
+            </button>
+          )}
+          <button type="button" className={`btn btn-sm ${showKeypad ? 'btn-secondary' : 'btn-quiet'}`}
+            onClick={() => setShowKeypad((v) => !v)} aria-label="Toggle virtual keypad">
+            <Keyboard size={14} aria-hidden="true" /> {showKeypad ? 'Hide Keypad' : 'Keypad'}
           </button>
+        </div>
+
+        {showKeypad && (
+          <MathKeypad onInsert={insertAtCursor} onBackspace={handleBackspace} onClose={() => setShowKeypad(false)} />
         )}
 
         {vars.length > 0 && <h3 className="label" style={{ marginTop: 'var(--space-3)' }}>Sliders</h3>}
@@ -361,41 +631,70 @@ function GraphTab({ userId, incoming }) {
         </button>
       </div>
       <div className="stack-sm" style={{ minWidth: 0 }}>
-      <canvas ref={canvasRef} className="math-canvas" aria-label="Graph of the functions"
-        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dragRef.current = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy }; }}
-        onPointerUp={() => { dragRef.current = null; }} onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)} />
-
-      <div className="math-tools panel">
-        <div className="btn-row" style={{ alignItems: 'center' }}>
-          <label className="label" htmlFor="m-sel">Analyse</label>
-          <select id="m-sel" className="input" style={{ width: 'auto', minWidth: 160 }} value={sel} onChange={(e) => setTool({ sel: Number(e.target.value) })}>
-            {curves.map((c, i) => (!c.err && c.src ? <option key={i} value={i}>f{i + 1}(x) = {c.text}</option> : null))}
-          </select>
-          <label className="check-row"><input type="checkbox" checked={tools.deriv} onChange={(e) => setTool({ deriv: e.target.checked })} /> Derivative f′</label>
-          <label className="check-row"><input type="checkbox" checked={tools.tangent} onChange={(e) => setTool({ tangent: e.target.checked })} /> Tangent at cursor</label>
-          <label className="check-row"><input type="checkbox" checked={tools.area} onChange={(e) => setTool({ area: e.target.checked })} /> Area from</label>
-          <input className="input num" style={{ width: 72 }} type="number" aria-label="Area lower limit" value={tools.a} onChange={(e) => setTool({ a: e.target.value, area: true })} />
-          <span className="hint">to</span>
-          <input className="input num" style={{ width: 72 }} type="number" aria-label="Area upper limit" value={tools.b} onChange={(e) => setTool({ b: e.target.value, area: true })} />
-        </div>
-        {facts && (
-          <dl className="facts">
-            <div><dt>Zeros in view</dt><dd className="mono">{facts.roots.length ? facts.roots.map((r) => `x = ${fmtN(r)}`).join(',  ') : 'none'}</dd></div>
-            <div><dt>Turning points</dt><dd className="mono">{facts.extrema.length ? facts.extrema.map((p) => `${p.kind} (${fmtN(p.x)}, ${fmtN(p.y)})`).join(',  ') : 'none'}</dd></div>
-            <div><dt>y-intercept</dt><dd className="mono">{Number.isFinite(facts.y0) ? fmtN(facts.y0) : 'undefined'}</dd></div>
-            {hover && <div><dt>At cursor</dt><dd className="mono">f({fmtN(hover.x)}) = {fmtN(selFn(hover.x))},  f′ = {fmtN(dfdx(selFn, hover.x))}</dd></div>}
-            {area !== null && <div><dt>∫ from {tools.a} to {tools.b}</dt><dd className="mono">{Number.isFinite(area) ? fmtN(area) : 'diverges'}</dd></div>}
-          </dl>
-        )}
-        <div className="field">
-          <label htmlFor="m-calc">Calculator (uses your sliders; x is the cursor position)</label>
-          <div className="btn-row" style={{ alignItems: 'center' }}>
-            <input id="m-calc" className="input mono" style={{ flex: '1 1 220px' }} value={calc} spellCheck={false}
-              placeholder="e.g. sqrt(2) * pi / 4" onChange={(e) => setCalc(e.target.value)} />
-            {calcResult && (calcResult.err ? <span className="hint err">{calcResult.err}</span> : <b className="num calc-out">= {calcResult.v}</b>)}
+        <div className="math-canvas-wrap">
+          <canvas ref={canvasRef} className="math-canvas" aria-label="Graph of the functions"
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dragRef.current = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy }; }}
+            onPointerUp={() => { dragRef.current = null; }} onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)} />
+          <div className="canvas-overlay-controls" role="toolbar" aria-label="Graph controls">
+            <button type="button" className="canvas-control-btn" title="Zoom in" aria-label="Zoom in"
+              onClick={() => setView((v) => ({ ...v, scale: Math.min(5000, v.scale * 1.3) }))}>
+              <ZoomIn size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className="canvas-control-btn" title="Zoom out" aria-label="Zoom out"
+              onClick={() => setView((v) => ({ ...v, scale: Math.max(2, v.scale / 1.3) }))}>
+              <ZoomOut size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className="canvas-control-btn" title="Reset home" aria-label="Reset home"
+              onClick={() => setView({ cx: 0, cy: 0, scale: 50 })}>
+              <Crosshair size={16} aria-hidden="true" />
+            </button>
           </div>
         </div>
-      </div>
+
+        <div className="math-tools panel">
+          <div className="btn-row" style={{ alignItems: 'center' }}>
+            <label className="label" htmlFor="m-sel">Analyse</label>
+            <select id="m-sel" className="input" style={{ width: 'auto', minWidth: 160 }} value={sel} onChange={(e) => setTool({ sel: Number(e.target.value) })}>
+              {curves.map((c, i) => (!c.err && c.src ? <option key={i} value={i}>f{i + 1}(x) = {c.text}</option> : null))}
+            </select>
+            <label className="check-row"><input type="checkbox" checked={tools.deriv} onChange={(e) => setTool({ deriv: e.target.checked })} /> Derivative f′</label>
+            <label className="check-row"><input type="checkbox" checked={tools.tangent} onChange={(e) => setTool({ tangent: e.target.checked })} /> Tangent at cursor</label>
+            <label className="check-row"><input type="checkbox" checked={tools.area} onChange={(e) => setTool({ area: e.target.checked })} /> Area from</label>
+            <input className="input num" style={{ width: 72 }} type="number" aria-label="Area lower limit" value={tools.a} onChange={(e) => setTool({ a: e.target.value, area: true })} />
+            <span className="hint">to</span>
+            <input className="input num" style={{ width: 72 }} type="number" aria-label="Area upper limit" value={tools.b} onChange={(e) => setTool({ b: e.target.value, area: true })} />
+            <label className="check-row"><input type="checkbox" checked={Boolean(tools.table)} onChange={(e) => setTool({ table: e.target.checked })} /> Table of values</label>
+          </div>
+          {facts && (
+            <dl className="facts">
+              <div><dt>Zeros in view</dt><dd className="mono">{facts.roots.length ? facts.roots.map((r) => `x = ${fmtN(r)}`).join(',  ') : 'none'}</dd></div>
+              <div><dt>Turning points</dt><dd className="mono">{facts.extrema.length ? facts.extrema.map((p) => `${p.kind} (${fmtN(p.x)}, ${fmtN(p.y)})`).join(',  ') : 'none'}</dd></div>
+              <div><dt>y-intercept</dt><dd className="mono">{Number.isFinite(facts.y0) ? fmtN(facts.y0) : 'undefined'}</dd></div>
+              {hover && <div><dt>At cursor</dt><dd className="mono">f({fmtN(hover.x)}) = {fmtN(selFn(hover.x))},  f′ = {fmtN(dfdx(selFn, hover.x))}</dd></div>}
+              {area !== null && <div><dt>∫ from {tools.a} to {tools.b}</dt><dd className="mono">{Number.isFinite(area) ? fmtN(area) : 'diverges'}</dd></div>}
+            </dl>
+          )}
+
+          {tools.table && sel >= 0 && curves[sel] && (
+            <ValuesTable
+              curveName={curves[sel].text || `f${sel + 1}`}
+              color={CURVE_TOKENS[sel % CURVE_TOKENS.length]}
+              tableConfig={tableConfig}
+              setTableConfig={setTableConfig}
+              tableRows={tableRows}
+            />
+          )}
+
+          <div className="field">
+            <label htmlFor="m-calc">Calculator (uses your sliders; x is the cursor position)</label>
+            <div className="btn-row" style={{ alignItems: 'center' }}>
+              <input id="m-calc" className="input mono" style={{ flex: '1 1 220px' }} value={calc} spellCheck={false}
+                data-input-role="calc" onFocus={(e) => { lastFocusedRef.current = e.target; }}
+                placeholder="e.g. sqrt(2) * pi / 4" onChange={(e) => setCalc(e.target.value)} />
+              {calcResult && (calcResult.err ? <span className="hint err">{calcResult.err}</span> : <b className="num calc-out">= {calcResult.v}</b>)}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

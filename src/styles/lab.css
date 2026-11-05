@@ -569,6 +569,50 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .math-notebook .textarea { min-height: 460px; font-size: 0.9rem; }
 .math-preview { min-height: 460px; max-height: 70vh; overflow: auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Canvas overlay controls */
+.math-canvas-wrap { position: relative; width: 100%; min-width: 0; }
+.canvas-overlay-controls { position: absolute; top: var(--space-3); right: var(--space-3); display: flex; flex-direction: column; gap: 4px; z-index: 5; }
+.canvas-control-btn {
+  width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
+  color: var(--ink); box-shadow: var(--shadow-sm); cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.canvas-control-btn:hover { background: var(--sunk); border-color: var(--ink-soft); }
+.canvas-control-btn:active { background: var(--rule); }
+
+/* Virtual keypad */
+.math-keypad {
+  background: var(--surface); border: 1px solid var(--rule-strong); border-radius: var(--radius);
+  padding: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); box-shadow: var(--shadow-sm);
+}
+.keypad-tabs { display: flex; gap: 4px; }
+.keypad-tab-btn {
+  padding: 3px 10px; font: 600 0.8rem/1 var(--font-ui); border: 1px solid var(--rule);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); cursor: pointer;
+}
+.keypad-tab-btn.active { background: var(--accent); color: var(--accent-contrast, #fff); border-color: var(--accent); }
+.keypad-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.keypad-btn {
+  padding: var(--space-2) 0; font: 500 0.85rem/1 var(--font-mono); text-align: center;
+  background: var(--sunk); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  color: var(--ink); cursor: pointer; user-select: none; transition: background 0.1s, border-color 0.1s;
+}
+.keypad-btn:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+.keypad-btn:active { background: var(--rule); }
+.keypad-btn.action { color: var(--gold-text); font-weight: 600; }
+
+/* Values table */
+.values-table-container {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius);
+  padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2);
+}
+.values-table-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.values-table-scroll { max-height: 200px; overflow-y: auto; border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.values-table { width: 100%; border-collapse: collapse; font: 400 0.82rem/1.4 var(--font-mono); }
+.values-table th, .values-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--rule); }
+.values-table th { background: var(--sunk); font-weight: 600; color: var(--muted); position: sticky; top: 0; z-index: 1; }
+.values-table tr:hover td { background: var(--sunk); }
 @media (max-width: 860px) {
   .math-graph, .math-notebook { grid-template-columns: minmax(0, 1fr); }
   .math-canvas { height: 60vh; }
@@ -801,3 +845,63 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 @media (max-width: 640px) {
   .btn { white-space: normal; text-align: left; line-height: 1.25; min-height: var(--control-h); height: auto; padding-top: 6px; padding-bottom: 6px; }
 }
+
+/* ---- Languages workspace (LanguageLab.jsx, src/practice/language.jsx) */
+.stack-xs { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.lang-source { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font-size: 1.15rem; padding: var(--space-3); background: var(--sunk); border-radius: var(--radius-sm); }
+.lang-target { font-size: 1.35rem; font-weight: 600; color: var(--ink); }
+.lang-ipa { font-size: 1.05rem; }
+.lang-input { width: 100%; font-size: 1.05rem; resize: vertical; }
+.lang-answer-line { min-height: 3rem; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding: var(--space-2) 0; border-bottom: 2px solid var(--rule); }
+.lang-bank { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.lang-tile { font: inherit; font-size: 1.05rem; padding: var(--space-2) var(--space-3); border: 1px solid var(--rule-strong); border-bottom-width: 3px; border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); cursor: pointer; }
+.lang-tile:hover:not(:disabled) { border-color: var(--accent); }
+.lang-bank .lang-tile:disabled { color: transparent; background: var(--sunk); border-color: var(--rule); cursor: default; }
+.lang-mic { align-self: flex-start; }
+.lang-session { max-width: 760px; margin: 0 auto; }
+.lang-session-top { display: flex; align-items: center; gap: var(--space-3); }
+.lang-progress { flex: 1; height: 12px; border-radius: 999px; background: var(--sunk); overflow: hidden; }
+.lang-progress span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.3s ease; }
+.lang-hearts { display: inline-flex; align-items: center; gap: 4px; color: var(--bad); font-weight: 700; }
+.lang-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--sunk); border-left: 3px solid var(--rule-strong); }
+.lang-footer.ok { background: var(--ok-tint); border-color: var(--ok); color: var(--ok-ink); }
+.lang-footer.bad { background: var(--bad-tint); border-color: var(--bad); color: var(--bad-ink); }
+.lang-explain { border-left: 3px solid var(--info); }
+.lang-path { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.lang-node { padding-left: var(--offset, 0); }
+.lang-unit-head { margin: var(--space-3) 0 var(--space-2); }
+.lang-node-row { display: flex; align-items: center; gap: var(--space-4); }
+.lang-node-dot { flex: none; width: 64px; height: 64px; border-radius: 50%; border: none; border-bottom: 5px solid var(--accent-press); background: var(--accent); color: var(--on-accent); font-size: 1.3rem; font-weight: 700; display: grid; place-items: center; cursor: pointer; }
+.lang-node[data-done="true"] .lang-node-dot { background: var(--gold); color: var(--on-gold); border-bottom-color: var(--gold-text); }
+.lang-node-dot:disabled { background: var(--sunk); color: var(--muted); border-bottom-color: var(--rule); cursor: default; }
+.lang-modes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); }
+.lang-mode { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); text-align: left; font: inherit; color: var(--ink); cursor: pointer; }
+.lang-mode:hover:not(:disabled) { border-color: var(--accent); }
+.lang-mode:disabled { opacity: 0.6; cursor: default; }
+.lang-words { width: 100%; border-collapse: collapse; }
+.lang-words th, .lang-words td { text-align: left; padding: var(--space-2); border-bottom: 1px solid var(--rule); vertical-align: top; }
+.lang-strength { display: inline-flex; gap: 3px; }
+.lang-strength i { width: 10px; height: 14px; border-radius: 2px; background: var(--sunk); border: 1px solid var(--rule); }
+.lang-strength i[data-on="true"] { background: var(--accent); border-color: var(--accent); }
+@media (max-width: 600px) { .lang-node { padding-left: 0; } .lang-words th:nth-child(4), .lang-words td:nth-child(4) { display: none; } }
+
+/* History Lab interactive practice types */
+:root {
+  --primary: var(--accent);
+  --border: var(--rule);
+  --surface-raised: var(--surface);
+  --primary-soft: var(--accent-tint);
+}
+
+.hist-categorize-bucket { min-height: 80px; border: 2px dashed var(--border); border-radius: var(--radius); padding: var(--space-2); }
+.hist-categorize-bucket.over { border-color: var(--primary); background: var(--surface-raised); }
+.hist-chain-slot { min-height: 48px; border: 2px dashed var(--border); border-radius: var(--radius); padding: var(--space-1) var(--space-2); display: flex; align-items: center; }
+.hist-chain-slot.filled { border-style: solid; border-color: var(--primary); }
+.hist-source-quote { border-left: 4px solid var(--primary); padding: var(--space-2) var(--space-3); margin: var(--space-2) 0; background: var(--surface-raised); border-radius: 0 var(--radius) var(--radius) 0; font-style: italic; }
+.hist-map-container { position: relative; display: inline-block; width: 100%; max-width: 640px; cursor: crosshair; }
+.hist-map-container img { width: 100%; height: auto; display: block; border: 1px solid var(--border); border-radius: var(--radius); }
+.hist-pin-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 0.85rem; margin: 2px; }
+.hist-pin-chip.selected { border-color: var(--primary); background: var(--primary-soft, color-mix(in srgb, var(--primary) 15%, transparent)); }
+.hist-date-slider { width: 100%; accent-color: var(--primary); }
+.hist-who-clue { background: var(--surface-raised); border-radius: var(--radius); padding: var(--space-2) var(--space-3); border-left: 3px solid var(--primary); margin-bottom: var(--space-1); }
+.hist-game-score { font-size: 1.5rem; font-weight: 700; color: var(--primary); text-align: center; padding: var(--space-2); }

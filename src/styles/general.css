@@ -1,0 +1,47 @@
+/* Lab, Math and IDE activities (src/practice/general.jsx). Only tokens from lab.css, so every theme works. */
+
+.act-diagram { position: relative; width: 100%; max-width: 560px; border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); user-select: none; touch-action: manipulation; }
+.act-diagram-svg { display: block; width: 100%; height: 100%; }
+.act-diagram-sizer { display: block; width: 100%; height: auto; opacity: 0; pointer-events: none; }
+.act-diagram-mask { position: absolute; inset: 0; background: var(--ink);
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: 100% 100%; mask-size: 100% 100%; pointer-events: none; }
+
+.act-spot { position: absolute; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border-radius: 50%;
+  border: 2px dashed var(--accent); background: var(--accent-tint); cursor: pointer; }
+.act-spot:disabled { cursor: default; opacity: 0.85; }
+.act-spot:not(:disabled):hover { background: var(--accent); }
+
+.act-bank { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.act-chip { font: 600 0.85rem/1.2 var(--font-ui); padding: 6px 10px; min-height: 32px; border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); cursor: grab; touch-action: none; max-width: 100%; }
+.act-chip:disabled { cursor: default; opacity: 0.6; }
+.act-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); }
+.act-chip-placed { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; cursor: pointer;
+  box-shadow: var(--shadow); max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.act-chip-placed:disabled { opacity: 1; }
+.act-chip[data-result="correct"] { border-color: var(--ok); background: var(--ok-tint); color: var(--ok-ink); }
+.act-chip[data-result="wrong"] { border-color: var(--bad); background: var(--bad-tint); color: var(--bad-ink); }
+.act-chip-answer { position: absolute; transform: translate(-50%, 60%); white-space: nowrap; border-style: dashed;
+  border-color: var(--ok); color: var(--ok-ink); background: var(--surface); pointer-events: none; font-size: 0.75rem; min-height: 0; padding: 2px 6px; }
+.act-chip-ghost { position: fixed; z-index: 50; transform: translate(-50%, -50%); pointer-events: none; box-shadow: var(--shadow-raised);
+  border-color: var(--accent); }
+
+.act-value { font: 600 0.85rem/1 var(--font-mono); color: var(--gold-text); }
+
+.act-cloze { line-height: 2.2; overflow-wrap: anywhere; }
+.act-gap { display: inline-block; width: auto; max-width: 100%; min-height: 0; height: 32px; padding: 2px 8px; margin: 0 2px; vertical-align: baseline; }
+.act-gap[data-result="correct"] { border-color: var(--ok); background: var(--ok-tint); }
+.act-gap[data-result="wrong"] { border-color: var(--bad); background: var(--bad-tint); }
+
+.act-code { list-style: none; margin: 0; padding: var(--space-2) 0; background: var(--code-bg); border: 1px solid var(--rule);
+  border-radius: var(--radius-sm); overflow-x: auto; }
+.act-code-line { display: flex; gap: var(--space-3); width: 100%; min-width: max-content; padding: 2px var(--space-3); border: 0;
+  border-left: 3px solid transparent; background: transparent; color: var(--ink); text-align: left; cursor: pointer; font: 0.85rem/1.5 var(--font-mono); }
+.act-code-line code { white-space: pre; font: inherit; background: none; }
+.act-code-line:not(:disabled):hover { background: var(--accent-tint); border-left-color: var(--accent); }
+.act-code-line:disabled { cursor: default; }
+.act-code-line[data-result="correct"] { background: var(--ok-tint); border-left-color: var(--ok); }
+.act-code-line[data-result="wrong"] { background: var(--bad-tint); border-left-color: var(--bad); }
+.act-code-n { color: var(--muted); min-width: 2ch; text-align: right; user-select: none; }
+.act-fix-input { font-family: var(--font-mono); width: 100%; }

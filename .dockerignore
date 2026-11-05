@@ -2,10 +2,22 @@ node_modules
 dist
 .env
 .git
-__pycache__
-*.pyc
-*.log
+.github
+.venv
+**/__pycache__
+**/*.pyc
+*.log*
+server.log*
+tests
+docs
+# runtime and private data: only the seed lessons in content/topics go into the image
 content/edu_studio.db*
 content/notes
+content/*.json
 content/*.jsonl
-content/agy_messages.json
+content/agy_drafts
+content/catalog_cache
+content/syllabus_cache
+content/*.tmp
+# private student lessons (src/App.jsx imports some of the seed topics, so those stay)
+content/topics/course-*.json

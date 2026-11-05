@@ -1,0 +1,7 @@
+# Caddy front end for `docker compose --profile tls up -d` (see docker-compose.yml).
+# Copy to ./Caddyfile and set SCIEDU_DOMAIN=<your domain> in .env. Caddy gets and renews the Let's Encrypt
+# certificate itself; the domain's DNS must point at this server and ports 80 and 443 must be open.
+# The same domain must be listed in SCIEDU_ALLOWED_HOSTS, or the app answers 403 "Forbidden host".
+{$SCIEDU_DOMAIN} {
+	reverse_proxy lab:8090
+}

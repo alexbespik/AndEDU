@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState, startTransition } from 'react';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import TopicViewer from './components/TopicViewer';
@@ -21,6 +21,22 @@ const SubjectWorkspace = lazy(() => import('./components/SubjectWorkspace'));
 const AdvisorPage = lazy(() => import('./components/AdvisorPage'));
 
 const FALLBACK_TOPICS = [rollingTopic, billiardTopic, lagrangianTopic];
+
+const topicSig = new WeakMap();  // topic object -> its JSON, computed once per object
+const sigOf = (t) => { let v = topicSig.get(t); if (v === undefined) { v = JSON.stringify(t); topicSig.set(t, v); } return v; };
+
+/** The new list, reusing the previous object for every lesson whose content did not change (and the old array if none did). */
+export function mergeTopics(prev, next) {
+  const old = new Map(prev.map((t) => [t.id, t]));
+  let changed = prev.length !== next.length;
+  const out = next.map((t, i) => {
+    const p = old.get(t.id);
+    if (p && sigOf(p) === sigOf(t)) { if (prev[i] !== p) changed = true; return p; }
+    changed = true;
+    return t;
+  });
+  return changed ? out : prev;
+}
 
 /**
  * Where a topic opens. Course classes: their course's workspace (the server always sets source.workspace).
@@ -51,6 +67,7 @@ export default function App() {
   const [ideRequest, setIdeRequest] = useState(null); // a practice set asked for in My courses
   const [homePreset, setHomePreset] = useState(null);
   const [progress, setProgress] = useState(null); // streak, daily goal, quests (engage.py)
+  const [workspaceTab, setWorkspaceTab] = useState(null);  // {tab, at} for History/Languages, sent by MCP tools
   const [mathPush, setMathPush] = useState(null);  // functions or a widget sent by the assistant / MCP tools
 
   useEffect(() => {
@@ -64,11 +81,18 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   }, []);
 
-  const fetchTopics = useCallback(async () => {
-    try {
-      const data = await api('/api/topics');
-      if (Array.isArray(data) && data.length) setTopics(data);
-    } catch { /* keep what we have */ }
+  // One refetch at a time (the version poll and TOPIC_UPDATED events often fire together). Unchanged lessons keep
+  // their objects, so memoized views skip them, and the update renders as a transition that never blocks input.
+  const topicsFetch = useRef(null);
+  const topicsDirty = useRef(false);  // asked again while a fetch was running: that fetch may predate the change
+  const fetchTopics = useCallback(() => {
+    if (topicsFetch.current) { topicsDirty.current = true; return topicsFetch.current; }
+    const run = () => api('/api/topics')
+      .then((data) => { if (Array.isArray(data) && data.length) startTransition(() => setTopics((prev) => mergeTopics(prev, data))); })
+      .catch(() => { /* keep what we have */ })
+      .then(() => { if (topicsDirty.current) { topicsDirty.current = false; return run(); } return undefined; });
+    topicsFetch.current = run().finally(() => { topicsFetch.current = null; });
+    return topicsFetch.current;
   }, []);
 
   // Cheap change detection: refetch the (large) topic list only when files changed
@@ -123,7 +147,7 @@ export default function App() {
         else if (p.topicId) openTopic(p.topicId, p.tab || 'theory');
         break;
       case 'SWITCH_TAB':
-        if (p.tab) { setActiveTab(p.tab); setMode((m) => (m === 'class' ? 'class' : 'physics')); }
+        if (p.tab) { setActiveTab(p.tab); setMode((m) => (['class', 'math', 'history', 'language'].includes(m) ? m : 'physics')); }  // stay in the workspace that shows the lesson
         break;
       case 'MATH_GRAPH':
         setMathPush({ graph: p, at: evt.seq }); setMode('math');
@@ -133,6 +157,7 @@ export default function App() {
         break;
       case 'SWITCH_STUDIO_MODE':
         if (p.mode) setMode(p.mode);
+        if (p.tab) setWorkspaceTab({ ...p, tab: p.tab, mode: p.sessionMode || p.mode, unitId: p.unitId, at: evt.seq });  // a sub-tab of that workspace
         break;
       case 'SET_SIM_CONFIG':
         setLiveSimConfig({ ...p, _at: evt.seq });
@@ -173,11 +198,11 @@ export default function App() {
   const signOut = useCallback(() => {
     api('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setToken(null);
-    saveProfile(null); setUser(null); setCourseId(null); setMode('home'); setPanelOpen(false);
+    saveProfile(null); setUser(null); setCourseId(null); setProgress(null); setMode('home'); setPanelOpen(false);
   }, []);
 
   useEffect(() => {
-    const onExpired = () => { setToken(null); saveProfile(null); setUser(null); setMode('home'); };
+    const onExpired = () => { setToken(null); saveProfile(null); setUser(null); setProgress(null); setMode('home'); };
     window.addEventListener('andedu:signed-out', onExpired);
     return () => window.removeEventListener('andedu:signed-out', onExpired);
   }, []);
@@ -239,7 +264,7 @@ export default function App() {
           )}
           {(mode === 'history' || mode === 'language') && (
             <Suspense fallback={<div className="page"><p className="hint">Loading…</p></div>}>
-              <SubjectWorkspace key={mode} kind={mode} classTopic={subjectClass} topics={subjectTopics} onOpenTopic={(id) => openTopic(id)}
+              <SubjectWorkspace key={mode} kind={mode} requestedTab={workspaceTab} classTopic={subjectClass} topics={subjectTopics} onOpenTopic={(id) => openTopic(id)}
                 renderClass={(t) => (
                   <TopicViewer key={t.id} embedded topic={t} activeTab={activeTab} setActiveTab={setActiveTab}
                     liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(t)} />

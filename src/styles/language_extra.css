@@ -1,0 +1,51 @@
+/* Extra language activities (stories, dialogues, conjugation, scripts). Tokens from lab.css only. */
+.lx-story-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-3); }
+.lx-story-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.lx-story-line { padding: var(--space-2) var(--space-3); background: var(--sunk); border-radius: var(--radius-sm); }
+.lx-line-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.lx-speaker { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.lx-line-text { font-size: 1.05rem; color: var(--ink); flex: 1 1 12rem; min-width: 0; }
+.lx-link { font: inherit; font-size: 0.85rem; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; }
+.lx-story-q { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--rule); }
+
+.lx-dialogue-brief { flex-direction: column; align-items: flex-start; gap: var(--space-1); font-size: 1rem; }
+.lx-chat { display: flex; flex-direction: column; gap: var(--space-3); max-height: 460px; overflow-y: auto; padding: var(--space-2); }
+.lx-msg { display: flex; flex-direction: column; gap: var(--space-1); max-width: 100%; }
+.lx-msg-me { align-items: flex-end; }
+.lx-msg-them { align-items: flex-start; }
+.lx-bubble { display: flex; flex-direction: column; gap: var(--space-1); max-width: 85%; padding: var(--space-2) var(--space-3); border-radius: var(--radius); border: 1px solid var(--rule); background: var(--sunk); color: var(--ink); overflow-wrap: anywhere; }
+.lx-msg-me .lx-bubble { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.lx-msg-me .lx-speaker { color: var(--on-accent); opacity: 0.85; }
+.lx-tr { font-size: 0.85rem; color: var(--muted); }
+.lx-tr summary { cursor: pointer; }
+.lx-corrections { margin: 0; padding-left: var(--space-5); font-size: 0.9rem; max-width: 85%; }
+.lx-correction s { color: var(--bad-ink); }
+.lx-correction strong { color: var(--ok-ink); }
+.lx-tip { max-width: 85%; font-size: 0.85rem; }
+.lx-chat-input { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.lx-chat-input .input { flex: 1 1 12rem; min-width: 0; }
+
+.lx-conj { display: flex; flex-direction: column; gap: var(--space-2); }
+.lx-conj-row { display: grid; grid-template-columns: minmax(4rem, 7rem) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
+.lx-conj-pronoun { font-weight: 600; color: var(--ink-soft); }
+.lx-conj-row[data-result="correct"] .input { border-color: var(--ok); background: var(--ok-tint); }
+.lx-conj-row[data-result="wrong"] .input { border-color: var(--bad); background: var(--bad-tint); }
+.lx-conj-mark { color: var(--ok-ink); font-size: 0.9rem; }
+.lx-conj-row[data-result="wrong"] .lx-conj-mark { color: var(--bad-ink); }
+
+.lx-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.lx-picker [aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); }
+.lx-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 0.9rem; }
+.lx-glyphs { display: grid; grid-template-columns: repeat(auto-fill, minmax(3.6rem, 1fr)); gap: var(--space-2); }
+.lx-glyph { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: var(--space-2) var(--space-1); border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }
+.lx-glyph:hover { border-color: var(--accent); }
+.lx-glyph-char { font-size: 1.5rem; line-height: 1.2; }
+.lx-glyph-roman { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); }
+.lx-script .match-item { font-size: 1.15rem; }
+.lx-tip-section summary { cursor: pointer; font-weight: 600; padding: var(--space-1) 0; }
+
+@media (max-width: 480px) {
+  .lx-bubble, .lx-corrections, .lx-tip { max-width: 100%; }
+  .lx-conj-row { grid-template-columns: minmax(3.5rem, 5rem) minmax(0, 1fr); }
+  .lx-conj-mark { grid-column: 2; }
+}

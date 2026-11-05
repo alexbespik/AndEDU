@@ -1,15 +1,40 @@
-# &.edu LAB on a server: `docker compose up -d --build`, then open http://<server>:8090
+# &.edu LAB on a server.
+#   docker compose up -d --build                 app only, reachable from this host only: http://127.0.0.1:8090
+#   docker compose --profile tls up -d --build   plus Caddy: automatic HTTPS for students on https://<domain>
+# For the tls profile: point the domain's DNS at this server, `cp Caddyfile.example Caddyfile`, set
+# SCIEDU_DOMAIN=<domain> in .env, and put that domain in SCIEDU_ALLOWED_HOSTS below (other Host headers get 403).
 services:
   lab:
     build: .
     restart: unless-stopped
     ports:
-      - "8090:8090"
-    env_file: .env                 # api_KEY=..., optional SCIEDU_PLANNER_MODELS / SCIEDU_LESSON_MODELS
+      # loopback only: without the tls profile nothing outside this machine can reach the app
+      # (use an SSH tunnel to test from elsewhere). Students come in through Caddy.
+      - "127.0.0.1:8090:8090"
+    env_file: .env                 # api_KEY=..., optional SCIEDU_PLANNER_MODELS / SCIEDU_LESSON_MODELS (see .env.example)
     environment:
       SCIEDU_AUTH: "1"             # every student signs in; courses are private to their owner
-      # the hostnames students type in the address bar (anything else is rejected)
-      SCIEDU_ALLOWED_HOSTS: "lab.example.edu,192.168.1.50"
+      # the hostnames students type in the address bar (anything else is rejected); must include SCIEDU_DOMAIN
+      SCIEDU_ALLOWED_HOSTS: "lab.example.edu"
       AGY_CLI: "0"                 # never let uploaded documents drive an agent on a shared server
+      # trust X-Forwarded-For from the Caddy proxy, so sign-in limits count each student, not the proxy.
+      # Only Docker's private networks (where Caddy runs) are trusted; uvicorn then reads the right-most untrusted hop.
+      FORWARDED_ALLOW_IPS: "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
     volumes:
       - ./content:/app/content     # SQLite database, lessons and notes survive rebuilds
+
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]              # only with `docker compose --profile tls ...`
+    restart: unless-stopped
+    depends_on: [lab]
+    ports:
+      - "80:80"                    # ACME challenge and redirect to HTTPS
+      - "443:443"
+    env_file: .env                 # SCIEDU_DOMAIN=lab.example.edu
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro   # copy Caddyfile.example to Caddyfile first
+      - caddy_data:/data           # certificates; keep it, or Let's Encrypt rate limits can bite on rebuilds
+
+volumes:
+  caddy_data:

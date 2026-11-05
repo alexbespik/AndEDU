@@ -1,12 +1,119 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload, Loader2, Search, X, Compass, Sparkles, ClipboardCheck, BookMarked } from 'lucide-react';
 import { api, uploadFiles } from '../lib/api';
+import AdvisorChat from './AdvisorChat';
 
-/** A course's listed prerequisites against the student's record ("or" wording: one of the group is enough). */
+/** Evaluates prerequisite CNF groups (AND of OR-choice groups). */
+function prereqGroups(course) {
+  // an older backend sends prereq_tree as the raw JSON column ("[]"); a string here used to crash the page
+  let tree = course.prereq_tree;
+  if (typeof tree === 'string') { try { tree = JSON.parse(tree); } catch { tree = []; } }
+  const groups = Array.isArray(tree) ? tree.map((g) => (Array.isArray(g) ? g : [g]).filter((c) => typeof c === 'string')).filter((g) => g.length) : [];
+  return groups.length ? groups : (Array.isArray(course.prereq_codes) ? course.prereq_codes : []).map((c) => [c]);
+}
+
 function readiness(course, done) {
-  const missing = course.prereq_codes.filter((c) => !done.has(c));
-  const either = /\bor\b/i.test(course.prereqs || '') && course.prereq_codes.some((c) => done.has(c));
-  return { met: either || !missing.length, missing: either ? [] : missing };
+  const tree = prereqGroups(course);
+
+  const levelMatch = (course.code || '').match(/\d+/);
+  const level = levelMatch ? parseInt(levelMatch[0], 10) : 100;
+  const rawPrereqs = (course.prereqs || '').trim().toLowerCase();
+  const isExplicitNone = ['none', 'none.', 'n/a', 'no prerequisites'].includes(rawPrereqs);
+
+  if (!tree.length) {
+    if (level >= 300 && !isExplicitNone) {
+      return { met: false, missing: [], status: 'unknown' };
+    }
+    return { met: true, missing: [], status: 'none' };
+  }
+
+  const missing = [];
+  for (const group of tree) {
+    if (!group.some((c) => done.has(c))) {
+      missing.push(group.length > 1 ? `(${group.join(' or ')})` : group[0]);
+    }
+  }
+  return { met: missing.length === 0, missing, status: missing.length === 0 ? 'met' : 'missing' };
+}
+
+function DegreeAudit({ user, doneLength }) {
+  const [audit, setAudit] = useState(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    api(`/api/advisor/${user.id}/degree-audit`).then(setAudit).catch(() => {});
+  }, [user?.id, doneLength]);
+
+  if (!audit || !user?.id) return null;
+  const { coll, proficiencies, total_credits } = audit;
+
+  return (
+    <section className="panel stack-sm" style={{ marginBottom: 'var(--space-4)' }} aria-labelledby="coll-h" role="region">
+      <div className="btn-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 id="coll-h" style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Sparkles size={16} /> Degree Progress · College Curriculum (COLL)
+        </h2>
+        <span className="hint">{total_credits} credits completed</span>
+      </div>
+      <div className="file-chips" style={{ marginTop: 'var(--space-2)' }}>
+        {coll && Object.entries(coll).map(([k, req]) => (
+          <span
+            key={k}
+            className="chip"
+            style={{
+              background: req.met ? 'var(--ok-tint)' : 'var(--surface)',
+              color: req.met ? 'var(--ok-ink)' : 'var(--ink)',
+              borderColor: req.met ? 'var(--ok-border, var(--ok-ink))' : 'var(--rule)',
+              padding: '4px 10px',
+            }}
+            title={req.courses?.length ? `Applied: ${req.courses.join(', ')}` : 'No courses applied'}
+          >
+            <strong>{req.name}</strong>:{' '}
+            {req.met ? 'Done' : `${req.earned}/${req.required} cr`}
+            {k === 'coll200' && !req.met && (
+              <span className="hint" style={{ fontSize: '0.72rem', marginLeft: '4px' }}>
+                (ALV: {req.alv}/3 · CSI: {req.csi}/3 · NQR: {req.nqr}/3)
+              </span>
+            )}
+            {req.likely > 0 && !req.met && (
+              <span
+                className="chip"
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '1px 6px',
+                  marginLeft: '6px',
+                  background: 'var(--accent-tint, rgba(99, 102, 241, 0.1))',
+                  color: 'var(--accent-ink, #4f46e5)',
+                  border: '1px solid var(--accent-border, rgba(99, 102, 241, 0.3))',
+                }}
+                title={
+                  req.likely_courses?.length
+                    ? `AI identified candidate course(s) awaiting official advisor review: ${req.likely_courses.join(', ')}`
+                    : 'AI identified candidate courses awaiting official advisor review'
+                }
+              >
+                +{req.likely} likely (AI)
+              </span>
+            )}
+          </span>
+        ))}
+        {proficiencies && Object.entries(proficiencies).map(([k, p]) => (
+          <span
+            key={k}
+            className="chip"
+            style={{
+              background: p.met ? 'var(--ok-tint)' : 'var(--surface)',
+              color: p.met ? 'var(--ok-ink)' : 'var(--ink)',
+              borderColor: p.met ? 'var(--ok-border, var(--ok-ink))' : 'var(--rule)',
+              padding: '4px 10px',
+            }}
+            title={p.courses?.length ? `Applied: ${p.courses.join(', ')}` : 'Not yet completed'}
+          >
+            <strong>{p.name}</strong>: {p.met ? 'Done' : 'Needed'}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function Importer({ label, hint, onText, accept }) {
@@ -46,14 +153,35 @@ export default function AdvisorPage({ user, onOpenCourse }) {
   const [recs, setRecs] = useState(null);
   const [interests, setInterests] = useState('');
   const [open, setOpen] = useState(null);
+  const [sectionsMap, setSectionsMap] = useState({});
   const [notice, setNotice] = useState(null);
-  const doneSet = new Set(done.map((d) => d.code));
+  const doneSet = new Set(done.filter((d) => !d.grade || !['F', 'W', 'U', 'I'].includes(d.grade.trim().toUpperCase())).map((d) => d.code));
 
   const loadDone = useCallback(() => api(`/api/advisor/${user.id}/completed`).then((d) => setDone(d.completed)).catch(() => {}), [user.id]);
   const search = useCallback(() => api(`/api/advisor/catalog?q=${encodeURIComponent(q)}&dept=${encodeURIComponent(dept)}`)
     .then((d) => { setResults(d.courses); setStats(d.stats); }).catch(() => {}), [q, dept]);
   useEffect(() => { loadDone(); }, [loadDone]);
   useEffect(() => { const t = setTimeout(search, 250); return () => clearTimeout(t); }, [search]);
+
+  const requestedSections = useRef(new Set());
+
+  const fetchSections = useCallback((code) => {
+    if (requestedSections.current.has(code)) return;
+    requestedSections.current.add(code);
+    setSectionsMap((prev) => ({ ...prev, [code]: null }));
+    api(`/api/advisor/catalog/${encodeURIComponent(code)}/sections`)
+      .then((d) => setSectionsMap((latest) => ({ ...latest, [code]: d.sections || [] })))
+      .catch(() => setSectionsMap((latest) => ({ ...latest, [code]: [] })));
+  }, []);
+
+  const toggleOpen = (code) => {
+    if (open === code) {
+      setOpen(null);
+    } else {
+      setOpen(code);
+      fetchSections(code);
+    }
+  };
 
   const readyCourse = async (code) => {
     setNotice(`Building a readiness check for ${code}…`);
@@ -65,12 +193,13 @@ export default function AdvisorPage({ user, onOpenCourse }) {
   const CourseRow = ({ c, extra }) => {
     const r = readiness(c, doneSet);
     const taken = doneSet.has(c.code);
+    const secs = sectionsMap[c.code];
     return (
       <li className="advisor-row">
-        <button type="button" className="card-link advisor-head" onClick={() => setOpen(open === c.code ? null : c.code)} aria-expanded={open === c.code}>
+        <button type="button" className="card-link advisor-head" onClick={() => toggleOpen(c.code)} aria-expanded={open === c.code}>
           <span className="num advisor-code">{c.code}</span><span>{c.title}</span>
-          <span className={`status ${taken ? 'status-pending' : r.met ? 'status-ready' : 'status-error'}`}>
-            {taken ? 'Done' : r.met ? 'Prerequisites met' : `Missing ${r.missing.join(', ')}`}
+          <span className={`status ${taken ? 'status-pending' : r.status === 'unknown' ? 'status-pending' : r.met ? 'status-ready' : 'status-error'}`}>
+            {taken ? 'Done' : r.status === 'unknown' ? 'Prerequisites not listed' : r.met ? (r.status === 'none' ? 'No prerequisites' : 'Prerequisites met') : `Missing: ${r.missing.join(' · ')}`}
           </span>
           {extra}
         </button>
@@ -79,6 +208,25 @@ export default function AdvisorPage({ user, onOpenCourse }) {
             {c.credits && <span className="hint">{c.credits} credits{c.attributes?.length ? ` · ${c.attributes.join(', ')}` : ''}</span>}
             {c.description && <p>{c.description}</p>}
             {c.prereqs && <p className="hint">Prerequisites: {c.prereqs}</p>}
+            <div className="advisor-sections stack-xs" style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+              <span className="label" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Scheduled Classes &amp; Sections</span>
+              {secs === null || secs === undefined ? (
+                <span className="hint"><Loader2 size={12} className="spin" /> Checking active schedule…</span>
+              ) : secs.length > 0 ? (
+                <ul className="stack-xs" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {secs.map((s) => (
+                    <li key={s.term + s.crn} className="hint" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
+                      <span className="chip" style={{ fontSize: '0.75rem', padding: '1px 6px' }}>{s.term_name || s.term} · Sec {s.section}</span>
+                      {s.meets && <span>{s.meets}</span>}
+                      {s.instructor && <span>· {s.instructor}</span>}
+                      <span className="num" style={{ opacity: 0.7 }}>CRN {s.crn}{s.credits ? ` · ${s.credits} cr` : ''}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="hint">No active sections listed for upcoming semesters.</span>
+              )}
+            </div>
             {!taken && (
               <div className="btn-row">
                 <button type="button" className="btn btn-gold btn-sm" onClick={() => readyCourse(c.code)}><ClipboardCheck size={14} /> Test my readiness</button>
@@ -112,6 +260,10 @@ export default function AdvisorPage({ user, onOpenCourse }) {
       )}
       {notice && <p className="notice notice-info">{notice}</p>}
 
+      <DegreeAudit user={user} doneLength={done.length} />
+
+      <AdvisorChat user={user} doneCount={done.length} />
+
       <div className="split">
         <section className="panel stack" aria-labelledby="rec-h">
           <h2 id="rec-h"><Sparkles size={18} aria-hidden="true" /> What to take next</h2>
@@ -143,7 +295,7 @@ export default function AdvisorPage({ user, onOpenCourse }) {
 
       <section className="panel stack" aria-labelledby="cat-h">
         <div className="btn-row" style={{ justifyContent: 'space-between' }}>
-          <h2 id="cat-h"><Compass size={18} aria-hidden="true" /> Catalog {stats ? `(${stats.courses} courses)` : ''}</h2>
+          <h2 id="cat-h"><Compass size={18} aria-hidden="true" /> Catalog {stats ? `(${stats.courses} courses${stats.sections ? ` · ${stats.sections.toLocaleString()} classes scheduled` : ''})` : ''}</h2>
           <div className="btn-row">
             <Search size={15} aria-hidden="true" />
             <input className="input" style={{ width: 240 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search titles and descriptions" aria-label="Search the catalog" />

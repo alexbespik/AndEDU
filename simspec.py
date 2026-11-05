@@ -17,11 +17,21 @@ import re
 from typing import Any, Dict, List, Tuple
 
 FUNCTIONS = {
-    "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh",
-    "sqrt", "abs", "exp", "log", "log10", "min", "max", "pow", "floor", "ceil",
-    "round", "sign", "hypot", "clamp", "if", "fact",
+    "sin", "cos", "tan", "csc", "sec", "cot",
+    "asin", "arcsin", "acos", "arccos", "atan", "arctan", "atan2",
+    "acsc", "arccsc", "asec", "arcsec", "acot", "arccot",
+    "sinh", "cosh", "tanh", "csch", "sech", "coth",
+    "asinh", "arcsinh", "acosh", "arccosh", "atanh", "arctanh",
+    "acsch", "arccsch", "asech", "arcsech", "acoth", "arccoth",
+    "sqrt", "cbrt", "nthroot", "exp", "pow",
+    "ln", "log", "log2", "log10",
+    "abs", "sign", "sgn", "floor", "ceil", "round", "trunc", "clamp", "hypot",
+    "mod", "gcd", "lcm", "min", "max",
+    "fact", "factorial", "nPr", "perm", "nCr", "comb",
+    "erf", "gamma", "sinc", "step", "heaviside", "rect",
+    "if",
 }
-CONSTANTS = {"pi", "tau", "E"}
+CONSTANTS = {"pi", "PI", "tau", "TAU", "e", "E", "phi", "PHI", "inf", "infinity", "Infinity"}
 BODY_FIELDS = {"x", "y", "vx", "vy", "m", "r", "speed"}
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
 COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|accent|gold|green|cyan|pink|orange|purple|white)$")

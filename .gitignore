@@ -10,11 +10,15 @@ __pycache__
 # runtime data (profiles, courses, attempts)
 content/edu_studio.db*
 content/quiz_results.jsonl
+# every runtime log in content/ (quiz results, agy inbox)
+content/*.jsonl
+content/agy_inbox.jsonl
 content/*.tmp
 # generated per student: course lessons and their notes stay out of the repo
 content/topics/course-*.json
 content/notes/
 content/catalog_cache/
+content/syllabus_cache/
 content/agy_messages.json
 content/quiz_results.json
 content/agy_drafts/

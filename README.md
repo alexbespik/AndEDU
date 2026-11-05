@@ -27,8 +27,12 @@ Optional `.env` settings:
 ## Host it for a class or a university
 Accounts are required whenever the server is reachable from other machines; it refuses to start otherwise.
 ```bash
-docker compose up -d --build   # edit SCIEDU_ALLOWED_HOSTS in docker-compose.yml first
+cp .env.example .env                        # fill in api_KEY; SCIEDU_DOMAIN for HTTPS
+cp Caddyfile.example Caddyfile
+docker compose --profile tls up -d --build  # app + Caddy (automatic HTTPS on 80/443)
 ```
+Put the domain in `SCIEDU_ALLOWED_HOSTS` in docker-compose.yml. Without `--profile tls` the app listens on
+127.0.0.1:8090 only, so it is reachable from the server itself and nothing else.
 Without Docker: `npm run build`, then `SCIEDU_AUTH=1 SCIEDU_HOST=0.0.0.0 SCIEDU_ALLOWED_HOSTS=lab.example.edu python server.py`.
 The backend serves the built app and the API on one port (8090). Data lives in `content/`
 (SQLite database, lessons, notes), or wherever `SCIEDU_CONTENT_DIR` points.

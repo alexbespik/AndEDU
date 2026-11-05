@@ -10,6 +10,7 @@ import datetime
 import hashlib
 import json
 import math
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +27,13 @@ CREATE TABLE IF NOT EXISTS xp_events (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS xp_user_day ON xp_events (user_id, day);
+CREATE INDEX IF NOT EXISTS xp_user_source_ref ON xp_events (user_id, source, ref);
+CREATE TABLE IF NOT EXISTS quest_days (
+    user_id  TEXT NOT NULL,
+    day      TEXT NOT NULL,
+    ids      TEXT NOT NULL,                 -- JSON list of the quest ids picked for that day
+    PRIMARY KEY (user_id, day)
+);
 CREATE TABLE IF NOT EXISTS engage_prefs (
     user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     daily_goal INTEGER NOT NULL DEFAULT 30,
@@ -63,22 +71,23 @@ CREATE TABLE IF NOT EXISTS review_items (
 
 # source -> (xp, scope). scope: "day" = once per (ref, day); "ever" = once per ref; ("cap", n) = n per day
 SOURCES = {
-    "quiz_correct": (10, "day"),
-    "quiz_attempt": (2, "day"),          # a wrong answer still counts as effort (and keeps the streak)
-    "class_complete": (20, "ever"),
-    "quiz_perfect": (10, "ever"),
-    "practice_correct": (8, "day"),
-    "math_correct": (8, "day"),
-    "review_correct": (6, "day"),
-    "review_attempt": (1, "day"),
-    "review_session": (10, ("cap", 3)),
-    "ide_solved": (15, "ever"),
-    "sim_explored": (5, "day"),
-    "lesson_read": (3, "day"),
-    "quests_bonus": (15, "day"),
+    "quiz_correct": (8, "day"),          # was 10 — reduced: quiz correct per ref per day
+    "quiz_attempt": (0, "day"),          # unchanged: wrong answers don't reward
+    "class_complete": (25, "ever"),      # was 20 — bonus for completing a full class
+    "quiz_perfect": (15, "ever"),        # was 10 — perfect score bonus, once per class
+    "practice_correct": (5, ("cap", 20)),  # was (8, "day") — cap at 20 correct per day (100 XP max from practice)
+    "math_correct": (5, ("cap", 20)),    # was (8, "day") — same cap
+    "review_correct": (8, "day"),        # was 6 — reviewing missed items is higher value
+    "review_attempt": (0, "day"),        # unchanged
+    "review_session": (10, ("cap", 2)),  # was cap 3 — reduced to 2 review session bonuses per day
+    "ide_solved": (20, "ever"),          # was 15 — coding tasks are hard, one-time
+    "sim_explored": (3, ("cap", 5)),     # was (5, "day") — cap at 5 unique sims per day (15 XP max)
+    "lesson_read": (2, ("cap", 10)),     # was (3, "day") — cap at 10 lessons per day (20 XP max)
+    "quests_bonus": (20, "day"),         # was 15 — completing all 3 quests deserves more
 }
 CLIENT_SOURCES = {"practice_correct", "math_correct", "ide_solved", "sim_explored", "lesson_read"}
-CLIENT_DAILY_CAP = 60  # per client-reported source per day
+CLIENT_DAILY_CAP = 40  # per client-reported source per day
+DAILY_MAX = {"ide_solved": 5}  # "ever" sources whose refs the client names: at most this many new ones a day
 CORRECT_SOURCES = ("quiz_correct", "practice_correct", "math_correct", "review_correct")
 GOALS = (10, 20, 30, 50)                    # casual, regular, serious, intense
 REVIEW_INTERVALS = (1, 3, 7, 14, 30)        # days until the next review, by Leitner box
@@ -149,7 +158,7 @@ def set_prefs(user_id: str, daily_goal: Optional[int] = None, focus_mode: Option
 # ---------------------------------------------------------------- streaks
 def _active_days(user_id: str) -> set:
     c = db.conn()
-    days = {r[0] for r in c.execute("SELECT DISTINCT day FROM xp_events WHERE user_id = ?", (user_id,))}
+    days = {r[0] for r in c.execute("SELECT DISTINCT day FROM xp_events WHERE user_id = ? AND amount > 0", (user_id,))}
     days |= {r[0] for r in c.execute("SELECT day FROM freeze_days WHERE user_id = ?", (user_id,))}
     return days
 
@@ -203,8 +212,18 @@ def level_for(total: int) -> Dict[str, int]:
     return {"level": level, "levelStart": start, "nextLevel": nxt}
 
 
+# Sync handlers run in a thread pool: two identical requests at once (a double click) must not both pass the
+# duplicate check. The server runs as one process (ARCHITECTURE.md §5.3), so a process lock is enough.
+_award_lock = threading.RLock()
+
+
 def award(user_id: str, day: str, source: str, ref: str = "") -> Dict[str, Any]:
     """Records XP for one action (if this action hasn't paid out already) and returns what changed."""
+    with _award_lock:
+        return _award(user_id, day, source, ref)
+
+
+def _award(user_id: str, day: str, source: str, ref: str = "") -> Dict[str, Any]:
     if source not in SOURCES:
         raise ValueError(f"unknown XP source {source}")
     amount, scope = SOURCES[source]
@@ -215,7 +234,13 @@ def award(user_id: str, day: str, source: str, ref: str = "") -> Dict[str, Any]:
     elif scope == "ever":
         dup = c.execute("SELECT 1 FROM xp_events WHERE user_id = ? AND source = ? AND ref = ?", (user_id, source, ref)).fetchone()
     else:
-        dup = c.execute("SELECT COUNT(*) FROM xp_events WHERE user_id = ? AND source = ? AND day = ?", (user_id, source, day)).fetchone()[0] >= scope[1]
+        if ref and c.execute("SELECT 1 FROM xp_events WHERE user_id = ? AND source = ? AND ref = ? AND day = ?", (user_id, source, ref, day)).fetchone():
+            dup = True
+        else:
+            dup = c.execute("SELECT COUNT(*) FROM xp_events WHERE user_id = ? AND source = ? AND day = ?", (user_id, source, day)).fetchone()[0] >= scope[1]
+    if not dup and source in DAILY_MAX:
+        dup = c.execute("SELECT COUNT(*) FROM xp_events WHERE user_id = ? AND source = ? AND day = ?",
+                        (user_id, source, day)).fetchone()[0] >= DAILY_MAX[source]
     if dup:
         return {"xp": 0}
     if source in CLIENT_SOURCES and c.execute("SELECT COUNT(*) FROM xp_events WHERE user_id = ? AND source = ? AND day = ?",
@@ -225,7 +250,7 @@ def award(user_id: str, day: str, source: str, ref: str = "") -> Dict[str, Any]:
     p = prefs(user_id)
     before_today = _xp_today(user_id, day)
     before_total = _total_xp(user_id)
-    first_today = not streak_info(user_id, day)["doneToday"]
+    first_today = (amount > 0) and not streak_info(user_id, day)["doneToday"]
     if first_today:
         _apply_freezes(user_id, day)
     c.execute("INSERT INTO xp_events (user_id, day, source, ref, amount, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -271,13 +296,23 @@ def quests(user_id: str, day: str) -> List[Dict[str, Any]]:
         ("sim", "Explore a simulation", n.get("sim_explored", 0), 1),
         ("read", "Read a lesson for a few minutes", n.get("lesson_read", 0), 1),
     ]
-    if due_count(user_id, day) == 0 and not n.get("review_session"):
-        pool = [p for p in pool if p[0] != "review"]
-    seed = int(hashlib.sha256(f"{user_id}:{day}".encode()).hexdigest(), 16)
-    picked = []
-    while len(picked) < 2 and pool:
-        picked.append(pool.pop(seed % len(pool)))
-        seed //= 7
+    # the day's two quests are picked once and stored, so finishing a review mid-day can't swap them
+    c = db.conn()
+    row = c.execute("SELECT ids FROM quest_days WHERE user_id = ? AND day = ?", (user_id, day)).fetchone()
+    if row:
+        ids = json.loads(row[0])
+        by_id = {p[0]: p for p in pool}
+        picked = [by_id[i] for i in ids if i in by_id]  # in the order they were picked
+    else:
+        if due_count(user_id, day) == 0 and not n.get("review_session"):
+            pool = [p for p in pool if p[0] != "review"]
+        seed = int(hashlib.sha256(f"{user_id}:{day}".encode()).hexdigest(), 16)
+        picked = []
+        while len(picked) < 2 and pool:
+            picked.append(pool.pop(seed % len(pool)))
+            seed //= 7
+        c.execute("INSERT OR IGNORE INTO quest_days (user_id, day, ids) VALUES (?, ?, ?)", (user_id, day, json.dumps([p[0] for p in picked])))
+        c.commit()
     out = [{"id": "xp", "title": f"Earn {goal} XP", "progress": min(xp, goal), "target": goal}]
     out += [{"id": i, "title": t, "progress": min(v, target), "target": target} for i, t, v, target in picked]
     for q in out:
@@ -295,7 +330,7 @@ def _check_badges(user_id: str, day: str) -> List[Dict[str, str]]:
     sims = c.execute("SELECT COUNT(DISTINCT ref) FROM xp_events WHERE user_id = ? AND source = 'sim_explored'", (user_id,)).fetchone()[0]
     streak = streak_info(user_id, day)["longest"]
     earned = {
-        "first_steps": sum(n.values()) > 0,
+        "first_steps": _total_xp(user_id) > 0,
         "streak_3": streak >= 3, "streak_7": streak >= 7, "streak_30": streak >= 30,
         "class_done": n.get("class_complete", 0) > 0,
         "perfect": n.get("quiz_perfect", 0) > 0,

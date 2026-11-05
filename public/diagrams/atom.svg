@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" fill="none" stroke="currentColor" stroke-width="2.5">
+  <title>Bohr model of an atom (unlabelled)</title>
+  <circle cx="160" cy="160" r="70" stroke-dasharray="6 5"/>
+  <circle cx="160" cy="160" r="130" stroke-dasharray="6 5"/>
+  <g fill="currentColor" fill-opacity="0.85" stroke="none">
+    <circle cx="150" cy="152" r="11"/><circle cx="170" cy="168" r="11"/>
+  </g>
+  <g fill="currentColor" fill-opacity="0.3">
+    <circle cx="170" cy="150" r="11"/><circle cx="150" cy="170" r="11"/>
+  </g>
+  <g fill="currentColor" stroke="none">
+    <circle cx="230" cy="160" r="7"/><circle cx="90" cy="160" r="7"/><circle cx="160" cy="30" r="7"/><circle cx="68" cy="252" r="7"/>
+  </g>
+</svg>

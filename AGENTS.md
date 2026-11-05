@@ -6,11 +6,16 @@ Autonomous agents (agy, Claude Code, background loops) can add lessons and simul
 frontend code.
 
 ## Workspaces
-Seven tabs: My courses, Lab, IDE, Math, **History** (timeline, all flashcards), **Languages** (flashcards read aloud,
-pronunciation, IPA), **Advisor** (course record, catalog, readiness). Course `workspace` values: math | code | lab | history | language.
+Seven tabs: My courses, Lab, IDE, Math, **History** (`HistoryLab.jsx`: Map with pins on offline maps in `public/maps/`, Figures to chat with in persona mode, daily Games, Sources, Crisis simulator, a timeline with era bands and zoom, all flashcards), **Languages** (`LanguageLab.jsx`: Learn path of
+units, practice sessions with free hearts, listening and speaking drills, a word list with strength, flashcards, pronunciation, IPA, plus Stories, Alphabets, Dialogues and Grammar tips from `src/components/language/`), **Advisor** (course record, catalog, readiness). Course `workspace` values: math | code | lab | history | language.
 Lesson activities (any subject): Flashcards (`flashcards`), Speed round (Kahoot-style, from `quiz`), Timeline (`timeline`,
 with an ordering challenge), practice types `match_pairs` and `draw` (a whiteboard in the app;
-`POST /api/draw/check` grades the drawing against its `criteria` with the vision model). Course advisor data: `advisor.py` (catalog_courses,
+`POST /api/draw/check` grades the drawing against its `criteria` with the vision model).
+More practice types live in per-subject normalizer modules merged into `server.PRACTICE_NORMALIZERS`, with bodies in `src/practice/<subject>.jsx`:
+history (`practice_history.py`) `categorize`, `cause_effect`, `source_analysis`, `map_pins`, `who_am_i`, `date_guess`, `roleplay`;
+languages (`practice_language_extra.py`) `story`, `dialogue`, `conjugate`, `script_match`; lab, math and code (`practice_general.py`)
+`label_diagram` (offline images in `public/diagrams/` or a data-only `svg_spec`), `sort_by`, `odd_one_out`, `cloze`, `spot_the_bug`.
+Fields and drop rules: `GET /api/practice/guide` (the normalizers' docstrings). Course advisor data: `advisor.py` (catalog_courses,
 completed_courses); catalog.wm.edu blocks scripts, so catalogs come from `scripts/import_wm_catalog_wayback.py`
 (Internet Archive snapshots, e.g. the 2023-24 catalog) or are imported from text/PDF/JSON.
 My courses (one place to add materials: learn, test prep, continue a course, coding practice) ·
@@ -51,7 +56,12 @@ fallback) and its class topics carry it in `source.workspace`; `src/App.jsx` ope
     { "type": "fill_blank", "prompt": "... ___ ...", "options": ["a", "b", "c", "d"], "answer": "b", "explanation": "..." },
     { "type": "order_steps", "prompt": "Order the steps", "steps": ["first", "second", "third"], "explanation": "..." },
     { "type": "numeric", "prompt": "Compute ...", "answer": 4.2, "tolerance": 0.02, "unit": "m/s", "explanation": "..." },
-    { "type": "true_false", "prompt": "Statement", "answer": false, "explanation": "..." }
+    { "type": "true_false", "prompt": "Statement", "answer": false, "explanation": "..." },
+    { "type": "translate", "prompt": "Translate", "source": "Good night", "answer": "Buenas noches", "accepted": [], "lang": "es" },
+    { "type": "word_bank", "prompt": "Build the sentence", "source": "I eat bread", "answer": "Yo como pan", "bank": ["Yo", "como", "pan", "agua"], "lang": "es" },
+    { "type": "listen_type", "prompt": "Type what you hear", "audio_text": "Buenos días", "lang": "es" },
+    { "type": "listen_choose", "prompt": "What did you hear?", "audio_text": "gato", "options": ["gato", "pato", "rato"], "answer": "gato", "lang": "es" },
+    { "type": "speak", "prompt": "Say it", "target": "Buenas noches", "ipa": "ˈbwe.nas ˈno.tʃes", "translation": "Good night", "lang": "es" }
   ],
   "simulation": { "kind": "graph", "...": "see SimSpec below" }
 }
@@ -88,12 +98,23 @@ Data only, never code: the browser evaluates expressions with its own small inte
 
 ## MCP tools (preferred for agents)
 `mcp_server.py` is a dependency-free MCP server (stdio) over the running backend, so every change is validated
-and shows up live in the UI. 28 tools, including: `simulation_guide`, `list_topics`, `get_topic`, `save_topic`,
+and shows up live in the UI. Subject tools live in `mcp_tools_<subject>.py` (merged at start). 109 tools, including: `simulation_guide`, `list_topics`, `get_topic`, `save_topic`,
 `validate_simulation`, `attach_simulation`, `generate_simulation` (kind auto | math | physics),
 `add_quiz_questions`, `add_practice_items`, `list_profiles`, `list_courses`, `get_course`, `regenerate_class`,
 `show_on_graph`, `preview_math_simulation`, `open_topic`; activities `add_flashcards`, `add_timeline_events`,
 `add_match_pairs`, `start_speed_round`, `start_flashcards`; advisor `catalog_search`, `catalog_import`, `student_record`,
-`add_completed_courses`, `recommend_courses`, `check_readiness`, `create_readiness_course`.
+`add_completed_courses`, `recommend_courses`, `check_readiness`, `create_readiness_course`, `search_sections`, `get_student_degree_audit`, `get_student_readiness`, `list_completed_courses`, `add_completed_course`, `ask_advisor`; languages (gamified)
+`add_translation_exercise`, `add_word_bank`, `add_listening_exercise`, `add_speaking_exercise`, `add_language_exercises`,
+`add_vocab_set`, `build_language_unit` (a whole unit offline, no quota), `start_language_session`, `open_language_tab`,
+`language_overview`; language extras `add_story`, `add_dialogue`, `add_conjugation`, `add_script_drill`, `add_minimal_pairs`,
+`add_dictation`, `import_vocab_csv`, `translate_drill_from_flashcards`, `roleplay_turn`; history `add_categorize`, `add_cause_effect_chain`,
+`add_source_analysis`, `add_map_pins`, `add_who_am_i`, `add_date_guess`, `add_roleplay_persona`, `build_history_unit` (offline),
+`start_history_activity`, `history_overview`, `chat_as_figure`, `add_timeline_era`, plus the crisis, primary-source and history topic tools;
+lab/math/code `add_label_diagram`, `add_sort_by`, `add_odd_one_out`, `add_cloze`, `add_spot_the_bug`, `list_diagram_images`,
+`practice_type_guide`; studio (any subject) `quiz_from_flashcards`, `flashcards_from_glossary`, `match_pairs_from_flashcards`,
+`timeline_from_text`, `copy_activities`, `topic_stats`, `lint_topic`, `search_topics`, `course_outline`, `student_dashboard`,
+`review_queue`, `open_workspace`, `daily_challenge`, `remove_practice_item`, `replace_practice_item`, `remove_flashcard`.
+The original task specs are in `docs/agy-tasks/`.
 Register it with your client (the backend must be running on 127.0.0.1:8090):
 ```json
 {"mcpServers": {"andedu": {"command": "python3", "args": ["/absolute/path/to/SciEdu-Studio/mcp_server.py"]}}}
@@ -130,6 +151,10 @@ python3 scripts/agent_add_topic.py --template             # starter topic
 | `GET /api/agy/events?since=<cursor>` | UI events; first call with no `since` returns only the cursor |
 | `POST /api/agy/events` | push `SWITCH_TOPIC`, `SWITCH_TAB`, `SET_SIM_CONFIG`, `TOPIC_UPDATED` |
 | `GET /api/jobs`, `GET /api/jobs/{id}` | background job status |
+| `PUT` · `DELETE /api/topics/{id}/practice/{item_id}`, `DELETE /api/topics/{id}/flashcards/{index}` | edit or remove one activity (PUT without `type` merges into the item; ids stay stable) |
+| `GET /api/practice/guide`, `GET /api/diagrams` | practice type fields; offline diagram names |
+| `POST /api/tutor/lesson` with `"mode": "persona", "persona", "era"` | chat with a historical figure, grounded in the lesson |
+| `POST /api/language/roleplay` | roleplay partner; optional `topicId`, `persona`, `setting`, `goal`; returns `corrections: [{said, better, why}]` |
 
 ## Adaptation and answer checking
 - Finishing a class quiz under 50% rewrites the next unstarted class one level easier with more support;
@@ -157,6 +182,7 @@ pays each (source, ref) once per day or once ever; browsers only report what hap
 - `SCIEDU_DAILY_MODEL_CALLS` (default 400): Gemini requests per day across all features, fallbacks included.
 - `SCIEDU_RATE_SCALE`: per-user hourly limits on generation (see `RATE_LIMITS` in server.py).
 - `AGY_DAILY_RUNS` (default 15): agy CLI runs per day, one at a time; Gemini answers when capped or busy.
+- Accounts mode admins: `SCIEDU_ADMINS` = comma-separated user ids (shown in the account menu), not names.
 
 ## Running agy from the in-app assistant
 The companion uses Gemini tools by default and receives the course the student has open (`courseId`), so
