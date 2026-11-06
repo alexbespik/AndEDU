@@ -99,7 +99,7 @@ def expand_shorthand(text: str) -> str:
     """Expands course shorthand like 'MATH 111 or 131' to 'MATH 111 or MATH 131'."""
     pattern = re.compile(r"\b([A-Z]{2,5})\s+([A-Z]?\d{3}[A-Z]{0,2})([\s,/]+(?:or|and|/)?\s+)([A-Z]?\d{3}[A-Z]{0,2})\b", re.I)
     s = str(text or "")
-    for _ in range(10):
+    for _ in range(40):  # one more code per pass; long lists like "HISP 340, 350, ... or 391" need many
         prev = s
         s = pattern.sub(r"\1 \2\3\1 \4", s)
         if prev == s:
@@ -120,45 +120,132 @@ def find_codes(text: str) -> List[str]:
     return out
 
 
-def parse_prereq_cnf(text: str = "", codes: Optional[List[str]] = None) -> List[List[str]]:
-    """Parses prerequisite text into Conjunctive Normal Form (AND of OR-choice groups).
-    Example: 'CSCI 141 and (MATH 111 or MATH 131)' -> [['CSCI 141'], ['MATH 111', 'MATH 131']]
-    """
-    raw = html.unescape(re.sub(r"<[^>]+>", " ", str(text or ""))).strip()
-    if not raw:
-        return [[c] for c in (codes or [])]
-    raw = expand_shorthand(raw)
-    t = re.sub(r"^(?:Prerequisites?(?:\(s\))?|Pre-?req(?:uisite)?s?)\s*[:\-]?\s*", "", raw, flags=re.I)
-    t = re.sub(r"\bA minimum grade of[^.;)]*[.;)]?", "", t, flags=re.I)
-    chunks = re.split(r"(?:,\s*)?\band\b|\s*[;&]\s*|(?<=[a-zA-Z0-9\)])\.\s+", t, flags=re.I)
-    cnf: List[List[str]] = []
-    seen: Set[str] = set()
-    for chunk in chunks:
-        cleaned_chunk = re.sub(r"[()\[\]]", " ", chunk)
-        c_codes = find_codes(cleaned_chunk)
-        if not c_codes:
+_NOT_PREREQ_LINE = re.compile(r"^\s*(?:\*\s*May be taken|A minimum grade|Corequisites?|Co-?req|Or consent|Enrollment|Registration|Instructor Approval|Department Approval|Dean Approval)", re.I)
+# course codes are upper case ("the 300 level" is not a course); the words are matched in any case
+_TOKEN_RE = re.compile(r"\(|\)|,|;|\b(?i:and|or)\b|\bALT\b|\b[A-Z]{2,5}\s?-?\s?[A-Z]?\d{3}[A-Z]{0,2}\b")
+# older catalog text ran the course description on after the prerequisites: "ITAL 103 This course covers ..."
+_PROSE_RE = re.compile(r"\s(?:This|These|A|An|The|Students|Topics|Emphasis|Introduction|Why|Examines?|Explores?|Designed|Intended|Research)\s[a-z]")
+
+
+def prereq_statement(text: str) -> str:
+    """The required-courses part of a prerequisite field: no HTML, no quoted test names, no grade, corequisite
+    or consent lines, and no "may be taken concurrently" markers."""
+    raw = html.unescape(re.sub(r"<[^>]+>", " ", str(text or "")))
+    lines = [ln for ln in raw.splitlines() if ln.strip() and not _NOT_PREREQ_LINE.match(ln)]
+    t = " ".join(lines)
+    m = _PROSE_RE.search(t)
+    if m:
+        t = t[:m.start()]
+    t = re.sub(r"^\s*(?:Prerequisites?(?:\(s\))?|Pre-?req(?:uisite)?s?)\s*[:\-]?\s*", "", t, flags=re.I)
+    t = re.sub(r"\(?\s*\bA minimum grade of[^.;)]*[.;)]?", " ", t, flags=re.I)
+    # a placement score or test is an alternative that isn't a course: keep its place in the expression
+    t = re.sub(r"minimum score of \S+ in (?:'[^']*'|\"[^\"]*\")", " ALT ", t, flags=re.I)
+    t = re.sub(r"'[^']*'|\"[^\"]*\"", " ALT ", t)
+    t = t.replace("*", " ")
+    # examples are alternatives: "(generally FREN 305, 314, 315, and higher)"
+    t = re.sub(r"\b(?:generally|e\.g\.|such as|including|for example)\b[^)]*",
+               lambda m: re.sub(r"\band\b|,", " or ", re.sub(r"\b(?:and|or) higher\b", "", m.group(0))), t, flags=re.I)
+    return expand_shorthand(t)
+
+
+def prereq_codes_of(text: str, self_code: str = "") -> List[str]:
+    """Course codes a prerequisite field requires (in any alternative), without corequisites, test names or the course itself."""
+    return [c for c in find_codes(prereq_statement(text)) if c != self_code]
+
+
+def _parse_expr(tokens: List[str], i: int = 0):
+    """Recursive descent over prerequisite tokens. Returns (node, next index). A node is ("code", c), ("alt",),
+    ("and", [nodes]) or ("or", [nodes]). In a list like "A, B or C" the commas take the list's own conjunction;
+    "and" binds looser than "or" when both appear at one level, and a bare comma list means all of them."""
+    items, ops = [], []
+    while i < len(tokens):
+        tok = tokens[i]
+        low = tok.lower()
+        if tok == "(":
+            lead = tokens[i + 1].lower() if i + 1 < len(tokens) else ""
+            node, i = _parse_expr(tokens, i + 1)
+            if items and len(ops) < len(items):
+                ops.append(lead if lead in ("and", "or") else ",")  # "ITAL 103 (or ITAL 102)"; else a plain list
+            items.append(node)
             continue
-        if len(c_codes) > 1 and re.search(r"\bor\b|/|, or\b", cleaned_chunk, re.I):
-            group = sorted(set(c_codes))
-            cnf.append(group)
-            seen.update(group)
+        if tok == ")":
+            i += 1
+            break
+        if low in ("and", "or", ",", ";"):
+            if items and len(ops) < len(items):
+                ops.append(low)
+            elif items and low in ("and", "or") and ops and ops[-1] in (",", ";") and len(ops) == len(items):
+                ops[-1] = low  # "A, or B" / "A, and B"
+            i += 1
+            continue
+        if items and len(ops) < len(items):
+            ops.append(",")
+        items.append(("alt",) if low == "alt" else ("code", norm_code(*re.match(r"([A-Za-z]{2,5})\s?-?\s?(\S+)", tok).groups())))
+        i += 1
+    ops = ops[:max(len(items) - 1, 0)]
+    if not items:
+        return ("and", []), i
+    if len(items) == 1:
+        return items[0], i
+    # split at "and"/";" (looser), then each run joined by "or" or commas
+    has_or = "or" in ops
+    groups, cur, cur_ops = [], [items[0]], []
+    for op, item in zip(ops, items[1:]):
+        if op in ("and", ";") or (op == "," and not has_or):
+            groups.append((cur, cur_ops))
+            cur, cur_ops = [item], []
         else:
-            for c in c_codes:
-                cnf.append([c])
-                seen.add(c)
-    if codes:
-        for c in codes:
-            if c not in seen:
-                cnf.append([c])
-                seen.add(c)
-    unique_cnf: List[List[str]] = []
-    seen_groups: Set[tuple] = set()
+            cur.append(item)
+            cur_ops.append(op)
+    groups.append((cur, cur_ops))
+    parts = [g[0] if len(g) == 1 else ("or", g) for g, _ in groups]
+    return (parts[0] if len(parts) == 1 else ("and", parts)), i
+
+
+def _cnf(node) -> Optional[List[List[str]]]:
+    """CNF of a node; None means "always satisfiable" (an alternative that isn't a course)."""
+    kind = node[0]
+    if kind == "code":
+        return [[node[1]]]
+    if kind == "alt":
+        return None
+    subs = [_cnf(n) for n in node[1]]
+    if kind == "and":
+        out = [g for s in subs if s for g in s]
+        return out
+    # or: any non-course alternative satisfies it from the app's point of view only if it's the only one;
+    # we keep the course alternatives, which is what a transcript can show
+    course_subs = [s for s in subs if s]
+    if not course_subs:
+        return None
+    out = [[]]
+    for s in course_subs:
+        out = [a + b for a in out for b in s]  # distribute (a OR (b AND c)) = (a OR b) AND (a OR c)
+        if len(out) > 64:  # too many clauses to be useful: any one of these courses (looser, never wrongly stricter)
+            return [sorted({c for sub in course_subs for g in sub for c in g})]
+    return out
+
+
+def parse_prereq_cnf(text: str = "", codes: Optional[List[str]] = None, self_code: str = "") -> List[List[str]]:
+    """Parses prerequisite text into Conjunctive Normal Form (AND of OR-choice groups), respecting parentheses.
+    Example: 'CSCI 141 and (MATH 111 or MATH 131)' -> [['CSCI 141'], ['MATH 111', 'MATH 131']].
+    Without text, each code in `codes` is required. Corequisites, test scores and the course itself are left out."""
+    statement = prereq_statement(text)
+    if not statement.strip():
+        return [[c] for c in (codes or []) if c != self_code]
+    tokens = _TOKEN_RE.findall(statement)
+    tokens = [t for t in tokens if not re.fullmatch(r"[A-Za-z]{2,5}\s?-?\s?\S+", t) or t.split()[0].upper().rstrip("-") not in NOT_COURSES]
+    node, _ = _parse_expr(tokens)
+    cnf = _cnf(node) or []
+    out: List[List[str]] = []
+    seen: Set[tuple] = set()
     for g in cnf:
-        t_g = tuple(sorted(g))
-        if t_g not in seen_groups:
-            seen_groups.add(t_g)
-            unique_cnf.append(g)
-    return unique_cnf
+        group = sorted({c for c in g if c != self_code})
+        if group and tuple(group) not in seen:
+            seen.add(tuple(group))
+            out.append(group)
+    # a group that is a superset of another required group adds nothing
+    return [g for g in out if not any(set(h) < set(g) for h in out)]
 
 
 def parse_catalog_text(text: str) -> List[Dict[str, Any]]:
@@ -183,8 +270,8 @@ def parse_catalog_text(text: str) -> List[Dict[str, Any]]:
         prereqs = pm.group(1).strip() if pm else ""
         prereqs = re.split(r"\s*(?:College Curriculum|Domain|Proficiency|Corequisite|Cross-listed)\s*:", prereqs, flags=re.I)[0].strip()
         attrs = re.findall(r"\b(COLL\s?\d{3}[A-Z]?|NQR|ALV|CSI|GE\s?\d+[A-Z]?)\b", body)
-        pcodes = [c for c in find_codes(prereqs) if c != e["code"]]
-        ptree = parse_prereq_cnf(prereqs, pcodes)
+        pcodes = prereq_codes_of(prereqs, e["code"])
+        ptree = parse_prereq_cnf(prereqs, pcodes, self_code=e["code"])
         out.append({**e, "description": body[:2000], "prereqs": prereqs[:500],
                     "prereq_codes": pcodes, "prereq_tree": ptree, "attributes": sorted(set(attrs))})
     return out
@@ -199,14 +286,16 @@ def upsert_courses(rows: Iterable[Dict[str, Any]], source: str = "", school: str
             continue
         code = norm_code(*m.groups())
         prereqs = str(r.get("prereqs") or "")[:500]
-        pcodes = r.get("prereq_codes") or [x for x in find_codes(prereqs) if x != code]
+        # the codes and tree always follow the text when there is one (given lists could hold corequisites)
+        pcodes = prereq_codes_of(prereqs, code) if prereqs.strip() else [x for x in (r.get("prereq_codes") or []) if x != code]
         syllabus = str(r.get("syllabus") or "")
-        prereq_tree = r.get("prereq_tree") or parse_prereq_cnf(prereqs, pcodes)
+        prereq_tree = parse_prereq_cnf(prereqs, pcodes, self_code=code) if prereqs.strip() else (r.get("prereq_tree") or [[x] for x in pcodes])
         inferred_attrs = json.dumps(list(r.get("inferred_attributes") or []))
         inferred_hash = str(r.get("inferred_hash") or "")
         c.execute("""INSERT INTO catalog_courses (school, code, title, credits, description, prereqs, prereq_codes, attributes, syllabus, prereq_tree, source, updated_at, inferred_attributes, inferred_hash)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT (school, code) DO UPDATE SET title = excluded.title,
+                     ON CONFLICT (school, code) DO UPDATE SET
+                       title = CASE WHEN lower(excluded.title) IN ('varies by section', 'tbd', 'tba') THEN title ELSE excluded.title END,
                        credits = CASE WHEN excluded.credits != '' THEN excluded.credits ELSE credits END,
                        description = CASE WHEN excluded.description != '' THEN excluded.description ELSE description END,
                        prereqs = CASE WHEN excluded.prereqs != '' THEN excluded.prereqs ELSE prereqs END,
