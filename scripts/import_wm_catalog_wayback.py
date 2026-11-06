@@ -100,7 +100,7 @@ def parse(page: str):
     code = advisor.norm_code(m.group(1), m.group(2))
     return {"code": code, "title": m.group(3).strip(), "credits": (m.group(4) or (cm.group(1) if cm else "")).strip(),
             "description": desc[:2000], "prereqs": prereqs[:500],
-            "prereq_codes": [c for c in advisor.find_codes(prereqs) if c != code],
+            "prereq_codes": advisor.prereq_codes_of(prereqs, code),
             "attributes": sorted(set(labels) | set(re.findall(r"\b(COLL\s?\d{3}[A-Z]?|NQR|ALV|CSI)\b", body)))}
 
 
