@@ -61,8 +61,8 @@ def _topics(_):
 
 
 TOOLS = [
-    ("simulation_guide", "The full SimSpec format: kinds particles (physics), graph, math (9 widgets: epsilon_delta, epsilon_n, "
-     "secant_tangent, riemann, series, unit_circle, parametric, vector_field, transform2d) and chem when installed. Read this before writing a spec.",
+    ("simulation_guide", "The full SimSpec format: kinds particles (physics), graph, math (9 widgets), "
+     "geometry / fbd (interactive apparatus, statics, vectors, free-body diagrams), and chem when installed. Read this before writing a spec.",
      S(), lambda a: call("GET", "/api/simulations/guide")["guide"]),
     ("list_topics", "Every lesson with its workspace (math | code | lab), course, simulation kind and quiz/practice counts.",
      S(), _topics),
@@ -126,9 +126,10 @@ TOOLS = [
     ("start_flashcards", "Open a lesson's flashcards on the student's screen.",
      S(topic_id=STR("topic id")), lambda a: call("POST", "/api/agy/events", {"type": "SWITCH_TOPIC", "payload": {"topicId": a["topic_id"], "tab": "cards"}})),
     # ---- course advisor
-    ("catalog_search", "Search the imported course catalog (W&M by default) by words and/or department, e.g. dept='CSCI'.",
-     S(query=STR("words", optional=True), dept=STR("department code", optional=True)),
-     lambda a: call("GET", f"/api/advisor/catalog?q={q(a.get('query', ''))}&dept={q(a.get('dept', ''))}")),
+    ("catalog_search", "Search the imported course catalog (W&M by default) by words and/or department, e.g. dept='CSCI'. "
+     "Returns up to `limit` courses (default 100, max 500) and `total`, the number of matches.",
+     S(query=STR("words", optional=True), dept=STR("department code", optional=True), limit={"type": "integer", "description": "max courses (default 100, max 500)", "optional": True}),
+     lambda a: call("GET", f"/api/advisor/catalog?q={q(a.get('query', ''))}&dept={q(a.get('dept', ''))}&limit={int(a.get('limit') or 100)}")),
     ("catalog_import", "Import catalog entries: rows [{code, title, credits, description, prereqs, attributes}] or raw catalog text "
      "('DEPT 123. Title. (3 Credits)' layout). Set use_model to let the app's model read text the parser can't (uses quota).",
      S(rows=ARR("course rows", optional=True), text=STR("catalog text", optional=True), source=STR("where it came from", optional=True),
@@ -143,16 +144,47 @@ TOOLS = [
     ("recommend_courses", "Courses the student can take next (prerequisites met), ranked by how they build on their record and interests.",
      S(user_id=STR("profile id"), interests=STR("e.g. 'machine learning, statistics'", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/recommend?interests={q(a.get('interests', ''))}")),
+    ("get_cart", "A student's planning cart for a term (default: the next term): primary and backup courses, chosen sections, "
+     "flags (no_section, prereq_missing, already_done), the primary credit load and section time conflicts.",
+     S(user_id=STR("profile id"), term=STR("term code, e.g. 202720", optional=True)),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/cart?term={q(a.get('term', ''))}")),
+    ("add_to_cart", "Add a catalog course to a student's planning cart (adding it again updates it). Give a section CRN only "
+     "if it is a listed section of that course in that term (search_sections); otherwise leave it empty for the student to pick.",
+     S(user_id=STR("profile id"), code=STR("course code, e.g. CSCI 241"), term=STR("term code", optional=True),
+       cart_type=STR("primary (counts toward the load) or backup", optional=True, enum=["primary", "backup"]),
+       section_crn=STR("CRN of a listed section", optional=True), notes=STR("short note", optional=True),
+       priority=STR("must, want (default for a new course) or nice; omit to keep the current one", optional=True,
+                    enum=["must", "want", "nice"])),
+     lambda a: call("POST", f"/api/advisor/{q(a['user_id'])}/cart", {"code": a["code"], "term": a.get("term", ""),
+                    "cart_type": a.get("cart_type") or "primary", "section_crn": a.get("section_crn", ""), "notes": a.get("notes", ""),
+                    "priority": a.get("priority") or None})),
+    ("remove_from_cart", "Remove a course from a student's planning cart.",
+     S(user_id=STR("profile id"), code=STR("course code"), term=STR("term code", optional=True)),
+     lambda a: call("DELETE", f"/api/advisor/{q(a['user_id'])}/cart/{q(a['code'])}?term={q(a.get('term', ''))}")),
+    ("set_cart_priority", "Set how much the student needs a course in their cart: must, want or nice.",
+     S(user_id=STR("profile id"), code=STR("course code"), priority=STR("must, want or nice", enum=["must", "want", "nice"]),
+       term=STR("term code", optional=True)),
+     lambda a: call("PATCH", f"/api/advisor/{q(a['user_id'])}/cart/{q(a['code'])}", {"term": a.get("term", ""), "priority": a["priority"]})),
+    ("research_cart", "A registration plan for a student's cart: courses ordered by priority (must, want, nice) and then seat "
+     "risk, each with a risk level (high, medium, low, unknown), a likely fill phase, evidence and advice. The risk is an "
+     "ESTIMATE from past imported schedules (often unknown or low confidence; registration window dates are not loaded): "
+     "present it as likely, never certain.",
+     S(user_id=STR("profile id"), term=STR("term code, e.g. 202720", optional=True)),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/cart/research?term={q(a.get('term', ''))}")),
     ("check_readiness", "Are the listed prerequisites of a course met by the student's record? Returns what is missing.",
      S(user_id=STR("profile id"), code=STR("course code, e.g. CSCI 241")),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}")),
     ("create_readiness_course", "Build a readiness course for a target course: a diagnostic on its prerequisite knowledge, then bridge classes. Uses Gemini quota.",
      S(user_id=STR("profile id"), code=STR("course code")),
      lambda a: call("POST", f"/api/advisor/{q(a['user_id'])}/readiness-course", {"code": a["code"]})),
-    ("search_sections", "Search for course sections by department code, term or instructor name.",
-     S(query=STR("department code e.g. CSCI, term e.g. Fall2024, or instructor name"),
+    ("search_sections", "Search course sections (with CRNs) by course code, department or instructor. Defaults to the "
+     "NEXT term only (the response names it). Pass term='all' or a term code (e.g. 202710) for other terms: those rows "
+     "are history, not next-term offerings, and their CRNs are not registrable for the next term.",
+     S(query=STR("course code e.g. CSCI 141, department code e.g. CSCI, or instructor name"),
+       term=STR("'next' (default), 'all', or a term code like 202720", optional=True),
        limit={"type": "integer", "description": "max results (default 20)", "optional": True}),
-     lambda a: call("GET", f"/api/advisor/sections?q={q(a['query'])}&limit={int(a.get('limit') or 20)}")),
+     lambda a: call("GET", f"/api/advisor/sections?q={q(a['query'])}&term={q(a.get('term') or 'next')}"
+                           f"&limit={int(a.get('limit') or 20)}")),
     ("get_prerequisite_tree", "Get the full prerequisite chain for a course (all direct and indirect prerequisites).",
      S(code=STR("course code e.g. CSCI 303")),
      lambda a: call("GET", f"/api/advisor/catalog/{q(a['code'])}")),

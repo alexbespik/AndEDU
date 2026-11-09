@@ -1,0 +1,513 @@
+{
+  "id": "de-09-perfekt",
+  "title": "German 9: What happened? The Perfekt",
+  "category": "Languages · German",
+  "difficulty": "Elementary (A2)",
+  "summary": "Talk about the past the way Germans speak: haben or sein plus the past participle at the end.",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 9: What happened? The Perfekt\n\nTalk about the past the way Germans speak: haben or sein plus the past participle at the end.\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| gemacht | — | done; made (machen) | /ɡəˈmaxt/ |\n| gegessen | — | eaten (essen) | /ɡəˈɡɛsn̩/ |\n| getrunken | — | drunk (trinken) | /ɡəˈtʁʊŋkn̩/ |\n| gesehen | — | seen (sehen) | /ɡəˈzeːən/ |\n| gekauft | — | bought (kaufen) | /ɡəˈkaʊ̯ft/ |\n| gearbeitet | — | worked (arbeiten) | /ɡəˈʔaʁbaɪ̯tət/ |\n| gegangen | — | gone; walked (gehen) | /ɡəˈɡaŋən/ |\n| gefahren | — | driven; travelled (fahren) | /ɡəˈfaːʁən/ |\n| geschlafen | — | slept (schlafen) | /ɡəˈʃlaːfn̩/ |\n| aufgestanden | — | got up (aufstehen) | /ˈaʊ̯fɡəˌʃtandn̩/ |\n| gestern | — | yesterday | /ˈɡɛstɐn/ |\n| das Wochenende | die Wochenenden | weekend | /ˈvɔxn̩ˌʔɛndə/ |\n| der Urlaub | die Urlaube | holiday; vacation | /ˈuːɐ̯ˌlaʊ̯p/ |\n\n## Phrases\n\n- **Ich habe gestern Pizza gegessen.**: I ate pizza yesterday.\n- **Wir sind nach Berlin gefahren.**: We travelled to Berlin.\n- **Hast du den Film gesehen?**: Have you seen the film?\n- **Sie ist um sechs Uhr aufgestanden.**: She got up at six o'clock.\n- **Am Wochenende habe ich viel gearbeitet.**: At the weekend I worked a lot.\n- **Er hat einen Kaffee getrunken.**: He drank a coffee.\n- **Was hast du im Urlaub gemacht?**: What did you do on holiday?\n\n## Grammar: the Perfekt (spoken past)\n\n**haben / sein** in position 2 + **past participle at the end**: *Ich **habe** gestern Pizza **gegessen**.*\n\n- Regular verbs: **ge-** + stem + **-t**: machen → *gemacht*, kaufen → *gekauft*, arbeiten → *gearbeitet*.\n- Irregular verbs: **ge-** + (changed) stem + **-en**: essen → *gegessen*, trinken → *getrunken*, sehen → *gesehen*.\n- Separable verbs put **-ge-** after the prefix: aufstehen → *auf**ge**standen*.\n- **sein** with verbs of movement or change of state: *Ich **bin** gegangen, gefahren, aufgestanden.* Most other verbs take **haben**.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "gemacht",
+          "done; made (machen)"
+        ],
+        [
+          "gegessen",
+          "eaten (essen)"
+        ],
+        [
+          "getrunken",
+          "drunk (trinken)"
+        ],
+        [
+          "gesehen",
+          "seen (sehen)"
+        ],
+        [
+          "gekauft",
+          "bought (kaufen)"
+        ],
+        [
+          "gearbeitet",
+          "worked (arbeiten)"
+        ],
+        [
+          "gegangen",
+          "gone; walked (gehen)"
+        ],
+        [
+          "gefahren",
+          "driven; travelled (fahren)"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I ate pizza yesterday.",
+      "answer": "Ich habe gestern Pizza gegessen.",
+      "accepted": [
+        "Gestern habe ich Pizza gegessen."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich habe gestern Pizza gegessen.",
+      "bank": [
+        "Ich",
+        "habe",
+        "gestern",
+        "Pizza",
+        "gegessen",
+        "bin",
+        "esse",
+        "gegesst"
+      ],
+      "source": "I ate pizza yesterday.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich habe gestern Pizza gegessen.",
+      "answer": "Ich habe gestern Pizza gegessen.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We travelled to Berlin.",
+      "answer": "Wir sind nach Berlin gefahren.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir sind nach Berlin gefahren.",
+      "bank": [
+        "Wir",
+        "sind",
+        "nach",
+        "Berlin",
+        "gefahren",
+        "haben",
+        "gefahrt",
+        "fahren"
+      ],
+      "source": "We travelled to Berlin.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir sind nach Berlin gefahren.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We travelled to Berlin."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Have you seen the film?",
+      "answer": "Hast du den Film gesehen?",
+      "accepted": [
+        "Hast du den Film schon gesehen?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Hast du den Film gesehen?",
+      "bank": [
+        "Hast",
+        "du",
+        "den",
+        "Film",
+        "gesehen",
+        "Bist",
+        "gesieht",
+        "der"
+      ],
+      "source": "Have you seen the film?",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Hast du den Film gesehen?",
+      "answer": "Hast du den Film gesehen?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "She got up at six o'clock.",
+      "answer": "Sie ist um sechs Uhr aufgestanden.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Sie ist um sechs Uhr aufgestanden.",
+      "bank": [
+        "Sie",
+        "ist",
+        "um",
+        "sechs",
+        "Uhr",
+        "aufgestanden",
+        "hat",
+        "aufgesteht",
+        "steht"
+      ],
+      "source": "She got up at six o'clock.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Sie ist um sechs Uhr aufgestanden.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "She got up at six o'clock."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "At the weekend I worked a lot.",
+      "answer": "Am Wochenende habe ich viel gearbeitet.",
+      "accepted": [
+        "Ich habe am Wochenende viel gearbeitet."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Am Wochenende habe ich viel gearbeitet.",
+      "bank": [
+        "Am",
+        "Wochenende",
+        "habe",
+        "ich",
+        "viel",
+        "gearbeitet",
+        "bin",
+        "gearbeit",
+        "Im"
+      ],
+      "source": "At the weekend I worked a lot.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Am Wochenende habe ich viel gearbeitet.",
+      "answer": "Am Wochenende habe ich viel gearbeitet.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "He drank a coffee.",
+      "answer": "Er hat einen Kaffee getrunken.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Er hat einen Kaffee getrunken.",
+      "bank": [
+        "Er",
+        "hat",
+        "einen",
+        "Kaffee",
+        "getrunken",
+        "ist",
+        "getrinkt",
+        "ein"
+      ],
+      "source": "He drank a coffee.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Er hat einen Kaffee getrunken.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "He drank a coffee."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "What did you do on holiday?",
+      "answer": "Was hast du im Urlaub gemacht?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Was hast du im Urlaub gemacht?",
+      "bank": [
+        "Was",
+        "hast",
+        "du",
+        "im",
+        "Urlaub",
+        "gemacht",
+        "bist",
+        "gemachen",
+        "machst"
+      ],
+      "source": "What did you do on holiday?",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Was hast du im Urlaub gemacht?",
+      "answer": "Was hast du im Urlaub gemacht?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "fill_blank",
+      "prompt": "Ich ___ nach Hause gegangen.",
+      "explanation": "gehen is movement: Perfekt with **sein**; ich → bin.",
+      "concept": null,
+      "options": [
+        "bin",
+        "habe",
+        "hat",
+        "ist"
+      ],
+      "answer": "bin"
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Wir ___ ein Auto gekauft.",
+      "explanation": "kaufen takes **haben**; wir → haben.",
+      "concept": null,
+      "options": [
+        "haben",
+        "sind",
+        "hat",
+        "seid"
+      ],
+      "answer": "haben"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "Hast du gut ___?",
+      "explanation": "schlafen is irregular: **geschlafen**.",
+      "concept": null,
+      "options": [
+        "geschlafen",
+        "geschlaft",
+        "schlafen",
+        "geschläft"
+      ],
+      "answer": "geschlafen"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Er ist um sieben Uhr ___.",
+      "explanation": "Separable verb: auf + **ge** + standen.",
+      "concept": null,
+      "options": [
+        "aufgestanden",
+        "aufgesteht",
+        "aufstehen",
+        "geaufstanden"
+      ],
+      "answer": "aufgestanden"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "gemacht",
+      "back": "done; made (machen)  /ɡəˈmaxt/",
+      "hint": "Was hast du gemacht?",
+      "lang": "de"
+    },
+    {
+      "front": "gegessen",
+      "back": "eaten (essen)  /ɡəˈɡɛsn̩/",
+      "hint": "Ich habe Pizza gegessen.",
+      "lang": "de"
+    },
+    {
+      "front": "getrunken",
+      "back": "drunk (trinken)  /ɡəˈtʁʊŋkn̩/",
+      "hint": "Er hat Tee getrunken.",
+      "lang": "de"
+    },
+    {
+      "front": "gesehen",
+      "back": "seen (sehen)  /ɡəˈzeːən/",
+      "hint": "Wir haben den Film gesehen.",
+      "lang": "de"
+    },
+    {
+      "front": "gekauft",
+      "back": "bought (kaufen)  /ɡəˈkaʊ̯ft/",
+      "hint": "Sie hat ein Kleid gekauft.",
+      "lang": "de"
+    },
+    {
+      "front": "gearbeitet",
+      "back": "worked (arbeiten)  /ɡəˈʔaʁbaɪ̯tət/",
+      "hint": "Ich habe lange gearbeitet.",
+      "lang": "de"
+    },
+    {
+      "front": "gegangen",
+      "back": "gone; walked (gehen)  /ɡəˈɡaŋən/",
+      "hint": "Wir sind nach Hause gegangen.",
+      "lang": "de"
+    },
+    {
+      "front": "gefahren",
+      "back": "driven; travelled (fahren)  /ɡəˈfaːʁən/",
+      "hint": "Sie ist nach Hamburg gefahren.",
+      "lang": "de"
+    },
+    {
+      "front": "geschlafen",
+      "back": "slept (schlafen)  /ɡəˈʃlaːfn̩/",
+      "hint": "Hast du gut geschlafen?",
+      "lang": "de"
+    },
+    {
+      "front": "aufgestanden",
+      "back": "got up (aufstehen)  /ˈaʊ̯fɡəˌʃtandn̩/",
+      "hint": "Ich bin früh aufgestanden.",
+      "lang": "de"
+    },
+    {
+      "front": "gestern",
+      "back": "yesterday  /ˈɡɛstɐn/",
+      "hint": "Gestern war ich müde.",
+      "lang": "de"
+    },
+    {
+      "front": "das Wochenende",
+      "back": "weekend  /ˈvɔxn̩ˌʔɛndə/",
+      "hint": "Plural: die Wochenenden. Am Wochenende habe ich gelesen.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Urlaub",
+      "back": "holiday; vacation  /ˈuːɐ̯ˌlaʊ̯p/",
+      "hint": "Plural: die Urlaube. Im Urlaub sind wir geschwommen.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 9,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

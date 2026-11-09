@@ -284,9 +284,36 @@ class StudioMcpTools(unittest.TestCase):
         del_card = [c for c in self.calls if c[0] == "DELETE" and "/flashcards/2" in c[1]]
         self.assertEqual(len(del_card), 1)
 
+    def test_add_drawing_to_notes_tool(self):
+        diag = {
+            "kind": "geometry",
+            "title": "Inclined Plane",
+            "bodies": [{"id": "b1", "type": "box", "x": 0, "y": 0, "width": 1, "height": 1}],
+            "forces": [{"id": "fg", "magnitude": 9.8, "angle": 270}]
+        }
+        res = self.tool_map["add_drawing_to_notes"]({"topic_id": "topic-1", "diagram": diag, "caption": "FBD Diagram"})
+        self.assertEqual(res["status"], "added")
+        post_topics = [c for c in self.calls if c[0] == "POST" and c[1] == "/api/topics"]
+        self.assertEqual(len(post_topics), 1)
+        self.assertIn("```geometry", post_topics[0][2]["markdownContent"])
+        self.assertIn("### FBD Diagram", post_topics[0][2]["markdownContent"])
+
+    def test_preview_geometry_diagram_tool(self):
+        diag = {
+            "kind": "fbd",
+            "bodies": [{"id": "b1", "type": "box", "x": 0, "y": 0, "width": 1, "height": 1}],
+            "forces": [{"id": "fg", "magnitude": 9.8, "angle": 270}]
+        }
+        self.tool_map["preview_geometry_diagram"]({"spec": diag})
+        ui_geom = [c for c in self.calls if c[0] == "POST" and c[1] == "/api/ui/geometry"]
+        self.assertEqual(len(ui_geom), 1)
+        self.assertEqual(ui_geom[0][2]["spec"]["kind"], "fbd")
+
 
 class ServerEndpoints(unittest.TestCase):
     def setUp(self):
+        import db
+        db.init_db()
         self.client = TestClient(server.app, base_url=LOCAL)
         self.topic_id = f"test-subres-{uuid.uuid4().hex[:6]}"
         # Seed topic with 2 practice items and 3 flashcards
@@ -369,6 +396,19 @@ class ServerEndpoints(unittest.TestCase):
         res_topic = self.client.delete("/api/topics/non-existent-topic/flashcards/0")
         self.assertEqual(res_topic.status_code, 404)
 
+    def test_preview_geometry_sim_endpoint(self):
+        spec = {
+            "kind": "geometry",
+            "title": "Test Sim",
+            "bodies": [{"id": "b1", "type": "box", "x": 0, "y": 0, "width": 1, "height": 1}],
+            "forces": [{"id": "f1", "magnitude": 5, "angle": 90}]
+        }
+        r = self.client.post("/api/ui/geometry", json={"spec": spec})
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(data["status"], "shown")
+        self.assertEqual(data["spec"]["kind"], "geometry")
+
 
 class AccountsModeOwnerEndpoints(unittest.TestCase):
     """With SCIEDU_AUTH=1, only topic owners can modify practice items and flashcards."""
@@ -379,7 +419,7 @@ class AccountsModeOwnerEndpoints(unittest.TestCase):
         self.c = self.ctx.__enter__()
 
         def register_user(name):
-            r = self.c.post("/api/auth/register", json={"name": name, "password": "password123", "adult": True}).json()
+            r = self.c.post("/api/auth/register", json={"name": name, "password": "password123", "adult": True, "privacy": True}).json()
             return {"Authorization": f"Bearer {r['token']}"}, r["user"]["id"]
 
         tag = uuid.uuid4().hex[:6]
@@ -441,7 +481,7 @@ class McpServerRegistration(unittest.TestCase):
             "timeline_from_text", "copy_activities", "topic_stats", "lint_topic",
             "search_topics", "course_outline", "student_dashboard", "review_queue",
             "open_workspace", "daily_challenge", "remove_practice_item", "replace_practice_item",
-            "remove_flashcard"
+            "remove_flashcard", "add_drawing_to_notes", "preview_geometry_diagram"
         ]
         for name in expected:
             self.assertIn(name, tools)

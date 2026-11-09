@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { api, setToken } from '../lib/api';
 import ThemeSwitch from './ThemeSwitch';
+import { PrivacyNotice } from './PrivacyCenter';
 
 /** Local profiles: a name picks your saved courses. No passwords; the backend only listens on 127.0.0.1. */
 export default function LoginPage({ onSignedIn }) {
@@ -13,11 +14,16 @@ export default function LoginPage({ onSignedIn }) {
   const [password, setPassword] = useState('');
   const [creating, setCreating] = useState(false);
   const [adult, setAdult] = useState(false);
+  const [privacy, setPrivacy] = useState(false);
+  const [showNotice, setShowNotice] = useState(false);
+  const [elevenlabs, setElevenlabs] = useState(false);
+  const [pending, setPending] = useState(null);  // sign-in that still needs privacy consent: {token, user}
 
   useEffect(() => {
     api('/api/status')
       .then((st) => {
         setAuthRequired(Boolean(st.auth_required));
+        setElevenlabs(Boolean(st.elevenlabs_enabled));
         if (!st.auth_required) return api('/api/users').then((d) => setProfiles(d.users || []));
         return null;
       })
@@ -29,12 +35,31 @@ export default function LoginPage({ onSignedIn }) {
     setBusy(true);
     setError(null);
     try {
-      const { token, user } = await api(creating ? '/api/auth/register' : '/api/auth/login', {
-        method: 'POST', body: { name: name.trim(), password, ...(creating ? { adult } : {}) },
+      const { token, user, privacyAccepted } = await api(creating ? '/api/auth/register' : '/api/auth/login', {
+        method: 'POST', body: { name: name.trim(), password, ...(creating ? { adult, privacy: true } : {}) },
       });
+      if (!creating && privacyAccepted === false) {
+        setPending({ token, user });  // accounts made before the notice: agree first
+        setBusy(false);
+        return;
+      }
       setToken(token);
       onSignedIn(user);
     } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  const agree = async () => {
+    setBusy(true);
+    setError(null);
+    setToken(pending.token);
+    try {
+      await api(`/api/users/${encodeURIComponent(pending.user.id)}/consent`, { method: 'POST', body: { kind: 'privacy' } });
+      onSignedIn(pending.user);
+    } catch (err) {
+      setToken(null);
       setError(err.message);
       setBusy(false);
     }
@@ -74,7 +99,22 @@ export default function LoginPage({ onSignedIn }) {
             : 'Your courses and progress are saved on this computer under your name.'}</p>
         </div>
 
-        {authRequired && (
+        {authRequired && pending && (
+          <div className="stack-sm">
+            <p>Before you continue, please read how &amp;.edu handles your data.</p>
+            <div className="privacy-inline"><PrivacyNotice elevenlabs={elevenlabs} authRequired /></div>
+            <div className="btn-row">
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={agree}>{busy ? 'Working…' : 'I agree'}</button>
+              <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => {
+                // the sign-in already opened a session: close it rather than leave an unused token valid
+                fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${pending.token}` } }).catch(() => {});
+                setPending(null); setError(null);
+              }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {authRequired && !pending && (
           <form className="stack-sm" onSubmit={passwordSignIn}>
             <div className="field">
               <label htmlFor="acct-name">Name</label>
@@ -92,8 +132,20 @@ export default function LoginPage({ onSignedIn }) {
                 <span>I am 18 or older (required by the Gemini API terms)</span>
               </label>
             )}
+            {creating && (
+              <div className="stack-sm">
+                <label className="check-row" htmlFor="acct-privacy">
+                  <input id="acct-privacy" type="checkbox" required checked={privacy} onChange={(e) => setPrivacy(e.target.checked)} />
+                  <span>I have read the privacy notice</span>
+                </label>
+                <button type="button" className="btn-link" aria-expanded={showNotice} aria-controls="signup-notice" onClick={() => setShowNotice((v) => !v)}>
+                  {showNotice ? 'Hide the privacy notice' : 'Read the privacy notice'}
+                </button>
+                {showNotice && <div id="signup-notice" className="privacy-inline"><PrivacyNotice elevenlabs={elevenlabs} authRequired /></div>}
+              </div>
+            )}
             <div className="btn-row">
-              <button type="submit" className="btn btn-primary" disabled={busy || name.trim().length < 2 || !password || (creating && !adult)}>
+              <button type="submit" className="btn btn-primary" disabled={busy || name.trim().length < 2 || !password || (creating && (!adult || !privacy))}>
                 {busy ? 'Working…' : creating ? 'Create account' : 'Sign in'}
               </button>
               <button type="button" className="btn btn-quiet" onClick={() => { setCreating((c) => !c); setError(null); }}>
@@ -132,6 +184,15 @@ export default function LoginPage({ onSignedIn }) {
             </button>
           </div>
         </form>}
+
+        {!authRequired && (
+          <div className="stack-sm">
+            <button type="button" className="btn-link" aria-expanded={showNotice} aria-controls="local-notice" onClick={() => setShowNotice((v) => !v)}>
+              {showNotice ? 'Hide the privacy notice' : 'Privacy notice'}
+            </button>
+            {showNotice && <div id="local-notice" className="privacy-inline"><PrivacyNotice elevenlabs={elevenlabs} authRequired={false} /></div>}
+          </div>
+        )}
 
         {error && <p className="notice notice-bad" role="alert">{error}</p>}
         <p className="hint">Your uploaded materials, prompts and quiz answers are sent to Google's Gemini API to write your

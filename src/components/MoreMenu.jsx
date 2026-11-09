@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MoreHorizontal, Headphones, Download, Square, Loader2 } from 'lucide-react';
+import { MoreHorizontal, Headphones, Download, Square, Loader2, Sparkles } from 'lucide-react';
 import { api, downloadFile } from '../lib/api';
 import { pickVoice } from '../lib/speech';
 
@@ -7,7 +7,7 @@ import { pickVoice } from '../lib/speech';
  * Secondary topic actions. The spoken lecture from &EDU lives here, out of the main flow.
  * It uses the browser's built-in voice (free) unless the server enables ElevenLabs (SCIEDU_ELEVENLABS=1).
  */
-export default function MoreMenu({ topic, courseTitle }) {
+export default function MoreMenu({ topic, courseTitle, onExplain }) {
   const [open, setOpen] = useState(false);
   const [lecture, setLecture] = useState('idle'); // idle | loading | playing
   const [error, setError] = useState(null);
@@ -82,6 +82,11 @@ export default function MoreMenu({ topic, courseTitle }) {
       </button>
       {open && (
         <div className="menu" role="menu">
+          {onExplain && (
+            <button type="button" role="menuitem" onClick={() => { setOpen(false); stop(); onExplain(); }}>
+              <Sparkles size={14} aria-hidden="true" /> Explain it to me (guided walkthrough)
+            </button>
+          )}
           <button type="button" role="menuitem" onClick={listen} disabled={lecture !== 'idle'}>
             <Headphones size={14} aria-hidden="true" /> Listen to a short lecture
           </button>

@@ -1,0 +1,542 @@
+{
+  "id": "de-07-hobbys",
+  "title": "German 7: Hobbies and modal verbs",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1-A2)",
+  "summary": "Talk about what you like doing, and what you can, want, must or may do: modal verbs send the main verb to the end.",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 7: Hobbies and modal verbs\n\nTalk about what you like doing, and what you can, want, must or may do: modal verbs send the main verb to the end.\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| das Hobby | die Hobbys | hobby | /ˈhɔbi/ |\n| der Sport | — | sport | /ʃpɔʁt/ |\n| die Musik | — | music | /muˈziːk/ |\n| das Spiel | die Spiele | game; match | /ʃpiːl/ |\n| das Lied | die Lieder | song | /liːt/ |\n| die Gitarre | die Gitarren | guitar | /ɡiˈtaʁə/ |\n| der Fußball | — | football (soccer) | /ˈfuːsˌbal/ |\n| schwimmen | — | to swim | /ˈʃvɪmən/ |\n| spielen | — | to play | /ˈʃpiːlən/ |\n| können | — | can; to be able to | /ˈkœnən/ |\n| wollen | — | to want to | /ˈvɔlən/ |\n| müssen | — | to have to; must | /ˈmʏsn̩/ |\n| dürfen | — | to be allowed to; may | /ˈdʏʁfn̩/ |\n| gern | — | gladly; (to like) doing | /ɡɛʁn/ |\n\n## Phrases\n\n- **Ich spiele gern Fußball.**: I like playing football.\n- **Kannst du schwimmen?**: Can you swim?\n- **Ich will Gitarre lernen.**: I want to learn the guitar.\n- **Wir müssen heute arbeiten.**: We have to work today.\n- **Darf ich hier fotografieren?**: May I take photos here?\n- **Am Wochenende hört sie Musik.**: At the weekend she listens to music.\n- **Er kann sehr gut singen.**: He can sing very well.\n\n## Grammar: modal verbs\n\n| | können | wollen | müssen | dürfen |\n| --- | --- | --- | --- | --- |\n| ich | kann | will | muss | darf |\n| du | kannst | willst | musst | darfst |\n| er / sie / es | kann | will | muss | darf |\n| wir | können | wollen | müssen | dürfen |\n| ihr | könnt | wollt | müsst | dürft |\n| sie / Sie | können | wollen | müssen | dürfen |\n\n- The modal is in position 2; the main verb goes to the **end** in the infinitive: *Ich **kann** gut **schwimmen**.*\n- *ich* and *er/sie/es* have the same form and no ending: *ich kann, er kann*.\n- **gern** + verb = to like doing: *Ich spiele **gern** Fußball.*\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "das Hobby",
+          "hobby"
+        ],
+        [
+          "der Sport",
+          "sport"
+        ],
+        [
+          "die Musik",
+          "music"
+        ],
+        [
+          "das Spiel",
+          "game; match"
+        ],
+        [
+          "das Lied",
+          "song"
+        ],
+        [
+          "die Gitarre",
+          "guitar"
+        ],
+        [
+          "der Fußball",
+          "football (soccer)"
+        ],
+        [
+          "schwimmen",
+          "to swim"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I like playing football.",
+      "answer": "Ich spiele gern Fußball.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich spiele gern Fußball.",
+      "bank": [
+        "Ich",
+        "spiele",
+        "gern",
+        "Fußball",
+        "spielt",
+        "gerne",
+        "Spiel"
+      ],
+      "source": "I like playing football.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich spiele gern Fußball.",
+      "answer": "Ich spiele gern Fußball.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Can you swim?",
+      "answer": "Kannst du schwimmen?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Kannst du schwimmen?",
+      "bank": [
+        "Kannst",
+        "du",
+        "schwimmen",
+        "Kann",
+        "schwimmst",
+        "Können"
+      ],
+      "source": "Can you swim?",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Kannst du schwimmen?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "Can you swim?"
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I want to learn the guitar.",
+      "answer": "Ich will Gitarre lernen.",
+      "accepted": [
+        "Ich möchte Gitarre lernen."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich will Gitarre lernen.",
+      "bank": [
+        "Ich",
+        "will",
+        "Gitarre",
+        "lernen",
+        "lerne",
+        "willst",
+        "wollen"
+      ],
+      "source": "I want to learn the guitar.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich will Gitarre lernen.",
+      "answer": "Ich will Gitarre lernen.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We have to work today.",
+      "answer": "Wir müssen heute arbeiten.",
+      "accepted": [
+        "Heute müssen wir arbeiten."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir müssen heute arbeiten.",
+      "bank": [
+        "Wir",
+        "müssen",
+        "heute",
+        "arbeiten",
+        "muss",
+        "arbeitet",
+        "müsst"
+      ],
+      "source": "We have to work today.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir müssen heute arbeiten.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We have to work today."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "May I take photos here?",
+      "answer": "Darf ich hier fotografieren?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Darf ich hier fotografieren?",
+      "bank": [
+        "Darf",
+        "ich",
+        "hier",
+        "fotografieren",
+        "Darfst",
+        "fotografiere",
+        "dürfen"
+      ],
+      "source": "May I take photos here?",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Darf ich hier fotografieren?",
+      "answer": "Darf ich hier fotografieren?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "At the weekend she listens to music.",
+      "answer": "Am Wochenende hört sie Musik.",
+      "accepted": [
+        "Sie hört am Wochenende Musik."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Am Wochenende hört sie Musik.",
+      "bank": [
+        "Am",
+        "Wochenende",
+        "hört",
+        "sie",
+        "Musik",
+        "hören",
+        "hörst",
+        "Im"
+      ],
+      "source": "At the weekend she listens to music.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Am Wochenende hört sie Musik.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "At the weekend she listens to music."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "He can sing very well.",
+      "answer": "Er kann sehr gut singen.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Er kann sehr gut singen.",
+      "bank": [
+        "Er",
+        "kann",
+        "sehr",
+        "gut",
+        "singen",
+        "singt",
+        "können",
+        "kannst"
+      ],
+      "source": "He can sing very well.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Er kann sehr gut singen.",
+      "answer": "Er kann sehr gut singen.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "conjugate",
+      "prompt": "Conjugate the verb",
+      "explanation": "",
+      "concept": null,
+      "verb": "können",
+      "tense": "Präsens (present)",
+      "lang": "de",
+      "forms": [
+        [
+          "ich",
+          "kann"
+        ],
+        [
+          "du",
+          "kannst"
+        ],
+        [
+          "er/sie/es",
+          "kann"
+        ],
+        [
+          "wir",
+          "können"
+        ],
+        [
+          "ihr",
+          "könnt"
+        ],
+        [
+          "sie/Sie",
+          "können"
+        ]
+      ]
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Ich ___ heute nicht kommen. (must)",
+      "explanation": "ich → **muss** (no ending).",
+      "concept": null,
+      "options": [
+        "muss",
+        "müssen",
+        "musst",
+        "müsst"
+      ],
+      "answer": "muss"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "Wir ___ ins Kino gehen. (want)",
+      "explanation": "wir → **wollen**.",
+      "concept": null,
+      "options": [
+        "wollen",
+        "will",
+        "willst",
+        "wollt"
+      ],
+      "answer": "wollen"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Ich kann gut ___.",
+      "explanation": "After a modal verb the main verb is an infinitive at the end.",
+      "concept": null,
+      "options": [
+        "schwimmen",
+        "schwimme",
+        "schwimmt",
+        "schwimmst"
+      ],
+      "answer": "schwimmen"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "das Hobby",
+      "back": "hobby  /ˈhɔbi/",
+      "hint": "Plural: die Hobbys. Mein Hobby ist Lesen.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Sport",
+      "back": "sport  /ʃpɔʁt/",
+      "hint": "Sport macht Spaß.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Musik",
+      "back": "music  /muˈziːk/",
+      "hint": "Ich höre gern Musik.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Spiel",
+      "back": "game; match  /ʃpiːl/",
+      "hint": "Plural: die Spiele. Das Spiel beginnt um acht.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "das Lied",
+      "back": "song  /liːt/",
+      "hint": "Plural: die Lieder. Das Lied ist schön.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Gitarre",
+      "back": "guitar  /ɡiˈtaʁə/",
+      "hint": "Plural: die Gitarren. Sie spielt Gitarre.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Fußball",
+      "back": "football (soccer)  /ˈfuːsˌbal/",
+      "hint": "Wir spielen Fußball.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "schwimmen",
+      "back": "to swim  /ˈʃvɪmən/",
+      "hint": "Im Sommer schwimme ich viel.",
+      "lang": "de"
+    },
+    {
+      "front": "spielen",
+      "back": "to play  /ˈʃpiːlən/",
+      "hint": "Die Kinder spielen im Park.",
+      "lang": "de"
+    },
+    {
+      "front": "können",
+      "back": "can; to be able to  /ˈkœnən/",
+      "hint": "Ich kann gut kochen.",
+      "lang": "de"
+    },
+    {
+      "front": "wollen",
+      "back": "to want to  /ˈvɔlən/",
+      "hint": "Wir wollen ins Kino gehen.",
+      "lang": "de"
+    },
+    {
+      "front": "müssen",
+      "back": "to have to; must  /ˈmʏsn̩/",
+      "hint": "Du musst heute lernen.",
+      "lang": "de"
+    },
+    {
+      "front": "dürfen",
+      "back": "to be allowed to; may  /ˈdʏʁfn̩/",
+      "hint": "Hier darf man nicht rauchen.",
+      "lang": "de"
+    },
+    {
+      "front": "gern",
+      "back": "gladly; (to like) doing  /ɡɛʁn/",
+      "hint": "Ich lese gern.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 7,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

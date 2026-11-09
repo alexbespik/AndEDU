@@ -2,6 +2,7 @@
 &.edu LAB regression tests. Standard library only:  python -m unittest discover -s tests -v
 Runs against a temporary data folder (SCIEDU_CONTENT_DIR) and never calls Gemini.
 """
+import asyncio
 import json
 import os
 import sys
@@ -9,6 +10,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 TMP = tempfile.TemporaryDirectory(prefix="andedu-test-")
@@ -16,6 +19,9 @@ os.environ["SCIEDU_CONTENT_DIR"] = TMP.name
 os.environ.pop("SCIEDU_AUTH", None)
 os.environ["api_KEY"] = ""          # set before import: load_dotenv() does not override existing variables
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["SCIEDU_ELEVENLABS"] = "0"  # a local .env may turn ElevenLabs on: tests must never spend real credits
+for _k in ("ELEVENLABS_API_KEY", "ELEVEN_LABS_API_KEY", "XI_API_KEY"):
+    os.environ[_k] = ""
 sys.path.insert(0, str(ROOT))
 
 import db  # noqa: E402
@@ -92,6 +98,49 @@ class LatexJson(unittest.TestCase):
         self.assertEqual(self.parse('{"a": "line\\nnext \\"q\\" \\u00e9"}'), 'line\nnext "q" é')
         self.assertEqual(self.parse(r'{"a": "already \\theta"}'), r"already \theta")
 
+    def test_raw_quotes_inside_strings_are_repaired(self):
+        # one raw quote used to fail a whole course plan with "Expecting ',' delimiter"
+        reply = r'{"m": "graph TD; A["Incident"] --> B", "q": [{"o": ["a "b" c", "d"]}], "t": "x\ny"}'
+        self.assertEqual(server._parse_json_reply(reply),
+                         {"m": 'graph TD; A["Incident"] --> B', "q": [{"o": ['a "b" c', "d"]}], "t": "x\ny"})
+
+    def test_inner_quotes_with_colons_are_repaired(self):
+        reply = r'{"question": "Consider case "A": which is true?", "answer": "Option "B": 10 N", "formula": "ratio: x / y"}'
+        parsed = server._parse_json_reply(reply)
+        self.assertEqual(parsed["question"], 'Consider case "A": which is true?')
+        self.assertEqual(parsed["answer"], 'Option "B": 10 N')
+        self.assertEqual(parsed["formula"], 'ratio: x / y')
+
+    def test_trailing_commas_are_stripped(self):
+        reply = r'{"a": [1, 2, 3,], "b": {"c": 4,}, "str": "keep, ] inside",}'
+        parsed = server._parse_json_reply(reply)
+        self.assertEqual(parsed, {"a": [1, 2, 3], "b": {"c": 4}, "str": "keep, ] inside"})
+
+    def test_friendly_ai_error_catches_malformed_json(self):
+        err = json.JSONDecodeError("Expecting ',' delimiter", '{"a": 1', 6)
+        self.assertIn("The AI returned a malformed response while planning the course", server.friendly_ai_error(err))
+        self.assertIn("Click 'Retry planning'", server.friendly_ai_error(err))
+        generic_err = Exception("Expecting ':' delimiter: line 1 column 5 (char 4)")
+        self.assertIn("The AI returned a malformed response while planning the course", server.friendly_ai_error(generic_err))
+
+    def test_code_fence_inside_a_string_is_content(self):
+        reply = '{"markdownContent": "Run:\\n```python\\nprint(1)\\n```\\ndone", "n": 1}'
+        self.assertEqual(server._parse_json_reply(reply)["markdownContent"], "Run:\n```python\nprint(1)\n```\ndone")
+        self.assertEqual(server._parse_json_reply('```json\n{"a": 1}\n```'), {"a": 1})
+        self.assertEqual(server._parse_json_reply('Here it is:\n```json\n{"a": 2}\n```'), {"a": 2})
+
+    def test_unparseable_reply_is_asked_again_once(self):
+        replies = iter(['{"a": "cut off', '{"a": "fixed"}'])
+        prompts = []
+
+        def fake(contents, role=None, **kw):
+            prompts.append(contents)
+            return SimpleNamespace(text=next(replies))
+        with mock.patch.object(server, "call_gemini", fake):
+            self.assertEqual(asyncio.run(server.gemini_json("make json")), {"a": "fixed"})
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("NOT VALID JSON", prompts[1])
+
 
 class SimSpec(unittest.TestCase):
     def test_valid_graph(self):
@@ -113,6 +162,51 @@ class SimSpec(unittest.TestCase):
             "links": [{"type": "rod", "a": "pivot", "b": "bob", "length": "L"}],
             "series": [{"label": "h", "expr": "if(bob.y > 1, bob.y, 0)"}]})
         self.assertEqual(errors, [])
+
+    def test_validate_geometry_valid(self):
+        spec = {
+            "kind": "geometry",
+            "title": "Incline plane",
+            "params": [{"name": "theta", "min": 0, "max": 90, "value": 30}],
+            "view": {"xmin": -5, "xmax": 5, "ymin": -5, "ymax": 5},
+            "bodies": [
+                {"id": "ramp", "type": "wedge", "x": -2, "y": 0, "width": 4, "height": "4 * tan(theta * pi / 180)"},
+                {"id": "block", "type": "box", "x": 0, "y": 1, "width": 1, "height": 0.8, "angle": "theta", "label": "m"}
+            ],
+            "forces": [
+                {"id": "fg", "body": "block", "origin": "center", "magnitude": "9.8", "angle": 270, "label": r"m\vec{g}"},
+                {"id": "fn", "body": "block", "origin": "center", "magnitude": "9.8 * cos(theta * pi / 180)", "angle": "90 + theta", "label": r"\vec{F}_N"}
+            ],
+            "elements": [
+                {"type": "angle_arc", "x": -2, "y": 0, "radius": 1.5, "startAngle": 0, "endAngle": "theta", "label": r"\theta"},
+                {"type": "right_angle", "x": 2, "y": 0, "size": 0.4, "angle": 90}
+            ]
+        }
+        clean, errors = validate_spec(spec)
+        self.assertEqual(errors, [])
+        self.assertEqual(clean["kind"], "geometry")
+        self.assertEqual(len(clean["bodies"]), 2)
+        self.assertEqual(len(clean["forces"]), 2)
+        self.assertEqual(len(clean["elements"]), 2)
+
+    def test_validate_geometry_rejects_unwhitelisted_and_malformed(self):
+        # Malformed view
+        clean, errors = validate_spec({"kind": "geometry", "view": {"xmin": 5, "xmax": 2}})
+        self.assertTrue(any("view" in e for e in errors))
+
+        # Unwhitelisted function / unsafe AST
+        clean, errors = validate_spec({
+            "kind": "geometry",
+            "bodies": [{"id": "b1", "type": "box", "x": "__import__('os')", "y": 0, "width": 1, "height": 1}]
+        })
+        self.assertTrue(any("bodies[0].x" in e for e in errors))
+
+        # Unknown body type
+        clean, errors = validate_spec({
+            "kind": "geometry",
+            "bodies": [{"id": "b1", "type": "spaceship_laser", "x": 0, "y": 0}]
+        })
+        self.assertTrue(any("unknown type" in e for e in errors))
 
 
 class Accounts(unittest.TestCase):
@@ -237,6 +331,30 @@ class Api(unittest.TestCase):
         course = db.create_course(user["id"], "Interrupted", "goal", "materials", [])
         self.assertIn(course["id"], [c["id"] for c in db.interrupted_planning()])
 
+    def test_resume_planning_after_error(self):
+        user = db.get_or_create_user("Resume Planner Tester")
+        course = db.create_course(user["id"], "Broken plan course", "Physics mechanics goal", "Long enough materials text for physics testing", [])
+        db.update_course(course["id"], status="error", error="The AI returned a malformed response")
+
+        server.start_plan_job, real_plan = (lambda *a: {"id": "job-plan-resume", "status": "running"}), server.start_plan_job
+        try:
+            r = self.c.post(f"/api/courses/{course['id']}/resume")
+            self.assertEqual(r.status_code, 200)
+            data = r.json()
+            self.assertEqual(data["course"]["status"], "planning")
+            self.assertIsNone(data["course"]["error"])
+            self.assertEqual(data["job"]["id"], "job-plan-resume")
+
+            # Calling again while job is running returns 409
+            server.JOBS["job-plan-resume"] = {"id": "job-plan-resume", "status": "running"}
+            server.ACTIVE_COURSE_JOBS[course["id"]] = "job-plan-resume"
+            r2 = self.c.post(f"/api/courses/{course['id']}/resume")
+            self.assertEqual(r2.status_code, 409)
+        finally:
+            server.start_plan_job = real_plan
+            server.ACTIVE_COURSE_JOBS.pop(course["id"], None)
+            server.JOBS.pop("job-plan-resume", None)
+
     def test_test_prep_mode_reaches_the_prompts(self):
         user = db.get_or_create_user("Prep Tester")
         server.start_plan_job, real = (lambda *a: {"id": "job-x"}), server.start_plan_job
@@ -295,21 +413,24 @@ class Api(unittest.TestCase):
 
     def test_accounts_keep_courses_private(self):
         server.AUTH_REQUIRED = True
-        self.assertEqual(self.c.get("/api/topics").status_code, 401)
-        no_age = self.c.post("/api/auth/register", json={"name": "Kid Test", "password": "correct horse"})
-        self.assertEqual(no_age.status_code, 422)  # Gemini API terms: users must be 18+
-        a = self.c.post("/api/auth/register", json={"name": "Ana Test", "password": "correct horse", "adult": True}).json()
-        b = self.c.post("/api/auth/register", json={"name": "Ben Test", "password": "battery staple", "adult": True}).json()
-        ha, hb = {"Authorization": f"Bearer {a['token']}"}, {"Authorization": f"Bearer {b['token']}"}
-        course = self.c.post("/api/courses", headers=ha, json={"userId": b["user"]["id"],
-                             "goal": "A goal long enough to be accepted by the server"}).json()["course"]
-        self.assertEqual(course["user_id"], a["user"]["id"])  # forged owner id is ignored
-        self.assertEqual(self.c.get(f"/api/courses/{course['id']}", headers=ha).status_code, 200)
-        self.assertEqual(self.c.get(f"/api/courses/{course['id']}", headers=hb).status_code, 404)
-        self.assertEqual(self.c.get(f"/api/users/{a['user']['id']}/courses", headers=hb).status_code, 403)
-        self.assertEqual(self.c.post("/api/auth/login", json={"name": "Ana Test", "password": "nope"}).status_code, 401)
-        self.c.post("/api/auth/logout", headers=hb)
-        self.assertEqual(self.c.get("/api/topics", headers=hb).status_code, 401)
+        try:
+            self.assertEqual(self.c.get("/api/topics").status_code, 401)
+            no_age = self.c.post("/api/auth/register", json={"name": "Kid Test", "password": "correct horse"})
+            self.assertEqual(no_age.status_code, 422)  # Gemini API terms: users must be 18+
+            a = self.c.post("/api/auth/register", json={"name": "Ana Test", "password": "correct horse", "adult": True, "privacy": True}).json()
+            b = self.c.post("/api/auth/register", json={"name": "Ben Test", "password": "battery staple", "adult": True, "privacy": True}).json()
+            ha, hb = {"Authorization": f"Bearer {a['token']}"}, {"Authorization": f"Bearer {b['token']}"}
+            course = self.c.post("/api/courses", headers=ha, json={"userId": b["user"]["id"],
+                                 "goal": "A goal long enough to be accepted by the server"}).json()["course"]
+            self.assertEqual(course["user_id"], a["user"]["id"])  # forged owner id is ignored
+            self.assertEqual(self.c.get(f"/api/courses/{course['id']}", headers=ha).status_code, 200)
+            self.assertEqual(self.c.get(f"/api/courses/{course['id']}", headers=hb).status_code, 404)
+            self.assertEqual(self.c.get(f"/api/users/{a['user']['id']}/courses", headers=hb).status_code, 403)
+            self.assertEqual(self.c.post("/api/auth/login", json={"name": "Ana Test", "password": "nope"}).status_code, 401)
+            self.c.post("/api/auth/logout", headers=hb)
+            self.assertEqual(self.c.get("/api/topics", headers=hb).status_code, 401)
+        finally:
+            server.AUTH_REQUIRED = False
 
 
 if __name__ == "__main__":
@@ -719,6 +840,13 @@ class LatexRepair(unittest.TestCase):
         self.assertEqual(server.repair_latex("so \\(v = \\frac{d}{t}\\) and \\[x^2\\]"), "so $v = \\frac{d}{t}$ and $$x^2$$")
         self.assertEqual(server.repair_latex("plain\ttext\nlines"), "plain\ttext\nlines")  # real tabs/newlines untouched
 
+    def test_unit_vector_repairs(self):
+        self.assertEqual(server.repair_latex("i\u0302 + j\u0302 + k\u0302"), r"\hat{\imath} + \hat{\jmath} + \hat{k}")
+        self.assertEqual(server.repair_latex("î + ĵ"), r"\hat{\imath} + \hat{\jmath}")
+        self.assertEqual(server.repair_latex("i^ + j^ + k^"), r"\hat{\imath} + \hat{\jmath} + \hat{k}")
+        self.assertEqual(server.repair_latex(r"\hat{i} + \hat{j} + \hat{k}"), r"\hat{\imath} + \hat{\jmath} + \hat{k}")
+        self.assertEqual(server.repair_latex(r"\ihat + \jhat + \khat"), r"\hat{\imath} + \hat{\jmath} + \hat{k}")
+
 
 class AccountsSecurity(unittest.TestCase):
     """With SCIEDU_AUTH=1 users must not touch each other's lessons, events, chats or the shared catalog."""
@@ -727,7 +855,7 @@ class AccountsSecurity(unittest.TestCase):
         server._rate_hits.pop(("auth", "testclient"), None)  # every TestClient shares one IP: reset the sign-in limit
         self.ctx = TestClient(server.app, base_url=LOCAL); self.c = self.ctx.__enter__()
         def acct(name):
-            r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True}).json()
+            r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True, "privacy": True}).json()
             return {"Authorization": f"Bearer {r['token']}"}, r["user"]["id"]
         import uuid
         tag = uuid.uuid4().hex[:6]

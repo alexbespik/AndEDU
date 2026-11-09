@@ -1,6 +1,7 @@
 """Cross-subject authoring and progress tools for the &.edu MCP server. Imported by mcp_server.py, which passes in
 its HTTP helpers. Every tool goes through the backend (so accounts-mode owner checks apply); none writes files or
 calls a model. The parsing and building helpers are plain functions so tests can call them directly."""
+import json
 import random
 import re
 
@@ -294,6 +295,27 @@ def tools(call, q, S, STR, OBJ, ARR):
     def replace(a):
         return call("PUT", f"/api/topics/{q(a['topic_id'])}/practice/{q(a['item_id'])}", {"item": a["item"]})
 
+    def add_drawing(a):
+        from simspec import validate_geometry
+        diagram = dict(a.get("diagram") or {})
+        if diagram.get("kind") not in ("geometry", "fbd"):
+            diagram["kind"] = "geometry"
+        clean_diag, errors = validate_geometry(diagram)
+        if errors:
+            raise RuntimeError(f"Invalid geometry diagram: {'; '.join(errors)}")
+        top = topic(a["topic_id"])
+        raw_caption = str(a.get("caption") or clean_diag.get("title") or "Geometric Diagram")
+        caption = re.sub(r"[\r\n#`]+", " ", raw_caption).strip()[:100] or "Geometric Diagram"
+        kind = clean_diag.get("kind", "geometry")
+        block = f"\n\n### {caption}\n\n```{kind}\n{json.dumps(clean_diag, indent=2)}\n```\n"
+        top["markdownContent"] = (top.get("markdownContent") or "").rstrip() + block
+        call("POST", "/api/topics", top)
+        return {"status": "added", "topic_id": a["topic_id"], "caption": caption, "spec": clean_diag}
+
+    def preview_drawing(a):
+        spec = a.get("spec") or {}
+        return call("POST", "/api/ui/geometry", {"spec": spec})
+
     return [
         ("quiz_from_flashcards", "Offline: turn a lesson's flashcards into multiple-choice quiz questions (other cards' backs are the distractors) and append them.",
          S(topic_id=STR("topic id"), count=INT("how many questions, default 5", optional=True)), quiz_from_cards),
@@ -333,4 +355,8 @@ def tools(call, q, S, STR, OBJ, ARR):
         ("remove_flashcard", "Delete one flashcard by its 0-based position; returns the removed card.",
          S(topic_id=STR("topic id"), index=INT("0-based card index")),
          lambda a: call("DELETE", f"/api/topics/{q(a['topic_id'])}/flashcards/{int(a['index'])}")),
+        ("add_drawing_to_notes", "Append an interactive geometry or free-body diagram block directly to a lesson's markdown notes.",
+         S(topic_id=STR("topic id"), diagram=OBJ("geometry or fbd specification"), caption=STR("optional section title/caption", optional=True)), add_drawing),
+        ("preview_geometry_diagram", "Project an interactive geometry or free-body diagram in Math Lab on the student's screen in real time.",
+         S(spec=OBJ("geometry or fbd specification")), preview_drawing),
     ]

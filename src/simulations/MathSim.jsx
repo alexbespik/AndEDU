@@ -221,9 +221,67 @@ const WIDGETS = {
       const m = (f(a + h) - f(a)) / h, e = 1e-5 * Math.max(1, Math.abs(a)), mt = (f(a + e) - f(a - e)) / (2 * e);
       plot(ctx, F, W, H, (x) => f(a) + mt * (x - a), pal.accent, 1.6, [6, 5]);
       plot(ctx, F, W, H, (x) => f(a) + m * (x - a), pal.gold, 2.4);
+
+      // Interactive Slope Triangle (Delta x, Delta y, right-angle glyph)
+      const ax = F.X(a), ay = F.Y(f(a));
+      const bx = F.X(a + h), by = F.Y(f(a + h));
+      const cx = bx, cy = ay;
+
+      // Triangle area fill
+      ctx.fillStyle = pal.gold;
+      ctx.globalAlpha = 0.12;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(bx, by);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Horizontal leg (Delta x = h)
+      ctx.strokeStyle = pal.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+
+      // Vertical leg (Delta y = f(a+h) - f(a))
+      ctx.strokeStyle = pal['gold-text'];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+
+      // Right-angle square glyph at (a+h, f(a))
+      const glyph = 8;
+      const gx = h >= 0 ? -glyph : glyph;
+      const gy = by <= cy ? -glyph : glyph;
+      ctx.strokeStyle = pal.muted;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx + gx, cy);
+      ctx.lineTo(cx + gx, cy + gy);
+      ctx.lineTo(cx, cy + gy);
+      ctx.stroke();
+
+      // Leg labels
+      ctx.font = '11px "IBM Plex Mono", monospace';
+      ctx.fillStyle = pal.accent;
+      ctx.textAlign = 'center';
+      ctx.fillText(`Δx = ${fmt(h, 3)}`, (ax + cx) / 2, cy + (by > cy ? -8 : 16));
+
+      ctx.fillStyle = pal['gold-text'];
+      ctx.textAlign = h >= 0 ? 'left' : 'right';
+      ctx.fillText(`Δy = ${fmt(f(a + h) - f(a), 3)}`, cx + (h >= 0 ? 8 : -8), (cy + by) / 2);
+
       for (const [x, c] of [[a, pal.ink], [a + h, pal['gold-text']]]) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(F.X(x), F.Y(f(x)), 5, 0, Math.PI * 2); ctx.fill(); }
       label(ctx, 'secant', F.X(a + h) + 8, F.Y(f(a + h)) - 8, pal['gold-text']);
-      return [`Secant slope [f(a+h) − f(a)] / h = ${fmt(m)}  (h = ${fmt(h, 3)})`, `Tangent slope f′(a) ≈ ${fmt(mt)}, difference ${fmt(m - mt, 3)}`];
+      return [
+        `Secant slope [Δy / Δx] = ${fmt(m, 5)}  (h = ${fmt(h, 4)})`,
+        `lim (h → 0) [Δy / Δx] = f′(a) ≈ ${fmt(mt, 5)}  (convergence error: ${fmt(Math.abs(m - mt), 4)})`
+      ];
     },
   },
 
@@ -232,22 +290,79 @@ const WIDGETS = {
     draw(ctx, F, W, H, pal, fn, sc, s, st) {
       const a = fn.a(sc), b = fn.b(sc), n = Math.max(1, Math.round(sc.n)), f = (x) => fn.f({ ...sc, x }), dx = (b - a) / n, method = st.method;
       let sum = 0;
+      let lowerSum = 0;
+      let upperSum = 0;
+
       for (let i = 0; i < n; i++) {
         const x0 = a + i * dx, x1 = x0 + dx;
-        ctx.fillStyle = pal.gold; ctx.globalAlpha = 0.32; ctx.strokeStyle = pal['gold-text']; ctx.lineWidth = 1;
-        if (method === 'trap') {
+
+        // Sample subinterval to compute inf and sup (Darboux bounds)
+        let infVal = Infinity, supVal = -Infinity;
+        for (let k = 0; k <= 12; k++) {
+          const sx = x0 + (k / 12) * dx;
+          const y = f(sx);
+          if (Number.isFinite(y)) {
+            if (y < infVal) infVal = y;
+            if (y > supVal) supVal = y;
+          }
+        }
+        if (!Number.isFinite(infVal)) infVal = f(x0);
+        if (!Number.isFinite(supVal)) supVal = f(x1);
+
+        lowerSum += infVal * dx;
+        upperSum += supVal * dx;
+
+        if (method === 'darboux') {
+          // Upper Darboux Sum rectangle (translucent gold)
+          ctx.fillStyle = pal.gold; ctx.globalAlpha = 0.20;
+          ctx.fillRect(F.X(x0), Math.min(F.Y(supVal), F.Y(0)), F.X(x1) - F.X(x0), Math.abs(F.Y(supVal) - F.Y(0)));
+          ctx.strokeStyle = pal['gold-text']; ctx.lineWidth = 1;
+          ctx.strokeRect(F.X(x0), Math.min(F.Y(supVal), F.Y(0)), F.X(x1) - F.X(x0), Math.abs(F.Y(supVal) - F.Y(0)));
+
+          // Lower Darboux Sum rectangle (translucent cyan)
+          ctx.fillStyle = pal.accent; ctx.globalAlpha = 0.32;
+          ctx.fillRect(F.X(x0), Math.min(F.Y(infVal), F.Y(0)), F.X(x1) - F.X(x0), Math.abs(F.Y(infVal) - F.Y(0)));
+          ctx.strokeStyle = pal.accent;
+          ctx.strokeRect(F.X(x0), Math.min(F.Y(infVal), F.Y(0)), F.X(x1) - F.X(x0), Math.abs(F.Y(infVal) - F.Y(0)));
+          ctx.globalAlpha = 1;
+        } else if (method === 'trap') {
           const y0 = f(x0), y1 = f(x1); sum += ((y0 + y1) / 2) * dx;
+          ctx.fillStyle = pal.gold; ctx.globalAlpha = 0.32; ctx.strokeStyle = pal['gold-text']; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.moveTo(F.X(x0), F.Y(0)); ctx.lineTo(F.X(x0), F.Y(y0)); ctx.lineTo(F.X(x1), F.Y(y1)); ctx.lineTo(F.X(x1), F.Y(0)); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; ctx.stroke();
         } else {
           const xs = method === 'left' ? x0 : method === 'right' ? x1 : (x0 + x1) / 2, y = f(xs); sum += y * dx;
+          ctx.fillStyle = pal.gold; ctx.globalAlpha = 0.32; ctx.strokeStyle = pal['gold-text']; ctx.lineWidth = 1;
           ctx.fillRect(F.X(x0), Math.min(F.Y(y), F.Y(0)), F.X(x1) - F.X(x0), Math.abs(F.Y(y) - F.Y(0))); ctx.globalAlpha = 1;
           ctx.strokeRect(F.X(x0), Math.min(F.Y(y), F.Y(0)), F.X(x1) - F.X(x0), Math.abs(F.Y(y) - F.Y(0)));
+
+          // Shaded error residual fill between rectangle top and exact curve
+          ctx.fillStyle = 'rgba(249, 38, 114, 0.16)';
+          ctx.beginPath();
+          ctx.moveTo(F.X(x0), F.Y(y));
+          for (let k = 0; k <= 8; k++) {
+            const sx = x0 + (k / 8) * dx;
+            ctx.lineTo(F.X(sx), F.Y(f(sx)));
+          }
+          ctx.lineTo(F.X(x1), F.Y(y));
+          ctx.closePath();
+          ctx.fill();
         }
       }
+
       plot(ctx, F, W, H, f, pal.ink, 2.4);
       const exact = simpson(f, a, b);
-      return [`${{ left: 'Left', right: 'Right', mid: 'Midpoint', trap: 'Trapezoid' }[method]} sum with n = ${n}: ${fmt(sum, 6)}`,
-        `Exact area ∫ f dx from ${fmt(a, 3)} to ${fmt(b, 3)} = ${fmt(exact, 6)}, error ${fmt(sum - exact, 3)}`];
+
+      if (method === 'darboux') {
+        return [
+          `Darboux Sandwich: L_${n} (${fmt(lowerSum, 5)}) ≤ ∫ f dx (${fmt(exact, 5)}) ≤ U_${n} (${fmt(upperSum, 5)})`,
+          `Darboux error gap: (U_${n} − L_${n}) = ${fmt(upperSum - lowerSum, 5)}  ➔  0 as n → ∞`
+        ];
+      }
+
+      return [
+        `${{ left: 'Left', right: 'Right', mid: 'Midpoint', trap: 'Trapezoid' }[method]} sum (n = ${n}): ${fmt(sum, 6)}  [Darboux bounds: ${fmt(lowerSum, 4)} ≤ ∫ ≤ ${fmt(upperSum, 4)}]`,
+        `Exact area ∫ f dx = ${fmt(exact, 6)}, error ${fmt(sum - exact, 4)} (shaded error residual)`
+      ];
     },
   },
 
@@ -519,9 +634,9 @@ export default function MathSim({ spec, editable = false }) {
 
       {spec.widget === 'riemann' && (
         <div className="btn-row" role="group" aria-label="Rule">
-          {['left', 'right', 'mid', 'trap'].map((m) => (
+          {['left', 'right', 'mid', 'trap', 'darboux'].map((m) => (
             <button key={m} type="button" className={`btn btn-sm ${method === m ? 'btn-primary' : 'btn-quiet'}`} aria-pressed={method === m} onClick={() => setMethod(m)}>
-              {{ left: 'Left', right: 'Right', mid: 'Midpoint', trap: 'Trapezoid' }[m]}
+              {{ left: 'Left', right: 'Right', mid: 'Midpoint', trap: 'Trapezoid', darboux: 'Darboux (Upper/Lower)' }[m]}
             </button>
           ))}
         </div>

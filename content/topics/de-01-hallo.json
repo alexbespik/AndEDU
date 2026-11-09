@@ -1,0 +1,575 @@
+{
+  "id": "de-01-hallo",
+  "title": "German 1: Hallo! Greetings and sein",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1)",
+  "summary": "Say hello and goodbye, introduce yourself, say where you come from, and meet the verb sein (to be).",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 1: Hallo! Greetings and sein\n\nSay hello and goodbye, introduce yourself, say where you come from, and meet the verb sein (to be).\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| Hallo | — | hello | /ˈhalo/ |\n| tschüss | — | bye | /tʃʏs/ |\n| danke | — | thank you | /ˈdaŋkə/ |\n| bitte | — | please; you're welcome | /ˈbɪtə/ |\n| ja | — | yes | /jaː/ |\n| nein | — | no | /naɪ̯n/ |\n| der Name | die Namen | name | /ˈnaːmə/ |\n| der Herr | die Herren | Mr; gentleman | /hɛʁ/ |\n| die Frau | die Frauen | Mrs; woman | /fʁaʊ̯/ |\n| der Tag | die Tage | day | /taːk/ |\n| sein | — | to be | /zaɪ̯n/ |\n| heißen | — | to be called | /ˈhaɪ̯sn̩/ |\n| kommen | — | to come | /ˈkɔmən/ |\n\n## Phrases\n\n- **Guten Morgen!**: Good morning!\n- **Wie heißt du?**: What is your name?\n- **Ich heiße Anna.**: My name is Anna.\n- **Woher kommst du?**: Where are you from?\n- **Ich komme aus Deutschland.**: I come from Germany.\n- **Wie geht es dir?**: How are you?\n- **Mir geht es gut, danke.**: I am fine, thanks.\n- **Wir sind Freunde.**: We are friends.\n\n## Grammar: sein (to be)\n\n| Person | sein |\n| --- | --- |\n| ich | bin |\n| du | bist |\n| er / sie / es | ist |\n| wir | sind |\n| ihr | seid |\n| sie / Sie | sind |\n\n- **du** is for friends, family and children; **Sie** (always capitalized) is the polite form for adults you don't know.\n- Professions and nationalities take no article: *Ich bin Student.* (not *ein Student* in everyday speech).\n- Every noun is capitalized: *der Name, die Frau, der Tag*.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "Hallo",
+          "hello"
+        ],
+        [
+          "tschüss",
+          "bye"
+        ],
+        [
+          "danke",
+          "thank you"
+        ],
+        [
+          "bitte",
+          "please; you're welcome"
+        ],
+        [
+          "ja",
+          "yes"
+        ],
+        [
+          "nein",
+          "no"
+        ],
+        [
+          "der Name",
+          "name"
+        ],
+        [
+          "der Herr",
+          "Mr; gentleman"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Good morning!",
+      "answer": "Guten Morgen!",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Guten Morgen!",
+      "bank": [
+        "Guten",
+        "Morgen",
+        "Wie",
+        "heißt",
+        "du"
+      ],
+      "source": "Good morning!",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Guten Morgen!",
+      "answer": "Guten Morgen!",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "What is your name?",
+      "answer": "Wie heißt du?",
+      "accepted": [
+        "Wie ist dein Name?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wie heißt du?",
+      "bank": [
+        "Wie",
+        "heißt",
+        "du",
+        "Guten",
+        "Morgen",
+        "Ich"
+      ],
+      "source": "What is your name?",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wie heißt du?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "What is your name?"
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "My name is Anna.",
+      "answer": "Ich heiße Anna.",
+      "accepted": [
+        "Mein Name ist Anna.",
+        "Ich bin Anna."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich heiße Anna.",
+      "bank": [
+        "Ich",
+        "heiße",
+        "Anna",
+        "heißt",
+        "bin",
+        "Name"
+      ],
+      "source": "My name is Anna.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich heiße Anna.",
+      "answer": "Ich heiße Anna.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Where are you from?",
+      "answer": "Woher kommst du?",
+      "accepted": [
+        "Woher kommen Sie?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Woher kommst du?",
+      "bank": [
+        "Woher",
+        "kommst",
+        "du",
+        "Wo",
+        "komme",
+        "kommt"
+      ],
+      "source": "Where are you from?",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Woher kommst du?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "Where are you from?"
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I come from Germany.",
+      "answer": "Ich komme aus Deutschland.",
+      "accepted": [
+        "Ich bin aus Deutschland."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich komme aus Deutschland.",
+      "bank": [
+        "Ich",
+        "komme",
+        "aus",
+        "Deutschland",
+        "kommst",
+        "in",
+        "nach"
+      ],
+      "source": "I come from Germany.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich komme aus Deutschland.",
+      "answer": "Ich komme aus Deutschland.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "How are you?",
+      "answer": "Wie geht es dir?",
+      "accepted": [
+        "Wie geht's?",
+        "Wie geht es Ihnen?",
+        "Wie geht's dir?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wie geht es dir?",
+      "bank": [
+        "Wie",
+        "geht",
+        "es",
+        "dir",
+        "du",
+        "ist",
+        "mir"
+      ],
+      "source": "How are you?",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wie geht es dir?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "How are you?"
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am fine, thanks.",
+      "answer": "Mir geht es gut, danke.",
+      "accepted": [
+        "Mir geht's gut, danke.",
+        "Gut, danke.",
+        "Es geht mir gut, danke."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Mir geht es gut, danke.",
+      "bank": [
+        "Mir",
+        "geht",
+        "es",
+        "gut",
+        "danke",
+        "Ich",
+        "bin",
+        "dir"
+      ],
+      "source": "I am fine, thanks.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Mir geht es gut, danke.",
+      "answer": "Mir geht es gut, danke.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We are friends.",
+      "answer": "Wir sind Freunde.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p24",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir sind Freunde.",
+      "bank": [
+        "Wir",
+        "sind",
+        "Freunde",
+        "seid",
+        "ist",
+        "Freund"
+      ],
+      "source": "We are friends.",
+      "lang": "de"
+    },
+    {
+      "id": "p25",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir sind Freunde.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We are friends."
+    },
+    {
+      "id": "p26",
+      "type": "conjugate",
+      "prompt": "Conjugate the verb",
+      "explanation": "",
+      "concept": null,
+      "verb": "sein",
+      "tense": "Präsens (present)",
+      "lang": "de",
+      "forms": [
+        [
+          "ich",
+          "bin"
+        ],
+        [
+          "du",
+          "bist"
+        ],
+        [
+          "er/sie/es",
+          "ist"
+        ],
+        [
+          "wir",
+          "sind"
+        ],
+        [
+          "ihr",
+          "seid"
+        ],
+        [
+          "sie/Sie",
+          "sind"
+        ]
+      ]
+    },
+    {
+      "id": "p27",
+      "type": "fill_blank",
+      "prompt": "Du ___ sehr nett.",
+      "explanation": "du → **bist**: *Du bist sehr nett* (You are very nice).",
+      "concept": null,
+      "options": [
+        "bist",
+        "bin",
+        "ist",
+        "seid"
+      ],
+      "answer": "bist"
+    },
+    {
+      "id": "p28",
+      "type": "fill_blank",
+      "prompt": "Wir ___ aus Berlin.",
+      "explanation": "wir → **sind**; ihr → seid.",
+      "concept": null,
+      "options": [
+        "sind",
+        "seid",
+        "ist",
+        "bin"
+      ],
+      "answer": "sind"
+    },
+    {
+      "id": "p29",
+      "type": "fill_blank",
+      "prompt": "___ heißen Sie? (polite: What is your name?)",
+      "explanation": "German asks *how* someone is called: **Wie** heißen Sie?",
+      "concept": null,
+      "options": [
+        "Wie",
+        "Wo",
+        "Was",
+        "Woher"
+      ],
+      "answer": "Wie"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "Hallo",
+      "back": "hello  /ˈhalo/",
+      "hint": "Hallo, ich bin Anna.",
+      "lang": "de"
+    },
+    {
+      "front": "tschüss",
+      "back": "bye  /tʃʏs/",
+      "hint": "Tschüss, bis morgen!",
+      "lang": "de"
+    },
+    {
+      "front": "danke",
+      "back": "thank you  /ˈdaŋkə/",
+      "hint": "Danke schön!",
+      "lang": "de"
+    },
+    {
+      "front": "bitte",
+      "back": "please; you're welcome  /ˈbɪtə/",
+      "hint": "Ein Wasser, bitte.",
+      "lang": "de"
+    },
+    {
+      "front": "ja",
+      "back": "yes  /jaː/",
+      "lang": "de"
+    },
+    {
+      "front": "nein",
+      "back": "no  /naɪ̯n/",
+      "lang": "de"
+    },
+    {
+      "front": "der Name",
+      "back": "name  /ˈnaːmə/",
+      "hint": "Plural: die Namen. Mein Name ist Paul.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "der Herr",
+      "back": "Mr; gentleman  /hɛʁ/",
+      "hint": "Plural: die Herren. Guten Tag, Herr Müller!",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Frau",
+      "back": "Mrs; woman  /fʁaʊ̯/",
+      "hint": "Plural: die Frauen. Guten Abend, Frau Schmidt!",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Tag",
+      "back": "day  /taːk/",
+      "hint": "Plural: die Tage. Guten Tag!",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "sein",
+      "back": "to be  /zaɪ̯n/",
+      "hint": "Ich bin Student.",
+      "lang": "de"
+    },
+    {
+      "front": "heißen",
+      "back": "to be called  /ˈhaɪ̯sn̩/",
+      "hint": "Ich heiße Lena.",
+      "lang": "de"
+    },
+    {
+      "front": "kommen",
+      "back": "to come  /ˈkɔmən/",
+      "hint": "Ich komme aus Österreich.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 1,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

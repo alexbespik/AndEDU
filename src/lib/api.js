@@ -36,7 +36,7 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
   if (!res.ok) {
     const detail = data?.detail;
     const msg = Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : detail;
-    throw new Error(msg || `Request failed (HTTP ${res.status})`);
+    throw Object.assign(new Error(msg || `Request failed (HTTP ${res.status})`), { status: res.status });
   }
   return data;
 }
@@ -62,7 +62,13 @@ export async function uploadFiles(files) {
   const form = new FormData();
   for (const f of files) form.append('files', f);
   const res = await fetch('/api/upload-multimodal', { method: 'POST', body: form, headers: authHeaders() });
-  if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`);
+  if (!res.ok) {
+    let detail = null;
+    try { detail = (await res.json())?.detail; } catch { /* empty body */ }
+    const msg = Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : detail;
+    // status lets callers spot 428 (upload consent missing on the server)
+    throw Object.assign(new Error(msg || `Upload failed (HTTP ${res.status})`), { status: res.status });
+  }
   return res.json();
 }
 
@@ -71,7 +77,9 @@ export async function uploadFiles(files) {
 // replays old navigation, and every subscriber sees each event exactly once.
 const subscribers = new Set();
 let cursor = -1;
-let timer = null;
+// Set before the first request goes out: subscribers that mount while it is in flight
+// must not start a second loop (each loop would deliver every event again).
+let polling = false;
 
 async function pollOnce() {
   try {
@@ -84,7 +92,7 @@ async function pollOnce() {
       }
     }
   } catch { /* backend offline: keep polling */ }
-  timer = setTimeout(pollOnce, document.hidden ? 4000 : 1000);
+  setTimeout(pollOnce, document.hidden ? 4000 : 1000);
 }
 
 /** Subscribes to server events (TOPIC_UPDATED, SWITCH_TOPIC, JOB_UPDATE, COURSE_UPDATED, ...). */
@@ -94,7 +102,10 @@ export function useAgyEvents(handler) {
   useEffect(() => {
     const fn = (evt) => ref.current(evt);
     subscribers.add(fn);
-    if (!timer) pollOnce();
+    if (!polling) {
+      polling = true;
+      pollOnce();
+    }
     return () => subscribers.delete(fn);
   }, []);
 }

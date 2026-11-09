@@ -1,0 +1,522 @@
+{
+  "id": "de-05-stadt",
+  "title": "German 5: In the city — Dativ and prepositions",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1)",
+  "summary": "Find your way around town and use the dative after mit, zu, von, aus, bei, nach and neben (where something is).",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 5: In the city — Dativ and prepositions\n\nFind your way around town and use the dative after mit, zu, von, aus, bei, nach and neben (where something is).\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| die Stadt | die Städte | city; town | /ʃtat/ |\n| der Bahnhof | die Bahnhöfe | train station | /ˈbaːnˌhoːf/ |\n| die Straße | die Straßen | street | /ˈʃtʁaːsə/ |\n| das Museum | die Museen | museum | /muˈzeːʊm/ |\n| die Apotheke | die Apotheken | pharmacy | /apoˈteːkə/ |\n| der Supermarkt | die Supermärkte | supermarket | /ˈzuːpɐˌmaʁkt/ |\n| das Kino | die Kinos | cinema | /ˈkiːno/ |\n| die Bank | die Banken | bank | /baŋk/ |\n| der Bus | die Busse | bus | /bʊs/ |\n| der Park | die Parks | park | /paʁk/ |\n| links | — | left | /lɪŋks/ |\n| rechts | — | right | /ʁɛçts/ |\n| geradeaus | — | straight ahead | /ɡəʁaːdəˈʔaʊ̯s/ |\n\n## Phrases\n\n- **Wo ist der Bahnhof?**: Where is the train station?\n- **Ich fahre mit dem Bus.**: I am going by bus.\n- **Die Apotheke ist neben der Bank.**: The pharmacy is next to the bank.\n- **Wir gehen zum Supermarkt.**: We are going to the supermarket.\n- **Nach dem Kino gehen wir nach Hause.**: After the cinema we are going home.\n- **Gehen Sie geradeaus und dann links.**: Go straight ahead and then left.\n- **Er kommt aus der Stadt.**: He is coming from the town.\n\n## Grammar: the dative (Dativ)\n\nAfter **aus, bei, mit, nach, seit, von, zu** the noun is always in the dative:\n\n| | masculine | feminine | neuter | plural |\n| --- | --- | --- | --- | --- |\n| dative | **dem / einem** | **der / einer** | **dem / einem** | **den** (+ -n) |\n\n- *mit dem Bus, mit der Bahn, mit dem Auto*.\n- Short forms: **zum** = zu dem, **zur** = zu der, **vom** = von dem, **beim** = bei dem.\n- **neben, vor, hinter, an, auf, in** take the dative when they say *where* something is: *neben **der** Bank*.\n- *nach Hause* = (going) home; *zu Hause* = at home.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "die Stadt",
+          "city; town"
+        ],
+        [
+          "der Bahnhof",
+          "train station"
+        ],
+        [
+          "die Straße",
+          "street"
+        ],
+        [
+          "das Museum",
+          "museum"
+        ],
+        [
+          "die Apotheke",
+          "pharmacy"
+        ],
+        [
+          "der Supermarkt",
+          "supermarket"
+        ],
+        [
+          "das Kino",
+          "cinema"
+        ],
+        [
+          "die Bank",
+          "bank"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Where is the train station?",
+      "answer": "Wo ist der Bahnhof?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wo ist der Bahnhof?",
+      "bank": [
+        "Wo",
+        "ist",
+        "der",
+        "Bahnhof",
+        "die",
+        "den",
+        "Wohin"
+      ],
+      "source": "Where is the train station?",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Wo ist der Bahnhof?",
+      "answer": "Wo ist der Bahnhof?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am going by bus.",
+      "answer": "Ich fahre mit dem Bus.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich fahre mit dem Bus.",
+      "bank": [
+        "Ich",
+        "fahre",
+        "mit",
+        "dem",
+        "Bus",
+        "den",
+        "der",
+        "fährt"
+      ],
+      "source": "I am going by bus.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Ich fahre mit dem Bus.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "I am going by bus."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The pharmacy is next to the bank.",
+      "answer": "Die Apotheke ist neben der Bank.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Die Apotheke ist neben der Bank.",
+      "bank": [
+        "Die",
+        "Apotheke",
+        "ist",
+        "neben",
+        "der",
+        "Bank",
+        "die",
+        "den",
+        "dem"
+      ],
+      "source": "The pharmacy is next to the bank.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Die Apotheke ist neben der Bank.",
+      "answer": "Die Apotheke ist neben der Bank.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We are going to the supermarket.",
+      "answer": "Wir gehen zum Supermarkt.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir gehen zum Supermarkt.",
+      "bank": [
+        "Wir",
+        "gehen",
+        "zum",
+        "Supermarkt",
+        "zur",
+        "in",
+        "gehe"
+      ],
+      "source": "We are going to the supermarket.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir gehen zum Supermarkt.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We are going to the supermarket."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "After the cinema we are going home.",
+      "answer": "Nach dem Kino gehen wir nach Hause.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Nach dem Kino gehen wir nach Hause.",
+      "bank": [
+        "Nach",
+        "dem",
+        "Kino",
+        "gehen",
+        "wir",
+        "nach",
+        "Hause",
+        "das",
+        "den",
+        "zu"
+      ],
+      "source": "After the cinema we are going home.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Nach dem Kino gehen wir nach Hause.",
+      "answer": "Nach dem Kino gehen wir nach Hause.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Go straight ahead and then left.",
+      "answer": "Gehen Sie geradeaus und dann links.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Gehen Sie geradeaus und dann links.",
+      "bank": [
+        "Gehen",
+        "Sie",
+        "geradeaus",
+        "und",
+        "dann",
+        "links",
+        "rechts",
+        "Geht",
+        "oder"
+      ],
+      "source": "Go straight ahead and then left.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Gehen Sie geradeaus und dann links.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "Go straight ahead and then left."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "He is coming from the town.",
+      "answer": "Er kommt aus der Stadt.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Er kommt aus der Stadt.",
+      "bank": [
+        "Er",
+        "kommt",
+        "aus",
+        "der",
+        "Stadt",
+        "die",
+        "dem",
+        "kommst"
+      ],
+      "source": "He is coming from the town.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Er kommt aus der Stadt.",
+      "answer": "Er kommt aus der Stadt.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "fill_blank",
+      "prompt": "Ich fahre mit ___ Bus.",
+      "explanation": "mit + dative; der Bus → mit **dem** Bus.",
+      "concept": null,
+      "options": [
+        "dem",
+        "den",
+        "der",
+        "des"
+      ],
+      "answer": "dem"
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Die Bank ist neben ___ Kino.",
+      "explanation": "Where? neben + dative; das Kino → neben **dem** Kino.",
+      "concept": null,
+      "options": [
+        "dem",
+        "das",
+        "den",
+        "der"
+      ],
+      "answer": "dem"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "Wir gehen ___ Apotheke.",
+      "explanation": "zu + die Apotheke (dative der) → **zur** Apotheke.",
+      "concept": null,
+      "options": [
+        "zur",
+        "zum",
+        "nach",
+        "in"
+      ],
+      "answer": "zur"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Er kommt aus ___ Schule.",
+      "explanation": "aus + dative; die Schule → aus **der** Schule.",
+      "concept": null,
+      "options": [
+        "der",
+        "die",
+        "dem",
+        "den"
+      ],
+      "answer": "der"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "die Stadt",
+      "back": "city; town  /ʃtat/",
+      "hint": "Plural: die Städte. Die Stadt ist schön.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Bahnhof",
+      "back": "train station  /ˈbaːnˌhoːf/",
+      "hint": "Plural: die Bahnhöfe. Wo ist der Bahnhof?",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Straße",
+      "back": "street  /ˈʃtʁaːsə/",
+      "hint": "Plural: die Straßen. Die Straße ist lang.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Museum",
+      "back": "museum  /muˈzeːʊm/",
+      "hint": "Plural: die Museen. Das Museum ist heute offen.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Apotheke",
+      "back": "pharmacy  /apoˈteːkə/",
+      "hint": "Plural: die Apotheken. Die Apotheke ist neben der Bank.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Supermarkt",
+      "back": "supermarket  /ˈzuːpɐˌmaʁkt/",
+      "hint": "Plural: die Supermärkte. Wir gehen zum Supermarkt.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "das Kino",
+      "back": "cinema  /ˈkiːno/",
+      "hint": "Plural: die Kinos. Das Kino ist neu.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Bank",
+      "back": "bank  /baŋk/",
+      "hint": "Plural: die Banken. Die Bank ist geschlossen.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Bus",
+      "back": "bus  /bʊs/",
+      "hint": "Plural: die Busse. Ich fahre mit dem Bus.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "der Park",
+      "back": "park  /paʁk/",
+      "hint": "Plural: die Parks. Der Park ist groß.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "links",
+      "back": "left  /lɪŋks/",
+      "hint": "Gehen Sie nach links.",
+      "lang": "de"
+    },
+    {
+      "front": "rechts",
+      "back": "right  /ʁɛçts/",
+      "hint": "Die Bank ist rechts.",
+      "lang": "de"
+    },
+    {
+      "front": "geradeaus",
+      "back": "straight ahead  /ɡəʁaːdəˈʔaʊ̯s/",
+      "hint": "Gehen Sie geradeaus.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 5,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

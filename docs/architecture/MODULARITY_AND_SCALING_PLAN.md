@@ -86,7 +86,12 @@ In `server.py:author_simulation`, add a chemistry generation branch utilizing `c
 
 ### 3.1 SQLite Connection Pooling & Lifecycle
 - **Issue**: `sqlite3.connect` stored in `threading.local` causes `ResourceWarning: unclosed database` when threads terminate in Starlette's threadpool.
-- **Resolution**:
+- **Done 2026-11-07 (different fix):** the real cause was that `close_all()` could not close other threads'
+  connections (`check_same_thread` raised, the error was swallowed) and dead worker threads kept theirs. `db.py` now
+  opens with `check_same_thread=False` (still one connection per thread), prunes connections of dead threads in
+  `conn()`, and `close_all()` runs at lifespan shutdown. Test-suite warnings went from 151 to 0. The context-manager
+  design below was not needed.
+- **Original proposal**:
   - Implement a scoped connection manager with automatic cleanup upon request completion.
   - Or wrap database operations in context managers:
     ```python
@@ -144,3 +149,8 @@ The main bundle chunk (`dist/assets/index-*.js`) is 898 kB due to eager imports 
    ```
 2. Dynamically import fallback topics (`rollingTopic`, etc.) on demand rather than statically bundling them into `App.jsx`.
 3. Lazy-load `TopicViewer.jsx` alongside `EduStudioIDE.jsx` and `MathLab.jsx`.
+
+**Status 2026-11-07:** items 2 and 3 are done (`App.jsx`: the sample topics load only when the server has none or
+is offline; `TopicViewer` is lazy inside a local `LessonView` Suspense so MathLab keeps its state). The main chunk
+went from 231 kB to 92.5 kB. Item 1 is done for katex and markdown through rolldown `codeSplitting` groups in
+`vite.config.js` (not `manualChunks`); a lucide group was not added (open, low value).

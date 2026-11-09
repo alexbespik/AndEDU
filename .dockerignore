@@ -16,6 +16,8 @@ content/notes
 content/*.json
 content/*.jsonl
 content/agy_drafts
+content/tts_cache
+content/explain_cache
 content/catalog_cache
 content/syllabus_cache
 content/*.tmp

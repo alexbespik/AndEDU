@@ -67,9 +67,28 @@ CREATE TABLE IF NOT EXISTS completed_courses (
     source   TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (user_id, code)
 );
+CREATE TABLE IF NOT EXISTS semester_plans (
+    id             TEXT PRIMARY KEY,
+    user_id        TEXT NOT NULL,
+    term           TEXT NOT NULL,
+    term_name      TEXT,
+    title          TEXT,
+    target_credits REAL,
+    courses_json   TEXT,
+    notes          TEXT,
+    status         TEXT,
+    created_at     REAL,
+    updated_at     REAL,
+    UNIQUE (user_id, term)
+);
+CREATE INDEX IF NOT EXISTS idx_semester_plans_user ON semester_plans(user_id);
+
 """
 
-CODE_RE = re.compile(r"\b([A-Z]{2,5})\s?-?\s?([A-Z]?\d{3}[A-Z]{0,2})\b")
+# course numbers: 3 digits with optional letters (CSCI 141, PHYS 101L), graduate 4 digits (BUAD 5002, never a year
+# like 2025) and a letter plus 2 digits (MUSC J99, EDUC C99)
+_NUM = r"(?:[A-Z]?\d{3}[A-Z]{0,2}|(?!19\d\d|20\d\d)\d{4}[A-Z]?|[A-Z]\d{2}[A-Z]?)"
+CODE_RE = re.compile(r"\b([A-Z]{2,5})\s?-?\s?(" + _NUM + r")\b")
 ENTRY_RE = re.compile(r"^\s*([A-Z]{2,5})\s?([A-Z]?\d{3}[A-Z]{0,2})\s*[.:-]\s*(.+?)\.\s*(?:\(([^)]*credits?[^)]*)\)|(\d(?:-\d)?\s*credits?))?", re.I)
 PREREQ_RE = re.compile(r"(?:Prerequisites?(?:\(s\))?|Pre-?req(?:uisite)?s?)\s*[:\-]?\s*(.+?)(?:(?<=[a-z0-9)])\.\s|$)", re.I)
 GRADE_RE = re.compile(r"(?<![A-Za-z])([A-D][+-]|[A-DFPS]|CR|TR|IP)(?![A-Za-z+-])")
@@ -88,7 +107,12 @@ def init():
         c.execute("ALTER TABLE catalog_courses ADD COLUMN inferred_attributes TEXT NOT NULL DEFAULT '[]'")
     if cols and "inferred_hash" not in cols:
         c.execute("ALTER TABLE catalog_courses ADD COLUMN inferred_hash TEXT NOT NULL DEFAULT ''")
+    scols = {r["name"] for r in c.execute("PRAGMA table_info(catalog_sections)")}
+    if scols and "details" not in scols:  # per-section PATH details: rooms, dates, seats, restrictions, attributes
+        c.execute("ALTER TABLE catalog_sections ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
     c.commit()
+    import advisor_cart  # here, not at the top: advisor_cart imports this module
+    advisor_cart.init()
 
 
 def norm_code(dept: str, num: str) -> str:
@@ -97,7 +121,7 @@ def norm_code(dept: str, num: str) -> str:
 
 def expand_shorthand(text: str) -> str:
     """Expands course shorthand like 'MATH 111 or 131' to 'MATH 111 or MATH 131'."""
-    pattern = re.compile(r"\b([A-Z]{2,5})\s+([A-Z]?\d{3}[A-Z]{0,2})([\s,/]+(?:or|and|/)?\s+)([A-Z]?\d{3}[A-Z]{0,2})\b", re.I)
+    pattern = re.compile(r"\b([A-Z]{2,5})\s+(" + _NUM + r")([\s,/]+(?:or|and|/)?\s+)(" + _NUM + r")\b")
     s = str(text or "")
     for _ in range(40):  # one more code per pass; long lists like "HISP 340, 350, ... or 391" need many
         prev = s
@@ -122,7 +146,7 @@ def find_codes(text: str) -> List[str]:
 
 _NOT_PREREQ_LINE = re.compile(r"^\s*(?:\*\s*May be taken|A minimum grade|Corequisites?|Co-?req|Or consent|Enrollment|Registration|Instructor Approval|Department Approval|Dean Approval)", re.I)
 # course codes are upper case ("the 300 level" is not a course); the words are matched in any case
-_TOKEN_RE = re.compile(r"\(|\)|,|;|\b(?i:and|or)\b|\bALT\b|\b[A-Z]{2,5}\s?-?\s?[A-Z]?\d{3}[A-Z]{0,2}\b")
+_TOKEN_RE = re.compile(r"\(|\)|,|;|\b(?i:and|or)\b|\bALT\b|\b[A-Z]{2,5}\s?-?\s?" + _NUM + r"\b")
 # older catalog text ran the course description on after the prerequisites: "ITAL 103 This course covers ..."
 _PROSE_RE = re.compile(r"\s(?:This|These|A|An|The|Students|Topics|Emphasis|Introduction|Why|Examines?|Explores?|Designed|Intended|Research)\s[a-z]")
 
@@ -295,7 +319,9 @@ def upsert_courses(rows: Iterable[Dict[str, Any]], source: str = "", school: str
         c.execute("""INSERT INTO catalog_courses (school, code, title, credits, description, prereqs, prereq_codes, attributes, syllabus, prereq_tree, source, updated_at, inferred_attributes, inferred_hash)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT (school, code) DO UPDATE SET
-                       title = CASE WHEN lower(excluded.title) IN ('varies by section', 'tbd', 'tba') THEN title ELSE excluded.title END,
+                       title = CASE WHEN lower(excluded.title) IN ('varies by section', 'tbd', 'tba')
+                                      OR (title != '' AND excluded.title LIKE title || ': %') THEN title  -- "Topics: this term's topic"
+                                    ELSE excluded.title END,
                        credits = CASE WHEN excluded.credits != '' THEN excluded.credits ELSE credits END,
                        description = CASE WHEN excluded.description != '' THEN excluded.description ELSE description END,
                        prereqs = CASE WHEN excluded.prereqs != '' THEN excluded.prereqs ELSE prereqs END,
@@ -330,8 +356,10 @@ def upsert_sections(rows: Iterable[Dict[str, Any]], school: str = "wm") -> int:
             code = norm_code(*m.groups())
         mtimes = r.get("meeting_times")
         mtimes_str = json.dumps(mtimes) if isinstance(mtimes, list) else str(mtimes or "[]")
-        c.execute("""INSERT INTO catalog_sections (school, term, term_name, crn, code, section, title, instructor, meets, meeting_times, schedule_type, status, seats, credits, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        details = r.get("details")
+        details_str = json.dumps(details) if isinstance(details, dict) else "{}"
+        c.execute("""INSERT INTO catalog_sections (school, term, term_name, crn, code, section, title, instructor, meets, meeting_times, schedule_type, status, seats, credits, updated_at, details)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT (school, term, crn) DO UPDATE SET
                        term_name = CASE WHEN excluded.term_name != '' THEN excluded.term_name ELSE term_name END,
                        code = excluded.code,
@@ -344,20 +372,22 @@ def upsert_sections(rows: Iterable[Dict[str, Any]], school: str = "wm") -> int:
                        status = excluded.status,
                        seats = CASE WHEN excluded.seats != '' THEN excluded.seats ELSE seats END,
                        credits = excluded.credits,
+                       details = CASE WHEN excluded.details != '{}' THEN excluded.details ELSE details END,
                        updated_at = excluded.updated_at""",
                   (school, term, str(r.get("term_name") or "")[:40], crn[:20], code,
                    str(r.get("section") or "01")[:20], str(r.get("title") or "")[:200],
                    str(r.get("instructor") or "")[:200], str(r.get("meets") or "")[:100],
                    mtimes_str, str(r.get("schedule_type") or "")[:20],
                    str(r.get("status") or "")[:20], str(r.get("seats") or "")[:50],
-                   str(r.get("credits") or "")[:20], now))
+                   str(r.get("credits") or "")[:20], now, details_str[:8000]))
         n += 1
     c.commit()
     return n
 
 
 def list_sections(code: str = "", dept: str = "", term: str = "", q: str = "", school: str = "wm", limit: int = 50) -> List[Dict[str, Any]]:
-    sql = "SELECT * FROM catalog_sections WHERE school = ?"
+    # PATH marks cancelled/inactive sections "I"; its own class search hides them, so do we.
+    sql = "SELECT * FROM catalog_sections WHERE school = ? AND status != 'I'"
     args = [school]
     if code:
         m = CODE_RE.search(code.upper())
@@ -392,6 +422,10 @@ def list_sections(code: str = "", dept: str = "", term: str = "", q: str = "", s
     for r in db.conn().execute(sql, args):
         d = dict(r)
         try:
+            d["details"] = json.loads(d.get("details") or "{}")
+        except Exception:
+            d["details"] = {}
+        try:
             d["meeting_times"] = json.loads(d.get("meeting_times") or "[]")
         except Exception:
             d["meeting_times"] = []
@@ -425,14 +459,24 @@ def get_course(code: str, school: str = "wm") -> Optional[Dict[str, Any]]:
     return _row(r) if r else None
 
 
-def search(query: str = "", dept: str = "", limit: int = 40, school: str = "wm") -> List[Dict[str, Any]]:
-    sql, args = "SELECT * FROM catalog_courses WHERE school = ?", [school]
+def _search_where(query: str, dept: str, school: str):
+    sql, args = " FROM catalog_courses WHERE school = ?", [school]
     if dept:
         sql += " AND code LIKE ?"; args.append(dept.upper() + " %")
     for word in (query or "").split()[:6]:
         sql += " AND (code LIKE ? OR title LIKE ? OR description LIKE ?)"; args += [f"%{word}%"] * 3
-    sql += " ORDER BY code LIMIT ?"; args.append(min(max(limit, 1), 200))
-    return [_row(r) for r in db.conn().execute(sql, args)]
+    return sql, args
+
+
+def search(query: str = "", dept: str = "", limit: int = 40, school: str = "wm") -> List[Dict[str, Any]]:
+    sql, args = _search_where(query, dept, school)
+    # a whole department can exceed 300 courses (LAW): the cap must not hide its upper levels
+    return [_row(r) for r in db.conn().execute("SELECT *" + sql + " ORDER BY code LIMIT ?", args + [min(max(limit, 1), 500)])]
+
+
+def search_count(query: str = "", dept: str = "", school: str = "wm") -> int:
+    sql, args = _search_where(query, dept, school)
+    return db.conn().execute("SELECT COUNT(*)" + sql, args).fetchone()[0]
 
 
 YEAR_RE = re.compile(r"\b((?:19|20)\d\d)\s*[-–/]\s*((?:19|20)?\d\d)\b")
@@ -731,12 +775,22 @@ def degree_audit(user_id: str, school: str = "wm") -> Dict[str, Any]:
     }
 
 
+ADVISOR_STOP_WORDS = {
+    "what", "which", "should", "take", "next", "course", "courses", "class", "classes",
+    "can", "the", "and", "for", "with", "that", "this", "have", "need", "want", "about",
+    "semester", "year", "will", "does", "are", "help", "from", "some", "tell", "like", "recommend"
+}
+
+
 def recommend(user_id: str, interests: str = "", limit: int = 12) -> List[Dict[str, Any]]:
     """Courses the student hasn't taken whose listed prerequisites they have, ranked by how much they build on
-    what they did (shared department, prerequisites satisfied) and by interest words."""
+    what they did (shared department, prerequisites satisfied) and by interest words.
+    De-biased when explicit interest keywords are provided to avoid drowning out topical courses."""
     done = {r["code"] for r in completed(user_id)}
     depts = {c.split()[0] for c in done}
     words = [w.lower() for w in re.findall(r"[A-Za-z]{3,}", interests or "")]
+    interest_words = [w for w in words if w not in ADVISOR_STOP_WORDS]
+    has_explicit_interest = bool(interest_words)
     out = []
     for r in db.conn().execute("SELECT * FROM catalog_courses WHERE school = 'wm'"):
         c = _row(r)
@@ -745,11 +799,50 @@ def recommend(user_id: str, interests: str = "", limit: int = 12) -> List[Dict[s
         rd = readiness(user_id, c["code"])
         if not rd["met"]:
             continue
-        blob = f"{c['title']} {c['description']}".lower()
-        score = (3 if c["code"].split()[0] in depts else 0) + 2 * len([p for p in c["prereq_codes"] if p in done])
-        score += sum(2 for w in words if w in blob)
+        blob = f"{c['code']} {c['title']} {c['description']}".lower()
+
+        # De-bias when explicit interest keywords are provided:
+        # scale keyword matches to +10 and suppress the +3 past-department continuation bonus
+        if has_explicit_interest:
+            dept_bonus = 0
+            kw_matches = sum(1 for w in interest_words if w in blob)
+            kw_score = 10 * kw_matches
+        else:
+            dept_bonus = 3 if c["code"].split()[0] in depts else 0
+            kw_score = sum(2 for w in words if w in blob)
+
+        score = dept_bonus + 2 * len([p for p in c["prereq_codes"] if p in done]) + kw_score
         num = int(re.sub(r"\D", "", c["code"].split()[1]) or 0)
         score -= 0 if not done else abs(num // 100 - (max(int(re.sub(r"\D", "", d.split()[1]) or 0) for d in done) // 100 + 1)) * 0.5
         out.append({**c, "score": round(score, 1), "builds_on": [p for p in c["prereq_codes"] if p in done]})
     out.sort(key=lambda c: (-c["score"], c["code"]))
     return out[:limit]
+
+
+def parse_credits(raw: Any) -> float:
+    """Parses a credit value (number, string like '3', '1-4', '3 credits') into a float."""
+    if raw is None or raw == "":
+        return 3.0
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    m = re.search(r"(\d+(?:\.\d+)?)", str(raw))
+    return float(m.group(1)) if m else 3.0
+
+
+# ---------------------------------------------------------------- semester plans (read-only: rows from the retired
+# Auto-Plan stay as the student's data; advisor_cart.py is the planning tool now)
+def get_semester_plan(user_id: str, term: str = "") -> Optional[Dict[str, Any]]:
+    """Retrieves the semester plan for a user, either for a specific term or their latest."""
+    c = db.conn()
+    if term:
+        row = c.execute("SELECT * FROM semester_plans WHERE user_id = ? AND term = ?", (user_id, term)).fetchone()
+    else:
+        row = c.execute("SELECT * FROM semester_plans WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1", (user_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["courses"] = json.loads(d.get("courses_json") or "[]")
+    except Exception:
+        d["courses"] = []
+    return d

@@ -14,7 +14,7 @@ import {
   Settings, HelpCircle, Bug, Search, FileCode, CheckSquare, MessageSquare,
   Trash2, FileCheck, Layers, Hash, Calculator, Binary, Compass, Box,
   GraduationCap, HelpCircle as QuestionIcon,
-  Volume2, VolumeX, Pause, Square, Mic
+  Volume2, VolumeX, Pause, Square, Mic, Database
 } from 'lucide-react';
 
 const STORAGE_KEY = 'andedu_studio_v5';
@@ -22,6 +22,7 @@ const STORAGE_KEY = 'andedu_studio_v5';
 // Shared &.edu LAB (William & Mary) palette
 import { theme } from '../theme';
 import { authFetch, api, loadProfile } from '../lib/api';
+import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { runPython } from '../lib/pyodide';
 
 // ---------------------------------------------------------------------------
@@ -544,7 +545,7 @@ $$\\int u \\, dv = u v - \\int v \\, du$$
 DEFAULT_CODE_CURRICULUM.problems = DEFAULT_CODE_CURRICULUM.chapters.flatMap(ch => ch.problems);
 DEFAULT_MATH_CURRICULUM.problems = DEFAULT_MATH_CURRICULUM.chapters.flatMap(ch => ch.problems);
 
-/** Turns a Pyodide traceback into what a student needs: which test failed, or the error and its line. */
+/** Turns a Pyodide traceback into Socratic process-level scaffolding with exact fault diagnosis. */
 export function explainError(raw, script, userLines) {
   if (!raw) return '';
   const lines = raw.split('\n').map((l) => l.trimEnd()).filter(Boolean);
@@ -552,8 +553,125 @@ export function explainError(raw, script, userLines) {
   const frames = [...raw.matchAll(/File "<exec>", line (\d+)/g)];
   const n = frames.length ? Number(frames[frames.length - 1][1]) : null;
   const src = n ? (script.split('\n')[n - 1] || '').trim() : '';
-  if (/^AssertionError/.test(last) && n && n > userLines) return `Failed: ${src}${last.length > 15 ? `\n${last}` : ''}`;
-  return n && n <= userLines ? `${last}\n(your code, line ${n}: ${src})` : last;
+
+  // Classify fault into Socratic Guidance
+  let socraticHint = '';
+  if (/AssertionError/.test(last) || /AssertionError/.test(raw)) {
+    if (/==\s*None|is None|returned None/i.test(raw) || /==\s*None|is None/i.test(src)) {
+      socraticHint = 'Missing Return: Your function completed without returning a value (None). Did you compute a result but forget the return statement?';
+    } else if (/len\(.*?\)\s*==\s*|differs by 1|off-by-one/i.test(raw) || /len\(.*?\)/i.test(src)) {
+      socraticHint = 'Off-by-One Bound: The result differs by an unexpected count. Check your loop boundaries (range(...)): does it include or exclude the endpoint?';
+    } else if (/\[\]|\b0\b|""|empty/i.test(src) || /empty|zero/i.test(raw)) {
+      socraticHint = 'Boundary Condition: The failure occurred on a boundary input (e.g. empty sequence or 0). Does your algorithm include a base check for empty or zero-sized cases?';
+    } else {
+      socraticHint = 'Assertion Condition Failed: Compare your function output with the expected condition in the test assertion.';
+    }
+  } else if (/IndexError/.test(raw)) {
+    socraticHint = 'Index Bound Exceeded: You attempted to access an element beyond the sequence boundary. If a list has N elements, valid indices are 0 through N-1.';
+  } else if (/TypeError.*(?:can only concatenate|unsupported operand type)/i.test(raw)) {
+    socraticHint = 'Type Incompatibility: Attempted an operation between text (str) and numbers. In Python, convert explicitly using str(...) or int(...) before combining.';
+  } else if (/RecursionError/.test(raw)) {
+    socraticHint = 'Base Case Omission: Infinite recursion occurred. Verify that your base case triggers and that each recursive call makes progress toward the base condition.';
+  } else if (/KeyError/.test(raw)) {
+    socraticHint = 'Key Not Found: Attempted to access a dictionary key that does not exist. Verify the key exists before lookup or use dict.get(key, default).';
+  } else if (/ZeroDivisionError/.test(raw)) {
+    socraticHint = 'Zero Division: Division by zero occurred. Verify that your denominator cannot become zero under any input.';
+  }
+
+  let baseMsg = '';
+  if (/^AssertionError/.test(last) && n && n > userLines) {
+    baseMsg = `Failed: ${src}${last.length > 15 ? `\n${last}` : ''}`;
+  } else if (n && n <= userLines) {
+    baseMsg = `${last}\n(your code, line ${n}: ${src})`;
+  } else {
+    baseMsg = last;
+  }
+
+  return socraticHint ? `${baseMsg}\n\n💡 Socratic Diagnostic: ${socraticHint}` : baseMsg;
+}
+
+/** Variable Inspector Panel displaying user variables, memory slots, and sequence cells */
+export function VariableInspector({ snapshot, theme: th }) {
+  if (!snapshot || Object.keys(snapshot).length === 0) {
+    return (
+      <div style={{ padding: '24px 16px', color: th.textMuted, fontSize: '11px', fontFamily: th.fontMono, textAlign: 'center' }}>
+        No user variables currently in memory. Run your Python code to inspect variable slots and sequence memory cells.
+      </div>
+    );
+  }
+
+  const entries = Object.entries(snapshot);
+
+  return (
+    <div style={{ padding: '8px 14px', overflowY: 'auto', flex: 1, fontFamily: th.fontMono, fontSize: '11px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${th.borderContrast}`, color: th.textMuted, fontSize: '10px' }}>
+            <th style={{ padding: '4px 8px', width: '16%' }}>NAME</th>
+            <th style={{ padding: '4px 8px', width: '12%' }}>TYPE</th>
+            <th style={{ padding: '4px 8px', width: '32%' }}>VALUE / PREVIEW</th>
+            <th style={{ padding: '4px 8px', width: '40%' }}>MEMORY SLOTS / SEQUENCE CELLS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(([name, info]) => {
+            const isSeq = info.is_seq && Array.isArray(info.items);
+            return (
+              <tr key={name} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <td style={{ padding: '6px 8px', color: th.accentYellow, fontWeight: 700 }}>{name}</td>
+                <td style={{ padding: '6px 8px' }}>
+                  <span style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    padding: '2px 6px',
+                    borderRadius: '3px',
+                    fontSize: '10px',
+                    color: th.accentBlue
+                  }}>
+                    {info.type}
+                  </span>
+                </td>
+                <td style={{ padding: '6px 8px', color: th.textMain, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {info.repr}
+                </td>
+                <td style={{ padding: '6px 8px' }}>
+                  {isSeq ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '9px', color: th.textMuted, marginRight: '4px' }}>len={info.len}:</span>
+                      {info.items.map((item, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            background: 'rgba(102, 217, 239, 0.12)',
+                            border: '1px solid rgba(102, 217, 239, 0.35)',
+                            borderRadius: '3px',
+                            padding: '1px 4px',
+                            minWidth: '22px'
+                          }}
+                        >
+                          <span style={{ fontSize: '8px', color: th.textMuted }}>[{idx}]</span>
+                          <span style={{ fontSize: '10px', color: th.textMain }}>{item}</span>
+                        </div>
+                      ))}
+                      {info.len > info.items.length && (
+                        <span style={{ fontSize: '9px', color: th.textMuted }}>...+{info.len - info.items.length} more</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span style={{ color: th.textMuted, fontSize: '10px' }}>
+                      {info.len !== null && info.len !== undefined ? `size = ${info.len}` : 'Primitive'}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 /** Helper to resolve correct answer index from quiz question format */
@@ -930,6 +1048,54 @@ const VSCodeMarkdown = ({ content }) => {
   );
 };
 
+function findMatchingOption(text, options) {
+  if (!text || !Array.isArray(options) || options.length === 0) return null;
+  const clean = (s) => String(s || '').replace(/^[`'"$]+|[`'"$]+$/g, '').trim();
+  const stripPrefix = (s) => clean(s).replace(/^[A-Da-d0-9][).:]\s+/, '').trim();
+  const raw = String(text).trim();
+  const cleanPasted = clean(raw);
+  const strippedPasted = stripPrefix(raw);
+
+  // 1. Exact match
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === raw) return { option: options[i], index: i };
+  }
+  // 2. Trimmed case-insensitive match
+  for (let i = 0; i < options.length; i++) {
+    if (String(options[i]).trim().toLowerCase() === raw.toLowerCase()) {
+      return { option: options[i], index: i };
+    }
+  }
+  // 3. Clean (stripped quotes/backticks/dollar signs) match
+  for (let i = 0; i < options.length; i++) {
+    if (clean(options[i]) === cleanPasted) {
+      return { option: options[i], index: i };
+    }
+  }
+  // 4. Strip option prefix (e.g. "A) ...", "1. ...", "B: ...")
+  for (let i = 0; i < options.length; i++) {
+    const optStripped = stripPrefix(options[i]);
+    if (optStripped && (optStripped === strippedPasted || optStripped === cleanPasted)) {
+      return { option: options[i], index: i };
+    }
+  }
+  // 5. Letter match like "A", "B", "C", "D" or digit "1", "2"
+  if (/^[A-Za-z]$/.test(raw)) {
+    const idx = raw.toUpperCase().charCodeAt(0) - 65;
+    if (idx >= 0 && idx < options.length) {
+      return { option: options[idx], index: idx };
+    }
+  }
+  if (/^\d+$/.test(raw)) {
+    const idx = parseInt(raw, 10) - 1;
+    if (idx >= 0 && idx < options.length) {
+      return { option: options[idx], index: idx };
+    }
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // MAIN EDU IDE COMPONENT (3-PANEL HIGH-CONTRAST ALIGNMENT)
 // ---------------------------------------------------------------------------
@@ -1039,6 +1205,8 @@ const EduIDE = ({
     "[SYSTEM] &.edu LAB initialized.",
     "[STATUS] Ready. New practice sets start from My courses: add materials, then choose Coding practice."
   ]);
+  const [bottomTab, setBottomTab] = useState('terminal'); // 'terminal' | 'variables'
+  const [memorySnapshot, setMemorySnapshot] = useState(null);
 
   // Socratic Mentor with Theory-First Briefings
   const briefedProblemsRef = useRef(new Set());
@@ -1290,6 +1458,7 @@ const EduIDE = ({
   const handleMultiFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
+    if (!(await confirmGeminiUpload(files, { anyFile: true }))) return;  // the extracted text is used to generate with Gemini
 
     setLoading(true);
     setTerminalOutput(prev => [
@@ -1314,7 +1483,10 @@ const EduIDE = ({
         });
       }
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const detail = res.status === 428 ? (await res.json().catch(() => null))?.detail : null;
+        throw Object.assign(new Error(detail || `HTTP ${res.status}`), { status: res.status });
+      }
       const data = await res.json();
 
       const newFilesList = files.map(f => ({ 
@@ -1334,7 +1506,7 @@ const EduIDE = ({
     } catch (err) {
       setTerminalOutput(prev => [
         ...prev,
-        `[ERROR] Could not parse uploaded files: ${err.message}`
+        `[ERROR] Could not parse uploaded files: ${handleUploadConsentError(err)}`
       ]);
     } finally {
       setLoading(false);
@@ -2001,6 +2173,17 @@ const EduIDE = ({
     }
   };
 
+  const handleSlotPaste = (e) => {
+    const pasted = e.clipboardData?.getData('text/plain')?.trim();
+    if (!pasted || !currentProblem?.options) return;
+    const match = findMatchingOption(pasted, currentProblem.options);
+    if (match) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleSelectSlotOption(match.option, match.index);
+    }
+  };
+
   const handleDragStart = (e, option) => {
     e.dataTransfer.setData("text/plain", option);
   };
@@ -2008,8 +2191,50 @@ const EduIDE = ({
   const handleDrop = (e) => {
     e.preventDefault();
     const dropped = e.dataTransfer.getData("text/plain");
-    if (dropped) handleSelectSlotOption(dropped, null);
+    if (dropped) {
+      const match = findMatchingOption(dropped, currentProblem?.options);
+      if (match) {
+        handleSelectSlotOption(match.option, match.index);
+      } else {
+        handleSelectSlotOption(dropped, null);
+      }
+    }
   };
+
+  const slotPasteStateRef = useRef();
+  slotPasteStateRef.current = {
+    currentProblem,
+    handleSelectSlotOption,
+    slotChoice: activeState?.slotChoice
+  };
+
+  useEffect(() => {
+    const handleWindowPaste = (e) => {
+      const target = e.target;
+      const isEditable = target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName);
+      if (isEditable) return;
+
+      const state = slotPasteStateRef.current;
+      const curProb = state?.currentProblem;
+      if (!curProb || !Array.isArray(curProb.options) || curProb.options.length === 0) return;
+
+      const isSlotProblem = ['equation_builder', 'slot_plugin', 'syntax_problem', 'logic_problem'].includes(curProb.type);
+
+      if (!isSlotProblem) return;
+
+      const pasted = e.clipboardData?.getData('text/plain')?.trim();
+      if (!pasted) return;
+
+      const match = findMatchingOption(pasted, curProb.options);
+      if (match) {
+        e.preventDefault();
+        state.handleSelectSlotOption(match.option, match.index);
+      }
+    };
+
+    window.addEventListener('paste', handleWindowPaste);
+    return () => window.removeEventListener('paste', handleWindowPaste);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // 7. INTERACTION: BLOCK BUILDER (CODE INDENTATION & MATH DERIVATIONS)
@@ -2085,12 +2310,54 @@ const EduIDE = ({
     setExecutingCode(true);
     setTerminalOutput(prev => [...prev, "[RUN] Python in your browser (separate worker, fresh interpreter)..."]);
 
+    // Lightweight introspection block to extract memory snapshot
+    const memSnippet = `
+try:
+    import json as _agy_json
+    _agy_vars = {}
+    for _k, _v in list(locals().items()):
+        if not _k.startswith('_') and not callable(_v) and type(_v).__name__ not in ('module', 'function', 'type'):
+            try:
+                _agy_vars[_k] = {
+                    "type": type(_v).__name__,
+                    "repr": repr(_v)[:120],
+                    "is_seq": isinstance(_v, (list, tuple)),
+                    "len": len(_v) if isinstance(_v, (list, tuple, dict, set, str)) else None,
+                    "items": [repr(_x)[:40] for _x in _v[:12]] if isinstance(_v, (list, tuple)) else None
+                }
+            except Exception:
+                pass
+    print("__MEM_TRACE__" + _agy_json.dumps(_agy_vars))
+except Exception:
+    pass
+`;
+
     // Same runner as course exercises: never on the server, stopped after a few seconds if stuck,
     // and a crash can't leave the interpreter in a broken state for the next run.
-    const script = shouldRunTests ? `${code}\n\n${testCode}\nprint("${marker}")` : code;
+    const script = shouldRunTests
+      ? `${code}\n\n${testCode}\n${memSnippet}\nprint("${marker}")`
+      : `${code}\n\n${memSnippet}`;
     const res = await runPython(script);
-    const output = (res.output || "").replace(`${marker}\n`, "").replace(`${marker}`, "").trim();
-    const testsPassed = shouldRunTests && res.ok && (res.output || "").includes(marker);
+
+    // Extract __MEM_TRACE__ JSON snapshot
+    let memTrace = null;
+    const rawOutput = res.output || "";
+    const memMatch = rawOutput.match(/__MEM_TRACE__([^\r\n]+)/);
+    if (memMatch) {
+      try {
+        memTrace = JSON.parse(memMatch[1]);
+      } catch (e) {}
+    }
+    setMemorySnapshot(memTrace);
+
+    // Clean output for display
+    const output = rawOutput
+      .replace(/__MEM_TRACE__[^\r\n]*(\r?\n)?/g, "")
+      .replace(`${marker}\n`, "")
+      .replace(`${marker}`, "")
+      .trim();
+
+    const testsPassed = shouldRunTests && res.ok && rawOutput.includes(marker);
 
     if (testsPassed) {
       if (!completedProblems[activeProblemIndex]) {
@@ -2240,8 +2507,18 @@ const EduIDE = ({
               <MathFormula math={currentProblem.code_prefix} inline={true} />
 
               <div
+                tabIndex={0}
+                aria-label="Equation slot"
+                aria-roledescription="slot target"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDrop}
+                onPaste={handleSlotPaste}
+                onKeyDown={(e) => {
+                  if ((e.key === 'Backspace' || e.key === 'Delete') && slotChoice) {
+                    e.preventDefault();
+                    updateActiveState({ slotChoice: null, evaluation: null });
+                  }
+                }}
                 style={{
                   minWidth: '130px',
                   minHeight: '44px',
@@ -2255,10 +2532,11 @@ const EduIDE = ({
                   fontSize: '18px',
                   fontWeight: 600,
                   color: slotChoice ? theme.textMain : theme.accentBlue,
+                  cursor: 'pointer',
                   transition: 'background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s'
                 }}
               >
-                {slotChoice ? <MathFormula math={slotChoice} inline={true} /> : "⬚ drop or select term"}
+                {slotChoice ? <MathFormula math={slotChoice} inline={true} /> : "⬚ drop, click, or paste (Ctrl+V / ⌘V) term"}
               </div>
 
               {currentProblem.code_suffix && (
@@ -2267,7 +2545,7 @@ const EduIDE = ({
             </div>
 
             <div style={{ fontSize: '11px', color: theme.textMuted }}>
-              Click or drag a candidate mathematical term from the palette below into the equation slot.
+              Click, drag or paste (Ctrl+V / ⌘V) a candidate mathematical term from the palette below into the equation slot.
             </div>
           </div>
 
@@ -2428,8 +2706,18 @@ const EduIDE = ({
               <span style={{ whiteSpace: 'pre', color: theme.accentBlue, fontFamily: theme.fontMono }}>{lineWithPrefix}</span>
 
               <div
+                tabIndex={0}
+                aria-label="Code variant slot"
+                aria-roledescription="slot target"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDrop}
+                onPaste={handleSlotPaste}
+                onKeyDown={(e) => {
+                  if ((e.key === 'Backspace' || e.key === 'Delete') && slotChoice) {
+                    e.preventDefault();
+                    updateActiveState({ slotChoice: null, evaluation: null });
+                  }
+                }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -2447,7 +2735,7 @@ const EduIDE = ({
                   cursor: 'pointer'
                 }}
               >
-                {slotChoice ? slotChoice : "⬚ drop or click variant"}
+                {slotChoice ? slotChoice : "⬚ drop, click, or paste (Ctrl+V / ⌘V) variant"}
               </div>
 
               <span style={{ whiteSpace: 'pre', color: theme.accentBlue, fontFamily: theme.fontMono }}>{lineWithSuffix}</span>
@@ -2461,7 +2749,7 @@ const EduIDE = ({
           <div style={{ borderTop: `1px solid ${theme.borderContrast}`, backgroundColor: theme.bgPanel, padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '11px', fontWeight: 700, color: theme.textMain }}>
-                Code Options Palette (Drag or Click to Slot)
+                Code Options Palette (Drag, Click, or Paste to Slot)
               </span>
               {slotChoice && (
                 <button 
@@ -3485,31 +3773,94 @@ const EduIDE = ({
           <div style={{ height: '2px', width: '28px', backgroundColor: isDragging === 'terminal' ? theme.bgApp : theme.textMuted, borderRadius: '1px' }} />
         </div>
 
-        {/* Bottom Sandbox Terminal Console (Resizable Height) */}
+        {/* Bottom Sandbox Terminal & Variable Inspector (Resizable Height) */}
         <div style={{ height: `${terminalHeight}px`, minHeight: '60px', maxHeight: '500px', backgroundColor: theme.bgPanel, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-          <div style={{ height: '26px', backgroundColor: theme.bgActivity, display: 'flex', alignItems: 'center', padding: '0 12px', gap: '8px', borderBottom: `1px solid ${theme.border}` }}>
-            <Terminal size={12} color={theme.accentGreen} />
-            <span style={{ fontSize: '11px', color: theme.textMain, fontWeight: 700 }}>
-              {appMode === 'math' ? 'Verification log' : 'Python console (runs in your browser)'}
-            </span>
+          <div style={{ height: '28px', backgroundColor: theme.bgActivity, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', borderBottom: `1px solid ${theme.border}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setBottomTab('terminal')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: bottomTab === 'terminal' ? `2px solid ${theme.accentGreen}` : '2px solid transparent',
+                  padding: '4px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: bottomTab === 'terminal' ? theme.textMain : theme.textMuted,
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  fontFamily: theme.fontMono
+                }}
+              >
+                <Terminal size={12} color={bottomTab === 'terminal' ? theme.accentGreen : theme.textMuted} />
+                <span>{appMode === 'math' ? 'Verification log' : 'Console'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBottomTab('variables')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: bottomTab === 'variables' ? `2px solid ${theme.accentBlue}` : '2px solid transparent',
+                  padding: '4px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: bottomTab === 'variables' ? theme.textMain : theme.textMuted,
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  fontFamily: theme.fontMono
+                }}
+              >
+                <Database size={12} color={bottomTab === 'variables' ? theme.accentBlue : theme.textMuted} />
+                <span>Variable Inspector {memorySnapshot && Object.keys(memorySnapshot).length > 0 ? `(${Object.keys(memorySnapshot).length})` : ''}</span>
+              </button>
+            </div>
+
+            {bottomTab === 'terminal' && (
+              <button
+                type="button"
+                onClick={() => setTerminalOutput([])}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: theme.textMuted,
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  fontFamily: theme.fontMono
+                }}
+              >
+                Clear
+              </button>
+            )}
           </div>
-          <div style={{ padding: '8px 14px', overflowY: 'auto', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: theme.fontMono }}>
-            {terminalOutput.map((l, i) => (
-              <span key={i} style={{ 
-                color: l.includes('[ERROR]') || l.includes('FAIL') || l.includes('[MISMATCH]') || l.includes('Exception')
-                  ? theme.accentPink 
-                  : l.includes('[SUCCESS]') || l.includes('[VERIFIED]') || l.includes('PASS') 
-                    ? theme.accentGreen 
-                    : l.includes('[MODE SWITCH]') || l.includes('[ELEVENLABS') || l.includes('[PYODIDE') 
-                      ? theme.accentBlue 
-                      : l.includes('[NOTICE]') || l.includes('[WARNING]')
-                        ? theme.accentYellow
-                        : theme.textDim 
-              }}>
-                {l}
-              </span>
-            ))}
-          </div>
+
+          {bottomTab === 'terminal' ? (
+            <div style={{ padding: '8px 14px', overflowY: 'auto', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: theme.fontMono, flex: 1 }}>
+              {terminalOutput.map((l, i) => (
+                <span key={i} style={{ 
+                  color: l.includes('[ERROR]') || l.includes('FAIL') || l.includes('[MISMATCH]') || l.includes('Exception')
+                    ? theme.accentPink 
+                    : l.includes('[SUCCESS]') || l.includes('[VERIFIED]') || l.includes('PASS') 
+                      ? theme.accentGreen 
+                      : l.includes('[MODE SWITCH]') || l.includes('[ELEVENLABS') || l.includes('[PYODIDE') 
+                        ? theme.accentBlue 
+                        : l.includes('[NOTICE]') || l.includes('[WARNING]')
+                          ? theme.accentYellow
+                          : theme.textDim 
+                }}>
+                  {l}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <VariableInspector snapshot={memorySnapshot} theme={theme} />
+          )}
         </div>
 
       </main>

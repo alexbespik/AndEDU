@@ -10,6 +10,7 @@ import { reportXp } from '../lib/engage';
 import Md from './Md';
 import PracticeDeck from './PracticeDeck';
 import MathSim from '../simulations/MathSim';
+import GeometrySim from '../simulations/GeometrySim';
 
 const TABS = [
   { id: 'graph', label: 'Graph', icon: LineChart },
@@ -710,9 +711,47 @@ function NotebookTab({ userId }) {
   const key = `andedu_math_notes_${userId}`;
   const [text, setText] = useState(() => store.get(key, STARTER));
   const taRef = useRef(null);
-  useEffect(() => { const t = setTimeout(() => store.set(key, text), 300); return () => clearTimeout(t); }, [key, text]);
+  const isLoaded = useRef(!userId);
+  const isDirty = useRef(false);
+
+  // Fetch student notes from server on mount, falling back to localStorage
+  useEffect(() => {
+    if (!userId) {
+      isLoaded.current = true;
+      return;
+    }
+    let cancelled = false;
+    isLoaded.current = false;
+    api(`/api/users/${userId}/notes`)
+      .then((data) => {
+        if (!cancelled) {
+          if (data && data.notes_text !== undefined && data.notes_text !== '') {
+            setText(data.notes_text);
+            store.set(key, data.notes_text);
+          }
+          isLoaded.current = true;
+        }
+      })
+      .catch(() => {
+        if (!cancelled) isLoaded.current = true;
+      });
+    return () => { cancelled = true; };
+  }, [userId, key]);
+
+  // Debounced 800ms sync to server and localStorage
+  useEffect(() => {
+    if (!isLoaded.current || !isDirty.current) return;
+    const t = setTimeout(() => {
+      store.set(key, text);
+      if (userId) {
+        api(`/api/users/${userId}/notes`, { method: 'PUT', body: { notes_text: text } }).catch(() => {});
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [key, text, userId]);
 
   const insert = (snippet) => {
+    isDirty.current = true;
     const ta = taRef.current;
     const a = ta?.selectionStart ?? text.length, b = ta?.selectionEnd ?? text.length;
     const wrapped = `$${snippet}$`;
@@ -730,7 +769,17 @@ function NotebookTab({ userId }) {
       <div className="math-notebook">
         <div className="field">
           <label htmlFor="nb-src">Markdown and LaTeX (saved on this device)</label>
-          <textarea id="nb-src" ref={taRef} className="textarea mono" value={text} spellCheck={false} onChange={(e) => setText(e.target.value)} />
+          <textarea
+            id="nb-src"
+            ref={taRef}
+            className="textarea mono"
+            value={text}
+            spellCheck={false}
+            onChange={(e) => {
+              isDirty.current = true;
+              setText(e.target.value);
+            }}
+          />
         </div>
         <div className="field">
           <span className="label">Preview</span>
@@ -815,12 +864,107 @@ const KIT = [
   { id: 'lt', name: 'Linear transform', spec: { widget: 'transform2d', title: 'A 2×2 matrix acting on the plane', description: 'The unit square maps to a parallelogram with area |det|; a red square means orientation flipped.', a: 'm11', b: 'm12', c: 'm21', d: 'm22', params: [P('m11', -3, 3, 1), P('m12', -3, 3, 0.5), P('m21', -3, 3, 0), P('m22', -3, 3, 1)] } },
 ].map((k) => ({ ...k, spec: { kind: 'math', ...k.spec } }));
 
+const GEOMETRY_KIT = [
+  {
+    id: 'fbd_incline',
+    name: 'FBD: Incline Plane',
+    spec: {
+      kind: 'geometry',
+      title: 'Inclined Plane with Friction & Vector Decomposition',
+      description: 'Adjust the incline angle theta and friction coefficient mu to inspect normal force, static/kinetic friction, and component projections.',
+      params: [
+        P('theta', 5, 60, 30, 'Incline Angle', 1),
+        P('m', 1, 20, 5, 'Block Mass', 0.5),
+        P('mu', 0, 1, 0.35, 'Friction Coeff', 0.05),
+      ],
+      view: { xmin: -4, xmax: 6, ymin: -2, ymax: 6, grid: true, axes: true },
+      bodies: [
+        { id: 'ramp', type: 'wedge', x: -2, y: 0, width: 6, height: '6 * tan(theta * pi / 180)', color: 'muted', fill: 'rgba(116, 124, 120, 0.15)' },
+        { id: 'block', type: 'box', x: 1, y: '3 * tan(theta * pi / 180) + 0.3', width: 1.2, height: 0.8, angle: 'theta', color: 'gold', fill: 'rgba(229, 184, 92, 0.25)', label: 'm' },
+      ],
+      forces: [
+        { id: 'fg', body: 'block', origin: 'center', angle: 270, magnitude: 'm * 0.98', label: 'm\\vec{g}', color: 'pink', projections: true },
+        { id: 'fn', body: 'block', origin: 'center', angle: '90 + theta', magnitude: 'm * 0.98 * cos(theta * pi / 180)', label: '\\vec{F}_N', color: 'cyan', projections: true },
+        { id: 'f_friction', body: 'block', origin: 'center', angle: '180 + theta', magnitude: 'min(m * 0.98 * sin(theta * pi / 180), mu * m * 0.98 * cos(theta * pi / 180))', label: '\\vec{f}_s', color: 'orange', projections: true },
+      ],
+      elements: [
+        { type: 'angle_arc', x: -2, y: 0, radius: 1.5, startAngle: 0, endAngle: 'theta', label: '\\theta', color: 'gold' },
+        { type: 'right_angle', x: 4, y: 0, size: 0.4, angle: 90, color: 'muted' },
+      ],
+      axes: { x: 1, y: '3 * tan(theta * pi / 180) + 0.3', angle: 'theta', xLabel: "x'", yLabel: "y'" },
+    },
+  },
+  {
+    id: 'atwood_pulley',
+    name: 'Atwood Machine',
+    spec: {
+      kind: 'geometry',
+      title: 'Atwood Machine with Pulley Tension',
+      description: 'Two hanging masses suspended over a frictionless pulley. Examine gravity forces and cable tensions.',
+      params: [
+        P('m1', 1, 10, 3, 'Mass 1 (kg)', 0.5),
+        P('m2', 1, 10, 5, 'Mass 2 (kg)', 0.5),
+      ],
+      view: { xmin: -4, xmax: 4, ymin: -5, ymax: 3, grid: true, axes: false },
+      bodies: [
+        { id: 'ceiling', type: 'wall', x1: -3, y1: 2.2, x2: 3, y2: 2.2, color: 'muted' },
+        { id: 'pulley', type: 'pulley', x: 0, y: 1.5, radius: 0.8, color: 'gold' },
+        { id: 'b1', type: 'box', x: -0.8, y: -2, width: 0.8, height: 0.8, color: 'cyan', fill: 'rgba(102, 217, 239, 0.25)', label: 'm_1' },
+        { id: 'b2', type: 'box', x: 0.8, y: -3, width: 1.0, height: 1.0, color: 'orange', fill: 'rgba(253, 151, 31, 0.25)', label: 'm_2' },
+      ],
+      elements: [
+        { type: 'line', x1: 0, y1: 2.2, x2: 0, y2: 1.5, color: 'muted' },
+        { type: 'line', x1: -0.8, y1: 1.5, x2: -0.8, y2: -1.6, color: 'muted' },
+        { type: 'line', x1: 0.8, y1: 1.5, x2: 0.8, y2: -2.5, color: 'muted' },
+      ],
+      forces: [
+        { id: 'fg1', body: 'b1', origin: 'center', angle: 270, magnitude: 'm1 * 0.98', label: 'm_1 g', color: 'pink', projections: false },
+        { id: 'ft1', body: 'b1', origin: 'center', angle: 90, magnitude: '2 * m1 * m2 / (m1 + m2) * 0.98', label: 'T', color: 'cyan', projections: false },
+        { id: 'fg2', body: 'b2', origin: 'center', angle: 270, magnitude: 'm2 * 0.98', label: 'm_2 g', color: 'pink', projections: false },
+        { id: 'ft2', body: 'b2', origin: 'center', angle: 90, magnitude: '2 * m1 * m2 / (m1 + m2) * 0.98', label: 'T', color: 'orange', projections: false },
+      ],
+    },
+  },
+  {
+    id: 'lever_torque',
+    name: 'Lever & Torque',
+    spec: {
+      kind: 'geometry',
+      title: 'First-Class Lever Torque Equilibrium',
+      description: 'Adjust weights and arm distances to balance torque about the fulcrum: F1 * d1 = F2 * d2.',
+      params: [
+        P('d1', 0.5, 4, 2, 'Distance 1 (m)', 0.25),
+        P('F1', 5, 50, 20, 'Force 1 (N)', 5),
+        P('d2', 0.5, 4, 2.5, 'Distance 2 (m)', 0.25),
+        P('F2', 5, 50, 16, 'Force 2 (N)', 4),
+      ],
+      view: { xmin: -5, xmax: 5, ymin: -3, ymax: 3, grid: true, axes: false },
+      bodies: [
+        { id: 'fulcrum', type: 'wedge', x: -0.4, y: -0.8, width: 0.8, height: 0.8, color: 'gold', fill: 'rgba(229, 184, 92, 0.3)' },
+        { id: 'beam', type: 'rod', x1: -4.5, y1: 0, x2: 4.5, y2: 0, thickness: 5, color: 'muted' },
+        { id: 'pivot', type: 'point', x: 0, y: 0, color: 'gold' },
+      ],
+      forces: [
+        { id: 'f1', origin: ['-d1', 0], angle: 270, magnitude: 'F1 * 0.08', label: 'F_1', color: 'cyan', projections: false },
+        { id: 'f2', origin: ['d2', 0], angle: 270, magnitude: 'F2 * 0.08', label: 'F_2', color: 'orange', projections: false },
+        { id: 'fn', origin: [0, 0], angle: 90, magnitude: '(F1 + F2) * 0.08', label: 'F_N', color: 'green', projections: false },
+      ],
+      elements: [
+        { type: 'dimension', x1: '-d1', y1: 0.5, x2: 0, y2: 0.5, label: 'd_1' },
+        { type: 'dimension', x1: 0, y1: 0.5, x2: 'd2', y2: 0.5, label: 'd_2' },
+      ],
+    },
+  },
+];
+
+const ALL_KITS = [...KIT, ...GEOMETRY_KIT];
+
 function KitTab({ preview }) {
   const [pick, setPick] = useState(() => (preview ? 'preview' : store.get('andedu_math_kit', 'ed')));
   useEffect(() => { if (pick !== 'preview') store.set('andedu_math_kit', pick); }, [pick]);
   useEffect(() => { if (preview) setPick('preview'); }, [preview]);
-  const kit = preview ? [{ id: 'preview', name: 'From the assistant', spec: preview }, ...KIT] : KIT;
-  const item = kit.find((k) => k.id === pick) || KIT[0];
+  const kit = preview ? [{ id: 'preview', name: 'From the assistant', spec: preview }, ...ALL_KITS] : ALL_KITS;
+  const item = kit.find((k) => k.id === pick) || ALL_KITS[0];
   return (
     <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
       <div className="btn-row" role="group" aria-label="Widgets">
@@ -828,8 +972,12 @@ function KitTab({ preview }) {
           <button key={k.id} type="button" className={`btn btn-sm ${k.id === item.id ? 'btn-primary' : 'btn-quiet'}`} aria-pressed={k.id === item.id} onClick={() => setPick(k.id)}>{k.name}</button>
         ))}
       </div>
-      <p className="hint">Edit the functions to explore your own examples. Class simulations in math courses use these same widgets.</p>
-      <MathSim key={item.id} spec={item.spec} editable />
+      <p className="hint">Edit parameters and explore physical or geometric relationships.</p>
+      {item.spec?.kind === 'geometry' || item.spec?.kind === 'fbd' ? (
+        <GeometrySim key={item.id} spec={item.spec} />
+      ) : (
+        <MathSim key={item.id} spec={item.spec} editable />
+      )}
     </div>
   );
 }
