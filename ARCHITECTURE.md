@@ -54,8 +54,10 @@ This document is the authoritative architectural specification and system map fo
 | **Pedagogical Engagement** | `engage.py` | gamified positive engagement loop: XP ledger, daily goals, streak freezes, quests, 12 badges, and Leitner spaced-review scheduler. | `db.py` | Tables: `xp_events`, `engage_prefs`, `freeze_days`, `activity_results`, `review_items`. |
 | **Language Acquisition & AI** | `src/components/LanguageLab.jsx`, `src/components/LanguageRoleplay.jsx`, `src/lib/langgrade.js`, `src/practice/language.jsx` | gamified practice drills (translate, word bank, listen, speak), AI roleplay conversational partner with Web Speech API audio, and Socratic explain-answer tutoring. | Web Speech API, `src/lib/speech.js` | Browser localStorage preferences (`andedu_pron_lang`, roleplay history). |
 | **Interactive History Engine** | `src/components/HistoryLab.jsx`, `src/components/HistoryCrisisLab.jsx`, `src/components/PrimarySourceLab.jsx` | Branching counterfactual decision dilemmas ("What If?"), primary source document interrogator with SHEG sourcing criteria, and chronological ordering challenges. | React 19, Lucide | Curated crisis decision trees, primary source document library. |
-| **Academic Advisor** | `advisor.py` | University course catalog ingest (W&M focus), class section schedules, prerequisite dependency graphing (CNF tree), degree audit (W&M COLL curriculum + proficiencies), and readiness diagnostics. | `db.py` | Tables: `catalog_courses`, `completed_courses`, `catalog_sections`. |
+| **Academic Advisor & Semester Planner** | `advisor.py`, `advisor_chat.py`, `wm_advising.py` | University course catalog ingest (W&M focus), class section schedules, prerequisite dependency graphing (CNF tree), degree audit (W&M COLL curriculum + proficiencies), readiness diagnostics, topic expansion ontology, semester course planning with schedule conflict detection, and dynamic Studio course launch. | `db.py`, `server.py` | Tables: `catalog_courses`, `completed_courses`, `catalog_sections`, `semester_plans`. |
+| **Student Notes & Scratchpad Engine** | `db.py`, `server.py`, `src/components/MathLab.jsx` | Unified student written notes synchronization across devices and persistent storage in SQLite, automatically injected into prompt context across Advisor, AGY Drawer, and Lesson Tutor. | `db.py` | Table: `student_notes`. |
 | **Physics & Math Simulation Engine** | `simspec.py`, `src/simulations/SpecSim.jsx`, `src/lib/expr.js` | SimSpec v1 declarative specification validation and execution. Safe expression AST parser, 240Hz substepped physics solver, math widget kit. | Python `ast`, JS Pratt parser | Declarative SimSpec JSON (`kind: "particles"`, `"graph"`, `"math"`). |
+| **Geometry & Free-Body Diagram Kit** | `simspec.py`, `src/simulations/GeometrySim.jsx`, `src/components/Md.jsx` | Declarative 2D geometric and free-body diagram simulation engine. Interactive force vectors with component decomposition, angles, rigid bodies, and inline Markdown notes rendering (` ```geometry ` and ` ```fbd `). | SVG, KaTeX, `expr.js` | Declarative Geometry JSON (`kind: "geometry"`, `"fbd"`). |
 | **Chemistry Simulation Kit** | `chemspec.py`, `src/simulations/ChemSim.jsx` | ChemSpec v1 declarative specification validator and HTML5 Canvas simulations for kinetics, equilibrium, acid-base titration, gas laws, reaction coordinates, and radioactive decay. | `simspec.py` | ChemSpec JSON (`kind: "chem"`). |
 | **Frontend Shell & Workspaces** | `src/App.jsx`, `src/components/*` | Seven-tab single page application (`home`, `physics`, `code`, `math`, `history`, `language`, `advisor`), theme provider, unified event poller. | React 19, Vite, KaTeX, Lucide | Local browser state, `localStorage` cached profiles/tokens. |
 | **Code Studio & IDE** | `src/components/EduStudioIDE.jsx`, `src/lib/pyodide.js` | In-browser Python environment powered by WebAssembly (Pyodide), interactive coding puzzles, and Socratic mentor integration. | Pyodide, Web Workers | Browser-sandboxed code execution results, scratchpad buffers. |
@@ -239,6 +241,15 @@ MathLab exposes Desmos-equivalent graphing and analysis tools with three modular
   - *Domain Guard*: Number `300` is **not** an automatic COLL 300 rule because departmental 300-level courses (`MATH 300`, `ECON 300`, `BUAD 300`, `THEA 300`) are standard junior coursework/writing courses. COLL 300 requires explicit cross-cultural/global designation (`COLL 300` prefix, official attribute, or verified classification).
 - **Academic Advisor Chat Contract (`POST /api/advisor/{user_id}/chat` & `/ask`)**:
   - Socratic, conversational advising grounded strictly in student record and catalog data.
+  - Term and program knowledge (`wm_advising.py`): `next_term()` picks the term a student means by "next semester"
+    (the earliest `WM_CALENDAR` term whose add/drop is still open, else the next fall/spring by academic-year code:
+    YYYY10 = Fall YYYY-1, YYYY20 = Spring YYYY). `build_context` puts `term_context()` right after the CATALOG line so
+    truncation never drops it, and lists that term's sections first. `programs_context()` adds every CS and Data
+    Science major/minor with all tracks and how they differ when the question or the student's record involves them.
+  - `WM_PROGRAMS` / `WM_CALENDAR` are transcribed by hand from the official catalog (catalog.wm.edu) and the
+    registrar's undergraduate calendar; they live inline in `wm_advising.py` so they ship with the Dockerfile's `.py`
+    copy. Refresh once per catalog year: update `CATALOG_YEAR`, `CATALOG_AS_OF`, each program, and add the coming
+    terms' dates (without them the advisor says dates are not loaded rather than guessing). Tests: `tests/test_wm_programs.py`.
   - Request: `{"message": str (1-2000 chars), "history": [{"role": "user"|"advisor", "content": str}]}`
   - Response:
     ```json
@@ -324,7 +335,7 @@ Detailed linguistic explanation of why a selected answer is right or wrong:
 
 ### 3.5 Interactive History Decision Engine & Primary Source Interrogator
 
-#### 3.5.1 Branching Crisis Decision Simulator (`POST /api/history/generate-crisis` & `src/components/HistoryCrisisLab.jsx`)
+#### 3.5.1 Branching Crisis Decision Simulator (`GET`/`POST /api/topics/{topic_id}/crisis` & `src/components/HistoryCrisisLab.jsx`)
 Simulates pivotal historical turning points where students make critical policy choices:
 - **Schema**:
   ```json
@@ -375,6 +386,92 @@ Interactive document lab applying the Stanford History Education Group (SHEG) so
   }
   ```
 
+### 3.6 Privacy: Consent, Export & Delete Contracts
+- `db.USER_DATA_TABLES` is the registry of per-user tables (besides `users`, `courses`, `classes`, `lessons`,
+  `sessions`); `tests/test_privacy.py` fails if a table with a `user_id` column is missing from it.
+- `GET /api/users/{id}/export` (owner only): `{format:"andedu-export", version:1, exportedAt, user, courses
+  (with classes), lessons, tables, consent, topics, notes, quizLog}` as a JSON download. Never includes password
+  or session hashes, or rows with no owner.
+- `POST /api/auth/delete-account` (accounts: `{confirmName, password}`) / `POST /api/users/{id}/delete` (local:
+  `{confirmName}`): 422 name mismatch, 401 wrong password, 409 admin id. Removes the user's course topic files and
+  notes, every per-user row (one transaction), their quiz-log lines and in-memory jobs/events.
+- `POST /api/users/{id}/consent {kind:"privacy"|"upload"}`; register needs `privacy: true`; login returns
+  `privacyAccepted` (against `PRIVACY_VERSION`); `/api/status` returns `privacy_version`.
+- Upload consent (accounts mode): 428 before uploaded images or scanned PDFs, or files used to plan a course, go
+  to Gemini, until upload consent is recorded. Columns: `users.privacy_version`, `privacy_accepted_at`,
+  `upload_consent_at`.
+
+### 3.7 Declarative Geometry & Free-Body Diagram Kit (`kind: "geometry"`)
+The geometry simulation kit provides a reactive 2D vector and apparatus engine for mechanics, statics, and geometry. Specs are declarative JSON validated server-side by `simspec.py:validate_geometry` and executed client-side via SVG in `src/simulations/GeometrySim.jsx`.
+
+- **Schema Fields**:
+  - `kind`: `"geometry"` or `"fbd"`
+  - `title`: Short title (≤100 chars)
+  - `description`: Explanatory walkthrough (≤600 chars)
+  - `params`: Array of interactive slider objects `[{name, label, min, max, value, step, unit}]`
+  - `view`: Coordinate window `{xmin, xmax, ymin, ymax, grid: bool, axes: bool}`. Default `xmin: -5, xmax: 5, ymin: -4, ymax: 4`. $+x$ is right, $+y$ is up.
+  - `bodies`: Physical apparatus shapes `[{id, type, x, y, width?, height?, radius?, angle?, color?, fill?, label?}]`. Supported types: `box`, `wedge` / `ramp`, `sphere` / `circle`, `rod`, `wall` / `surface`, `pulley`, `point`.
+  - `forces`: Force vectors `[{id, body?, origin: [x, y]|"center", angle, magnitude, label, color?, projections: bool}]`. Dynamic expressions evaluate live with parameter sliders. `projections: true` renders dashed orthogonal components ($F_\parallel$, $F_\perp$ or $F_x$, $F_y$).
+  - `elements`: Geometric construction primitives: `line` (with optional arrow/dash), `angle_arc` (with angle label $\theta$), `right_angle` (perpendicular marker), `dimension` (measurement arrows), and `polygon`.
+  - `axes`: Optional tilted or local coordinate axes `{x, y, angle, xLabel, yLabel}`.
+- **Embedded Notes Rendering**: `src/components/Md.jsx` intercepts fenced code blocks marked ````geometry` and ````fbd`, compiling them via `GeometrySim` directly inside student lesson notes.
+
+### 3.8 KaTeX Vector Typography & Normalization Contract
+KaTeX math rendering in `src/components/Md.jsx` and server text normalizers in `server.py:repair_latex` adhere to standard mathematical physics vector conventions:
+- **KaTeX Options**: `rehype-katex` is configured with `throwOnError: false` and strict macro definitions:
+  - `\ihat` -> `\hat{\imath}` (dotless $i$ with circumflex)
+  - `\jhat` -> `\hat{\jmath}` (dotless $j$ with circumflex)
+  - `\khat` -> `\hat{k}`
+  - `\uvec{x}` -> `\mathbf{\hat{x}}`
+- **Regex & Unicode Caret Repair**: Combining characters (`î`, `ĵ`, `k̂`, `ı̂`, `ȷ̂`), raw carets (`i^`, `j^`, `k^`), and standard caret forms (`\hat{i}`, `\hat{j}`) are normalized client- and server-side to `\hat{\imath}`, `\hat{\jmath}`, `\hat{k}` to avoid visual dot collisions and parse failures.
+- **Formula Auto-Detection**: `LATEX_NAMES` regex in `Md.jsx` includes `ihat`, `jhat`, `khat`, `imath`, `jmath`, `uvec`, ensuring vector formulas without explicit delimiters are recognized as math and wrapped in `$...$`.
+
+### 3.9 Semester Course Planning & Dynamic Studio Launch Contract
+The semester planning engine enables multi-course semester schedule synthesis, live credit metering, time conflict analysis, and dynamic studio conversion:
+- **Persistence Schema (`semester_plans`)**:
+  - `id`: Unique plan identifier (`plan-<uuid>`)
+  - `user_id`: Owning student foreign key
+  - `term`: Target registration term code (e.g. `202620` for Spring 2026)
+  - `term_name`: Human-readable term label (e.g. `Spring 2026`)
+  - `title`: Plan title / strategy theme
+  - `target_credits`: Planned target credit total (default `15.0`)
+  - `courses_json`: Serialized array of `CoursePlanItem` records:
+    - `code`: Course code (e.g. `PHIL 231`)
+    - `title`: Course title
+    - `credits`: Fractional or integer credit count (e.g. `3.0`)
+    - `crn`: Section CRN for next-term registration
+    - `section`: Section number (e.g. `01`)
+    - `meets`: Human readable meeting schedule (e.g. `TR 11:00am - 12:20pm`)
+    - `instructor`: Primary instructor name
+    - `fulfills`: Degree / interest attribution (e.g. `COLL 200 ALV · Stoic Interest`)
+    - `rationale`: Why this course was selected
+    - `studio_course_id`: Associated active EduStudio course ID once launched
+  - `notes`: High-level strategic rationale and degree impact summary
+  - `status`: `draft` | `active`
+- **Schedule Conflict Detector**: `wm_advising.py:check_schedule_conflicts(courses)` evaluates section day/time strings, identifying pairwise time overlaps.
+- **Dynamic Studio Launch ("does more as you go")**: `POST /api/advisor/{user_id}/launch-course` converts a planned course into an active EduStudio course by populating `materials_text` from catalog descriptions and syllabi, initiating an asynchronous diagnostic and 4-class lesson generation job via `start_plan_job()`.
+
+### 3.10 Student Written Notes & Cross-Agent Synchronization Contract
+Ensures student notes from the notebook, IDE, and advisor scratchpads are persistently stored and accessible to all AI agents:
+- **Persistence Schema (`student_notes`)**:
+  - `user_id`: Owning student primary key
+  - `notes_text`: Markdown and LaTeX content
+  - `updated_at`: Unix timestamp of last update
+- **Sync Endpoints**:
+  - `GET /api/users/{user_id}/notes`: Retrieves latest saved notes.
+  - `PUT /api/users/{user_id}/notes`: Upserts student notes with debounced client synchronization (800ms).
+- **Cross-Agent Injection**:
+  - **Advisor Chat**: Injected inside `advisor_chat.py:build_context` under `STUDENT'S WRITTEN NOTES & STUDY SCRATCHPAD`.
+  - **AGY Companion**: Injected into `server.py:agy_prompt` context.
+  - **Lesson Tutor**: Injected into `server.py:lesson_tutor` system instruction.
+
+### 3.11 Universal Web Search Grounding & Reasoning Engine
+All Gemini interactions via `server.py:call_gemini` and `acall_gemini` feature automated capability injection and fallback resilience:
+- **Dynamic Reasoning**: `types.ThinkingConfig(thinking_budget=-1)` (or `SCIEDU_THINKING_BUDGET`) enables deep reasoning on complex academic requests.
+- **Web Search Grounding**: `types.Tool(google_search=types.GoogleSearch())` provides live web search.
+- **MIME & Tool Exclusions**: Grounding is strictly bypassed when `response_mime_type == "application/json"` or when `tool_config` specifies function calling `mode="ANY"`, preventing HTTP 400 API validation errors.
+- **Circuit Breaker**: Search quota exhaustion sets `GROUNDING_PAUSED_UNTIL = time.time() + 3600` and immediately retries the query without search, guaranteeing 100% operational uptime.
+
 ---
 
 ## 4. Workspaces & UI Presentation Architecture
@@ -422,11 +519,15 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 - **Data Lifecycle**:
   - `courses` rows track the master status: `planning` -> `diagnostic_ready` -> `generating` -> `ready` | `error`.
   - `classes` rows track individual lesson generation status: `pending` -> `generating` -> `ready` | `error`.
+  - **Failure Recovery & Resume Semantics**:
+    - *Course planning failure*: If Gemini outputs malformed JSON or times out during syllabus/diagnostic drafting, the course enters `error` with a friendly student-facing notice. `POST /api/courses/{course_id}/resume` detects the missing diagnostic, preserves the original `materials_text` (up to 200k chars) and `goal`, transitions status `error` -> `planning`, and triggers `start_plan_job`.
+    - *Class generation failure*: If an individual class generation fails, `POST /api/courses/{course_id}/resume` clears the course error and dispatches `queue_course_generation` for all remaining `pending` classes.
+    - *Concurrency & Idempotency*: `resume_course` checks `ACTIVE_COURSE_JOBS` and `JOBS` status to reject concurrent requests if a job is already queued or running for that course.
   - Interrupted runs: On backend startup (the app lifespan, `resume_course_generation`), `db.reset_stuck_classes()` resets orphaned `generating` records to `pending`, and `db.interrupted_planning()` reschedules syllabus generation jobs from stored materials.
   - Academic Advisor catalog tables:
     - `catalog_courses`: Master catalog course specifications (`school`, `code` PRIMARY KEY, title, credits, description, prerequisites, prereq_codes, attributes, syllabus, `prereq_tree` JSON CNF representation).
     - `completed_courses`: Student academic records (`user_id`, `code` PRIMARY KEY, title, grade, term).
-    - `catalog_sections`: Scheduled course offerings per term (`school`, `term`, `crn` PRIMARY KEY, `code`, section, title, instructor, meeting times, schedule type, seats, status, credits). Indexed on `(school, code)` and `(school, term)` for sub-millisecond section lookups. Raw schedule feeds cached under `content/catalog_cache/classes_<term>.json`.
+    - `catalog_sections`: Scheduled course offerings per term (`school`, `term`, `crn` PRIMARY KEY, `code`, section, title, instructor, meeting times, schedule type, seats, status, credits). Indexed on `(school, code)` and `(school, term)` for sub-millisecond section lookups. Raw schedule feeds cached under `content/catalog_cache/sections_<term>.json` (the older `classes_<term>.json` name is still read).
 
 ### 5.2 Background Jobs & Event Processing
 - **Queue Architecture**: An in-memory dictionary `JOBS` (capped at 100 entries) runs background coroutines via `asyncio.create_task` or threadsafe dispatch onto `MAIN_LOOP`.
@@ -472,6 +573,7 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 | `SCIEDU_ADMINS` | `""` | No | Comma-separated user ids (shown in the account menu) with administrative permissions (catalog imports, library topic updates, agent inbox). Names are not accepted. |
 | `SCIEDU_RATE_SCALE` | `1.0` | No | Multiplier for hourly rate limits. Set to `0` to disable rate limiting in automated testing. |
 | `SCIEDU_DAILY_MODEL_CALLS` | `400` | No | Hard daily request quota across all Gemini models. |
+| `SCIEDU_USER_DAILY_MODEL_CALLS` | half of `SCIEDU_DAILY_MODEL_CALLS` | No | Per-user daily share of the model budget, so one student cannot use up the whole day. |
 | `SCIEDU_PLANNER_MODELS` | Candidate list fallback | No | Comma-separated Gemini model IDs preferred for syllabus planning and answer verification. |
 | `SCIEDU_LESSON_MODELS` | Candidate list fallback | No | Comma-separated Gemini model IDs preferred for lesson prose and practice generation. |
 | `SCIEDU_AUTHOR_SIMS` | `1` | No | Set to `0` to disable automatic background simulation generation during class building. |
@@ -492,11 +594,11 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 ### 8.1 Tool Catalog by Discipline
 
 #### Language Acquisition & gamified Drills
-- `add_translate_drill`: Append translation exercises with source text, target language, and alternate acceptable phrasing.
-- `add_word_bank_drill`: Append sentence chip scramble puzzles with distractor tokens.
-- `add_listening_drill`: Append audio dictation (`listen_type`) or audio multiple-choice (`listen_choose`) comprehension drills with normal and turtle speeds.
-- `add_speaking_drill`: Append pronunciation speaking tasks with target text, IPA transcription, and speech-recognition scoring.
-- `batch_add_language_unit`: Append a complete language unit including vocabulary, dialogue, and comprehensive drill decks.
+- `add_translation_exercise`: Append translation exercises with source text, target language, and alternate acceptable phrasing.
+- `add_word_bank`: Append sentence chip scramble puzzles with distractor tokens.
+- `add_listening_exercise`: Append audio dictation (`listen_type`) or audio multiple-choice (`listen_choose`) comprehension drills with normal and turtle speeds.
+- `add_speaking_exercise`: Append pronunciation speaking tasks with target text, IPA transcription, and speech-recognition scoring.
+- `build_language_unit`: Append a complete language unit including vocabulary, dialogue, and comprehensive drill decks.
 - `start_language_practice`: Dispatch `SWITCH_STUDIO_MODE {mode: "language", tab: "practice"}` to launch drills for a specific target language.
 
 #### AI AI Features
@@ -509,6 +611,66 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 - `open_primary_source`: Dispatch `SWITCH_STUDIO_MODE {mode: "history", tab: "sources"}` to open an annotated historical document (e.g. Magna Carta, Code of Hammurabi) with sourcing analysis questions.
 - `add_primary_source_lab`: Attach an authentic annotated primary source with SHEG questions to a history topic.
 
+#### Visual Geometry & Free-Body Diagrams
+- `add_drawing_to_notes`: Validates and appends an interactive ````geometry` declarative simulation block to a lesson's markdown content and standalone notes file (`content/notes/<id>.md`).
+- `preview_geometry_diagram`: Dispatches `GEOMETRY_PREVIEW` to project an interactive geometry or free-body diagram directly into Math Lab / Sim Kit on the student's screen in real time.
+- `simulation_guide`: Expanded documentation covering `kind: "geometry"` schemas, bodies (`box`, `wedge`, `sphere`, `rod`, `wall`, `pulley`), forces, elements, and reactive slider parameters.
+
 #### Navigation & Screen Control
-- `switch_workspace_tab`: Route the browser UI to any subject workspace (`history`, `language`, `math`, `lab`, `code`, `advisor`) and specific sub-tab (`crisis`, `sources`, `roleplay`, `practice`, `timeline`, `speech`).
+- `open_workspace`: Route the browser UI to any subject workspace (`history`, `language`, `math`, `lab`, `code`, `advisor`) and specific sub-tab (`crisis`, `sources`, `roleplay`, `practice`, `timeline`, `speech`).
+
+---
+
+## 9. Socratic Pedagogy & Anti-Hallucination Prompt Architecture
+
+The system's Socratic agents (`SOCRATIC_PROMPT`, `LESSON_TUTOR_PROMPT`, `AGY_SYSTEM_PROMPT`) embody a Stoic, first-principles pedagogical design grounded in learning science (Collins' Cognitive Apprenticeship, Sweller's Cognitive Load Theory, and Hattie's feedback taxonomy):
+
+1. **Two-Tier Dynamic Response Sizing**:
+   - Abolishes both artificial one-sentence chokes AND rigid multi-paragraph mandates that induce extraneous cognitive load.
+   - **Diagnostic Turns (40–80 words)**: When the student checks a formula, asks a quick clarification, or tests a single hypothesis, provide a concise, laser-focused diagnostic turn addressing the specific threshold concept, ending with **one leading check question**.
+   - **Conceptual Scaffolding Turns (100–180 words)**: When the student has a fundamental misconception or begins a new derivation, provide structured scaffolding:
+     * Paragraph 1: Governing physical law / mathematical invariant.
+     * Paragraph 2: Coordinate geometry / free-body reference frame constraints.
+     * Paragraph 3: Direct diagnosis of the conceptual blocker using limiting cases or dimensional reasoning.
+     * Conclusion: Exactly **one leading diagnostic check question**.
+2. **Anti-Hallucination & Symbolic Invariants**:
+   - **Symbolic Problem Integrity**: Forbids inventing numbers on symbolic or algebraic problems. Formulas must remain exact in terms of declared parameters ($m, g, \theta, \mu$).
+   - **Dimensional Homogeneity Guard**: Mismatched dimensions across equations ($[M^a L^b T^c]$) are strictly prohibited.
+   - **Vector Typography Guard**: Mandates KaTeX dotless unit vectors ($\hat{\imath}$, $\hat{\jmath}$, $\hat{k}$) via `\hat{\imath}`, `\hat{\jmath}`, `\hat{k}`.
+   - **Grounded Step-by-Step Verification**: Prohibits stating unverified arithmetic as fact. Numerical evaluation is done explicitly or prompted to the student.
+3. **Multi-Turn Continuity & Alternating Sequence Integrity**:
+   - Ingests recent user and model conversation turns into Gemini structured turn sequences (`types.Content`).
+   - Strict role alternating: Merges consecutive duplicate roles (`user, user` or `model, model`) and guarantees the conversation sequence opens with a `user` turn.
+   - Context sanitization: `_sanitize_puzzle_context` strips internal solution/test secrets to prevent answer leakage and prompt injection.
+
+---
+
+## 10. Advanced Laboratory Engines & Code Studio Architecture
+
+Detailed specification: `docs/architecture/PEDAGOGY_AND_LAB_ELEVATION.md`.
+
+### 10.1 Chemistry Simulation Apparatus (`src/simulations/ChemSim.jsx`)
+ChemSpec v1 widgets match the visual fidelity and physical realism of the physics simulation kit:
+1. **Glassware Benchtop Apparatus**:
+   - Retort stand with heavy base, chrome support rod, and dual-finger clamp.
+   - Graduated burette with dynamic fluid meniscus, millimeter volume gradations, and rotating stopcock valve.
+   - Gravitational droplet emitter with fluid splash ripples on liquid contact.
+   - Erlenmeyer reaction flask with rising fluid volume, porcelain magnetic stirrer plate, rotating Teflon stir bar, and fluid vortex depression.
+   - Benchtop digital pH meter with dip electrode probe and live 2-decimal digital readout.
+   - Smooth continuous RGB colorimetric indicator gradient for phenolphthalein with fluid swirl eddies.
+2. **Molecular Kinetics & Gas Law Chamber**:
+   - Maxwell-Boltzmann 2D velocity sampling for molecular gas particles ($v \propto \sqrt{T/m}$).
+   - Particle-wall momentum impulse calculation with live analog dial pressure gauge.
+   - Reactive collision engine: collisions exceeding activation energy $E_a$ trigger chemical transformation with optical emission flash.
+
+### 10.2 Math Simulation Kit & Vector Geometry (`MathSim.jsx`, `GeometrySim.jsx`)
+1. **Secant-Tangent Slope Triangle**: Interactive right triangle connecting $(a, f(a))$ and $(a+h, f(a+h))$ with legs $\Delta x = h$, $\Delta y = f(a+h) - f(a)$, right-angle symbol, and live derivative convergence limit $\lim_{h \to 0} \frac{\Delta y}{\Delta x} = f'(a)$.
+2. **Riemann Sum Darboux Visualizer**: Upper and Lower Darboux sums ($L_n \le \int_a^b f(x)\,dx \le U_n$) with shaded error residual fill between rectangles and the exact curve $f(x)$.
+3. **Direct Vector Drag Handles**: SVG pointer drag handles on force vector arrowheads and body centers, updating slider parameters and coordinate projections in real time.
+
+### 10.3 Code Studio Memory Inspector & Socratic Diagnostics (`src/components/EduStudioIDE.jsx`)
+1. **In-Browser Memory & Variable Inspector**: Lightweight Pyodide post-execution introspection capturing local/global variables, types, sequence lengths, and array memory grid cells.
+2. **Socratic Error Diagnostic Engine**: Translates assertion errors and Python tracebacks into process-level Socratic hints (missing return, off-by-one loop boundaries, boundary conditions, index errors, type mismatches).
+
+
 

@@ -22,6 +22,8 @@ content/syllabus_cache/
 content/agy_messages.json
 content/quiz_results.json
 content/agy_drafts/
+content/tts_cache/
+content/explain_cache/
 
 # internal agent/model working files: task briefs, coordination notes, audits, generated design docs
 AGY_TASK_*.md

@@ -107,13 +107,13 @@ export default function RewardLayer({ focusMode, onReward }) {
       {card && (
         <>
           {card.big && <Confetti key={card.at} />}
-          <div className={`reward-card${card.big ? ' big' : ''}`} role="status">
+          <div className={`reward-card${card.big ? ' big' : ''}`} role="status" onClick={(e) => e.stopPropagation()}>
             <span className="reward-icon"><Icon size={card.big ? 30 : 22} aria-hidden="true" /></span>
             <div>
               <strong>{card.title}</strong>
               <p>{card.text}</p>
             </div>
-            <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Dismiss" onClick={() => setCard(null)}><X size={14} /></button>
+            <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Dismiss" onClick={(e) => { e.stopPropagation(); setCard(null); }}><X size={14} /></button>
           </div>
         </>
       )}

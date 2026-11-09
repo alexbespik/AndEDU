@@ -27,12 +27,28 @@ Logged 2026-11-03.
 - Never log transcript text (see 5).
 
 ### 3. Consent, notice and control
-- Add a privacy notice in the app: what is collected, which services receive it (Google Gemini; ElevenLabs if
-  enabled), retention, and contacts.
-- Ask for consent at sign-up and before the first upload.
-- **Missing feature:** "Delete my account and data" (users, courses, classes, lessons, quiz attempts, XP, review
-  items, completed courses, notes) and "Export my data". Only course deletion exists today.
-- Retention: decide how long uploads, materials text and chat logs are kept, then enforce it.
+- Done 2026-11-07: in-app privacy notice (`src/components/PrivacyCenter.jsx`, account menu → "Privacy and your
+  data…", and on the sign-in page): what is stored, what goes to Google Gemini and ElevenLabs (if on), what deletion
+  does not reach, contact "the site administrator". Version `PRIVACY_VERSION` in `server.py`; bumping it asks
+  accounts to accept again at sign-in. Fill in a real contact before a hosted deployment.
+- Done 2026-11-07: consent. Accounts must accept the notice at sign-up (`privacy: true`, else 422). Uploads that
+  go to Gemini (images, scanned PDFs, files used to plan a course) ask once per profile; in accounts mode the
+  server refuses them with 428 until `POST /api/users/{id}/consent {kind:"upload"}`. Stored in `users`
+  (`privacy_version`, `privacy_accepted_at`, `upload_consent_at`).
+- Done 2026-11-07: "Export my data" (`GET /api/users/{id}/export`, JSON) and "Delete my account and data"
+  (`POST /api/auth/delete-account` with name + password in accounts mode; `POST /api/users/{id}/delete` with the
+  name in local mode). `db.USER_DATA_TABLES` lists every per-user table and a test fails if a new one is missed.
+  Not reached by delete: backups, `server.log`, shared library lessons, local mode's shared assistant history, and
+  lesson snapshots of courses deleted earlier (they keep no owner id; decide whether to record one).
+  In local mode anyone at the computer can export or delete any profile (no accounts).
+- Still open: Retention. Decide how long uploads, materials text and chat logs are kept, then enforce it.
+- Done 2026-11-08: problem sprints (`mode: "problem_sprint"`) are deleted by default once every problem is done.
+  Finishing the last part only hides the sprint (status `cleared`: out of My courses, its lessons out of the library
+  and the review queue); it can be kept or restored until `SCIEDU_SPRINT_RETAIN_DAYS` (default 7) have passed, then
+  a purge at startup and once a day deletes its course row, classes, lesson snapshots, topic files and notes. Courses
+  created with "Keep in My courses" (`keep: true`) and every other course mode are never purged. Until the purge a
+  cleared sprint is still in "Export my data" and removed by account deletion.
+- Still open (not chosen 2026-11-07): read transcripts locally and redact name/ID/GPA before any Gemini call.
 
 ### 4. Secrets
 - `.env` (Gemini and ElevenLabs keys) was committed in the past (commit 9d30620). **Rotate both keys**, and remove
@@ -55,7 +71,17 @@ Logged 2026-11-03.
   (`CODE_PROPOSAL` event) and it runs only if the student clicks Run.
 - Security review: accounts-mode authorization, events, chats, catalog and uploads were reviewed and fixed (tests: `AccountsSecurity` in `tests/test_lab.py`).
 - **ElevenLabs** voice is off by default (`SCIEDU_ELEVENLABS=1`); if enabled, lesson text goes to ElevenLabs:
-  disclose it.
+  disclose it (the privacy notice does). Languages also sends the words and phrases a student plays
+  (`POST /api/language/tts`, at most 300 characters, text only, never the student's name or answers). Clips are cached in
+  `content/tts_cache/` (shared by all users, keyed by a hash of model, voice, language and text; capped at
+  `SCIEDU_TTS_CACHE_MB`, oldest removed first) and spending is capped by `SCIEDU_TTS_DAILY_CHARS` per day (an
+  in-memory counter that a restart resets) and the `language_tts` hourly rate limit. Only the server's key is used,
+  never one from the browser; with accounts on, playing audio requires a signed-in user.
+  The lesson walkthrough ("Explain it to me", `explain.py`) sends its narration lines, written by Gemini from the
+  lesson text (at most 250 characters each, never the student's name or answers), through the same endpoint with
+  `purpose: "explain"`, which has its own daily cap `SCIEDU_EXPLAIN_TTS_CHARS` (default 15000) so it never uses up the
+  Languages allowance. The steps themselves are cached per lesson in `content/explain_cache/` (no student data) and
+  count against the `explain` hourly rate limit only when a new walkthrough is written.
 
 ### 7. Hosting basics
 - `SCIEDU_AUTH=1`, HTTPS, the real hostname in the allowed hosts and CORS lists, rate limits kept on

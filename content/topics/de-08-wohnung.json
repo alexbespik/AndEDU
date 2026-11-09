@@ -1,0 +1,543 @@
+{
+  "id": "de-08-wohnung",
+  "title": "German 8: At home — two-way prepositions",
+  "category": "Languages · German",
+  "difficulty": "Elementary (A2)",
+  "summary": "Describe your flat and where things are. in, an, auf, unter, neben … take the dative for where (Wo?) and the accusative for where to (Wohin?).",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 8: At home — two-way prepositions\n\nDescribe your flat and where things are. in, an, auf, unter, neben … take the dative for where (Wo?) and the accusative for where to (Wohin?).\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| die Wohnung | die Wohnungen | flat; apartment | /ˈvoːnʊŋ/ |\n| das Zimmer | die Zimmer | room | /ˈtsɪmɐ/ |\n| die Küche | die Küchen | kitchen | /ˈkʏçə/ |\n| das Bad | die Bäder | bathroom | /baːt/ |\n| das Bett | die Betten | bed | /bɛt/ |\n| das Sofa | die Sofas | sofa | /ˈzoːfa/ |\n| der Schrank | die Schränke | cupboard; wardrobe | /ʃʁaŋk/ |\n| das Regal | die Regale | shelf | /ʁeˈɡaːl/ |\n| die Wand | die Wände | wall | /vant/ |\n| der Boden | die Böden | floor | /ˈboːdn̩/ |\n| legen | — | to lay; to put (flat) | /ˈleːɡn̩/ |\n| liegen | — | to lie; to be lying | /ˈliːɡn̩/ |\n| stellen | — | to put (upright) | /ˈʃtɛlən/ |\n| stehen | — | to stand | /ˈʃteːən/ |\n| hängen | — | to hang | /ˈhɛŋən/ |\n\n## Phrases\n\n- **Das Buch liegt auf dem Tisch.**: The book is lying on the table.\n- **Ich lege das Buch auf den Tisch.**: I am putting the book on the table.\n- **Die Katze schläft unter dem Bett.**: The cat is sleeping under the bed.\n- **Er stellt die Lampe neben das Sofa.**: He puts the lamp next to the sofa.\n- **Das Bild hängt an der Wand.**: The picture is hanging on the wall.\n- **Wir gehen in die Küche.**: We are going into the kitchen.\n- **Die Milch steht im Kühlschrank.**: The milk is in the fridge.\n\n## Grammar: two-way prepositions (Wechselpräpositionen)\n\n**an, auf, hinter, in, neben, über, unter, vor, zwischen**\n\n| Question | Case | Verbs | Example |\n| --- | --- | --- | --- |\n| **Wo?** (where: position) | dative | liegen, stehen, hängen, sein | *Das Buch liegt auf **dem** Tisch.* |\n| **Wohin?** (where to: movement) | accusative | legen, stellen, hängen, gehen | *Ich lege das Buch auf **den** Tisch.* |\n\n- Short forms: **im** = in dem, **ins** = in das, **am** = an dem, **ans** = an das.\n- Pairs: *legen → liegen* (flat), *stellen → stehen* (upright), *hängen → hängen*.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "die Wohnung",
+          "flat; apartment"
+        ],
+        [
+          "das Zimmer",
+          "room"
+        ],
+        [
+          "die Küche",
+          "kitchen"
+        ],
+        [
+          "das Bad",
+          "bathroom"
+        ],
+        [
+          "das Bett",
+          "bed"
+        ],
+        [
+          "das Sofa",
+          "sofa"
+        ],
+        [
+          "der Schrank",
+          "cupboard; wardrobe"
+        ],
+        [
+          "das Regal",
+          "shelf"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The book is lying on the table.",
+      "answer": "Das Buch liegt auf dem Tisch.",
+      "accepted": [
+        "Das Buch ist auf dem Tisch."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Das Buch liegt auf dem Tisch.",
+      "bank": [
+        "Das",
+        "Buch",
+        "liegt",
+        "auf",
+        "dem",
+        "Tisch",
+        "den",
+        "legt",
+        "der"
+      ],
+      "source": "The book is lying on the table.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Das Buch liegt auf dem Tisch.",
+      "answer": "Das Buch liegt auf dem Tisch.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am putting the book on the table.",
+      "answer": "Ich lege das Buch auf den Tisch.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich lege das Buch auf den Tisch.",
+      "bank": [
+        "Ich",
+        "lege",
+        "das",
+        "Buch",
+        "auf",
+        "den",
+        "Tisch",
+        "dem",
+        "liege",
+        "die"
+      ],
+      "source": "I am putting the book on the table.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Ich lege das Buch auf den Tisch.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "I am putting the book on the table."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The cat is sleeping under the bed.",
+      "answer": "Die Katze schläft unter dem Bett.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Die Katze schläft unter dem Bett.",
+      "bank": [
+        "Die",
+        "Katze",
+        "schläft",
+        "unter",
+        "dem",
+        "Bett",
+        "den",
+        "das",
+        "schlaft"
+      ],
+      "source": "The cat is sleeping under the bed.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Die Katze schläft unter dem Bett.",
+      "answer": "Die Katze schläft unter dem Bett.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "He puts the lamp next to the sofa.",
+      "answer": "Er stellt die Lampe neben das Sofa.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Er stellt die Lampe neben das Sofa.",
+      "bank": [
+        "Er",
+        "stellt",
+        "die",
+        "Lampe",
+        "neben",
+        "das",
+        "Sofa",
+        "dem",
+        "steht",
+        "der"
+      ],
+      "source": "He puts the lamp next to the sofa.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Er stellt die Lampe neben das Sofa.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "He puts the lamp next to the sofa."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The picture is hanging on the wall.",
+      "answer": "Das Bild hängt an der Wand.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Das Bild hängt an der Wand.",
+      "bank": [
+        "Das",
+        "Bild",
+        "hängt",
+        "an",
+        "der",
+        "Wand",
+        "die",
+        "den",
+        "auf"
+      ],
+      "source": "The picture is hanging on the wall.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Das Bild hängt an der Wand.",
+      "answer": "Das Bild hängt an der Wand.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We are going into the kitchen.",
+      "answer": "Wir gehen in die Küche.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir gehen in die Küche.",
+      "bank": [
+        "Wir",
+        "gehen",
+        "in",
+        "die",
+        "Küche",
+        "der",
+        "im",
+        "gehe"
+      ],
+      "source": "We are going into the kitchen.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir gehen in die Küche.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We are going into the kitchen."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The milk is in the fridge.",
+      "answer": "Die Milch steht im Kühlschrank.",
+      "accepted": [
+        "Die Milch ist im Kühlschrank."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Die Milch steht im Kühlschrank.",
+      "bank": [
+        "Die",
+        "Milch",
+        "steht",
+        "im",
+        "Kühlschrank",
+        "in",
+        "stellt",
+        "den"
+      ],
+      "source": "The milk is in the fridge.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Die Milch steht im Kühlschrank.",
+      "answer": "Die Milch steht im Kühlschrank.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "fill_blank",
+      "prompt": "Der Schlüssel liegt auf ___ Tisch.",
+      "explanation": "Wo? → dative: der Tisch → auf **dem** Tisch.",
+      "concept": null,
+      "options": [
+        "dem",
+        "den",
+        "der",
+        "das"
+      ],
+      "answer": "dem"
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Ich stelle die Vase auf ___ Regal.",
+      "explanation": "Wohin? → accusative: das Regal stays **das**.",
+      "concept": null,
+      "options": [
+        "das",
+        "dem",
+        "den",
+        "der"
+      ],
+      "answer": "das"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "Wohin gehst du? – In ___ Küche.",
+      "explanation": "Wohin? → accusative: die Küche → in **die** Küche.",
+      "concept": null,
+      "options": [
+        "die",
+        "der",
+        "dem",
+        "den"
+      ],
+      "answer": "die"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Das Handy ___ auf dem Sofa.",
+      "explanation": "Position (auf **dem** Sofa): **liegen**, er liegt.",
+      "concept": null,
+      "options": [
+        "liegt",
+        "legt",
+        "legen",
+        "liegen"
+      ],
+      "answer": "liegt"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "die Wohnung",
+      "back": "flat; apartment  /ˈvoːnʊŋ/",
+      "hint": "Plural: die Wohnungen. Die Wohnung hat drei Zimmer.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Zimmer",
+      "back": "room  /ˈtsɪmɐ/",
+      "hint": "Plural: die Zimmer. Das Zimmer ist hell.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Küche",
+      "back": "kitchen  /ˈkʏçə/",
+      "hint": "Plural: die Küchen. Wir essen in der Küche.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Bad",
+      "back": "bathroom  /baːt/",
+      "hint": "Plural: die Bäder. Das Bad ist klein.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "das Bett",
+      "back": "bed  /bɛt/",
+      "hint": "Plural: die Betten. Das Bett ist bequem.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "das Sofa",
+      "back": "sofa  /ˈzoːfa/",
+      "hint": "Plural: die Sofas. Die Katze liegt auf dem Sofa.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Schrank",
+      "back": "cupboard; wardrobe  /ʃʁaŋk/",
+      "hint": "Plural: die Schränke. Die Teller sind im Schrank.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "das Regal",
+      "back": "shelf  /ʁeˈɡaːl/",
+      "hint": "Plural: die Regale. Die Bücher stehen im Regal.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Wand",
+      "back": "wall  /vant/",
+      "hint": "Plural: die Wände. Das Bild hängt an der Wand.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Boden",
+      "back": "floor  /ˈboːdn̩/",
+      "hint": "Plural: die Böden. Die Tasche liegt auf dem Boden.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "legen",
+      "back": "to lay; to put (flat)  /ˈleːɡn̩/",
+      "hint": "Ich lege das Handy auf den Tisch.",
+      "lang": "de"
+    },
+    {
+      "front": "liegen",
+      "back": "to lie; to be lying  /ˈliːɡn̩/",
+      "hint": "Das Handy liegt auf dem Tisch.",
+      "lang": "de"
+    },
+    {
+      "front": "stellen",
+      "back": "to put (upright)  /ˈʃtɛlən/",
+      "hint": "Er stellt die Flasche in den Kühlschrank.",
+      "lang": "de"
+    },
+    {
+      "front": "stehen",
+      "back": "to stand  /ˈʃteːən/",
+      "hint": "Die Flasche steht im Kühlschrank.",
+      "lang": "de"
+    },
+    {
+      "front": "hängen",
+      "back": "to hang  /ˈhɛŋən/",
+      "hint": "Das Bild hängt an der Wand.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 8,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

@@ -1,0 +1,536 @@
+{
+  "id": "de-04-familie",
+  "title": "German 4: Family and possessives",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1)",
+  "summary": "Talk about your family with mein, dein, sein, ihr, unser, and the verb haben (to have).",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 4: Family and possessives\n\nTalk about your family with mein, dein, sein, ihr, unser, and the verb haben (to have).\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| die Familie | die Familien | family | /faˈmiːli̯ə/ |\n| die Mutter | die Mütter | mother | /ˈmʊtɐ/ |\n| der Vater | die Väter | father | /ˈfaːtɐ/ |\n| die Eltern | — | parents | /ˈɛltɐn/ |\n| der Bruder | die Brüder | brother | /ˈbʁuːdɐ/ |\n| die Schwester | die Schwestern | sister | /ˈʃvɛstɐ/ |\n| der Sohn | die Söhne | son | /zoːn/ |\n| die Tochter | die Töchter | daughter | /ˈtɔxtɐ/ |\n| die Oma | die Omas | grandma | /ˈoːma/ |\n| der Opa | die Opas | grandpa | /ˈoːpa/ |\n| die Geschwister | — | siblings | /ɡəˈʃvɪstɐ/ |\n| haben | — | to have | /ˈhaːbn̩/ |\n\n## Phrases\n\n- **Das ist meine Mutter.**: This is my mother.\n- **Mein Bruder heißt Max.**: My brother is called Max.\n- **Hast du Geschwister?**: Do you have siblings?\n- **Ich habe eine Schwester.**: I have a sister.\n- **Unsere Eltern wohnen in Wien.**: Our parents live in Vienna.\n- **Wie alt ist dein Vater?**: How old is your father?\n- **Ihre Tochter ist fünf Jahre alt.**: Her daughter is five years old.\n\n## Grammar: possessives and haben\n\n| | masc. / neut. | fem. / plural |\n| --- | --- | --- |\n| my | mein | meine |\n| your (du) | dein | deine |\n| his / its | sein | seine |\n| her / their | ihr | ihre |\n| our | unser | unsere |\n| your (polite) | Ihr | Ihre |\n\n- Possessives take the endings of *ein*: *mein Vater* (der), *meine Mutter* (die), *meine Eltern* (plural).\n- In the accusative masculine they add **-en**: *Ich besuche **meinen** Bruder.*\n- **haben**: ich habe, du hast, er hat, wir haben, ihr habt, sie/Sie haben.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "die Familie",
+          "family"
+        ],
+        [
+          "die Mutter",
+          "mother"
+        ],
+        [
+          "der Vater",
+          "father"
+        ],
+        [
+          "die Eltern",
+          "parents"
+        ],
+        [
+          "der Bruder",
+          "brother"
+        ],
+        [
+          "die Schwester",
+          "sister"
+        ],
+        [
+          "der Sohn",
+          "son"
+        ],
+        [
+          "die Tochter",
+          "daughter"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "This is my mother.",
+      "answer": "Das ist meine Mutter.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Das ist meine Mutter.",
+      "bank": [
+        "Das",
+        "ist",
+        "meine",
+        "Mutter",
+        "mein",
+        "meinen",
+        "sind"
+      ],
+      "source": "This is my mother.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Das ist meine Mutter.",
+      "answer": "Das ist meine Mutter.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "My brother is called Max.",
+      "answer": "Mein Bruder heißt Max.",
+      "accepted": [
+        "Mein Bruder ist Max."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Mein Bruder heißt Max.",
+      "bank": [
+        "Mein",
+        "Bruder",
+        "heißt",
+        "Max",
+        "Meine",
+        "heiße",
+        "Meinen"
+      ],
+      "source": "My brother is called Max.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Mein Bruder heißt Max.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "My brother is called Max."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Do you have siblings?",
+      "answer": "Hast du Geschwister?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Hast du Geschwister?",
+      "bank": [
+        "Hast",
+        "du",
+        "Geschwister",
+        "Habt",
+        "hat",
+        "Hat"
+      ],
+      "source": "Do you have siblings?",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Hast du Geschwister?",
+      "answer": "Hast du Geschwister?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I have a sister.",
+      "answer": "Ich habe eine Schwester.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich habe eine Schwester.",
+      "bank": [
+        "Ich",
+        "habe",
+        "eine",
+        "Schwester",
+        "einen",
+        "ein",
+        "hat"
+      ],
+      "source": "I have a sister.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Ich habe eine Schwester.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "I have a sister."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Our parents live in Vienna.",
+      "answer": "Unsere Eltern wohnen in Wien.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Unsere Eltern wohnen in Wien.",
+      "bank": [
+        "Unsere",
+        "Eltern",
+        "wohnen",
+        "in",
+        "Wien",
+        "Unser",
+        "wohnt",
+        "im"
+      ],
+      "source": "Our parents live in Vienna.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Unsere Eltern wohnen in Wien.",
+      "answer": "Unsere Eltern wohnen in Wien.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "How old is your father?",
+      "answer": "Wie alt ist dein Vater?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wie alt ist dein Vater?",
+      "bank": [
+        "Wie",
+        "alt",
+        "ist",
+        "dein",
+        "Vater",
+        "deine",
+        "sind",
+        "Wo"
+      ],
+      "source": "How old is your father?",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wie alt ist dein Vater?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "How old is your father?"
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Her daughter is five years old.",
+      "answer": "Ihre Tochter ist fünf Jahre alt.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ihre Tochter ist fünf Jahre alt.",
+      "bank": [
+        "Ihre",
+        "Tochter",
+        "ist",
+        "fünf",
+        "Jahre",
+        "alt",
+        "Ihr",
+        "sind",
+        "Jahr"
+      ],
+      "source": "Her daughter is five years old.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ihre Tochter ist fünf Jahre alt.",
+      "answer": "Ihre Tochter ist fünf Jahre alt.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "conjugate",
+      "prompt": "Conjugate the verb",
+      "explanation": "",
+      "concept": null,
+      "verb": "haben",
+      "tense": "Präsens (present)",
+      "lang": "de",
+      "forms": [
+        [
+          "ich",
+          "habe"
+        ],
+        [
+          "du",
+          "hast"
+        ],
+        [
+          "er/sie/es",
+          "hat"
+        ],
+        [
+          "wir",
+          "haben"
+        ],
+        [
+          "ihr",
+          "habt"
+        ],
+        [
+          "sie/Sie",
+          "haben"
+        ]
+      ]
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Das ist ___ Vater. (my)",
+      "explanation": "der Vater: **mein** Vater.",
+      "concept": null,
+      "options": [
+        "mein",
+        "meine",
+        "meinen",
+        "meinem"
+      ],
+      "answer": "mein"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "Das sind ___ Eltern. (our)",
+      "explanation": "Plural: **unsere** Eltern.",
+      "concept": null,
+      "options": [
+        "unsere",
+        "unser",
+        "unseren",
+        "unserem"
+      ],
+      "answer": "unsere"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Ich besuche ___ Bruder. (my)",
+      "explanation": "besuchen takes the accusative: der Bruder → **meinen** Bruder.",
+      "concept": null,
+      "options": [
+        "meinen",
+        "mein",
+        "meine",
+        "meinem"
+      ],
+      "answer": "meinen"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "die Familie",
+      "back": "family  /faˈmiːli̯ə/",
+      "hint": "Plural: die Familien. Meine Familie ist groß.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "die Mutter",
+      "back": "mother  /ˈmʊtɐ/",
+      "hint": "Plural: die Mütter. Meine Mutter ist Ärztin.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Vater",
+      "back": "father  /ˈfaːtɐ/",
+      "hint": "Plural: die Väter. Mein Vater kocht gern.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Eltern",
+      "back": "parents (plural)  /ˈɛltɐn/",
+      "hint": "Meine Eltern wohnen in Köln.",
+      "lang": "de",
+      "gender": "pl",
+      "article": "die"
+    },
+    {
+      "front": "der Bruder",
+      "back": "brother  /ˈbʁuːdɐ/",
+      "hint": "Plural: die Brüder. Mein Bruder ist zehn.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Schwester",
+      "back": "sister  /ˈʃvɛstɐ/",
+      "hint": "Plural: die Schwestern. Ich habe eine Schwester.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Sohn",
+      "back": "son  /zoːn/",
+      "hint": "Plural: die Söhne. Ihr Sohn heißt Tim.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Tochter",
+      "back": "daughter  /ˈtɔxtɐ/",
+      "hint": "Plural: die Töchter. Seine Tochter ist klein.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "die Oma",
+      "back": "grandma  /ˈoːma/",
+      "hint": "Plural: die Omas. Meine Oma ist achtzig.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Opa",
+      "back": "grandpa  /ˈoːpa/",
+      "hint": "Plural: die Opas. Mein Opa liest viel.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Geschwister",
+      "back": "siblings (plural)  /ɡəˈʃvɪstɐ/",
+      "hint": "Hast du Geschwister?",
+      "lang": "de",
+      "gender": "pl",
+      "article": "die"
+    },
+    {
+      "front": "haben",
+      "back": "to have  /ˈhaːbn̩/",
+      "hint": "Wir haben zwei Kinder.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 4,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

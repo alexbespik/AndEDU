@@ -4,9 +4,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Volume2, Snail, Mic, Square, RotateCcw, Check } from 'lucide-react';
 import Md, { MdInline } from '../components/Md';
-import { speak, noVoiceHelp, canRecognize, recognize, RECOGNITION_NOTICE } from '../lib/speech';
+import { speakAudio, stopSpeech, noVoiceHelp, canRecognize, recognize, RECOGNITION_NOTICE } from '../lib/speech';
 import { gradeText, similarity, normalizeAnswer } from '../lib/langgrade';
 import { ExplainAnswerButton } from '../components/ExplainDialog';
+import LangKeyboard from '../components/language/LangKeyboard';
 
 export const LANGUAGE_TYPES = ['translate', 'word_bank', 'listen_type', 'listen_choose', 'speak'];
 
@@ -47,17 +48,18 @@ function Result({ ok, note, answer, item, onRetry, given }) {
 /** Play buttons (normal and slow) for text read in a language; shows why when no voice is installed. */
 export function ListenButtons({ text, lang, autoPlay = false, label = 'Listen' }) {
   const [note, setNote] = useState(null);
-  const play = (rate) => speak(text, lang, { rate }).then((r) => setNote(r.ok ? null : r.reason === 'no-voice' ? noVoiceHelp(r.language) : 'This browser cannot read text aloud.'));
+  const play = (slow) => speakAudio(text, lang, { slow }).then((r) => setNote(r.ok ? null : r.reason === 'no-voice' ? noVoiceHelp(r.language) : 'This browser cannot read text aloud.'));
   useEffect(() => {
     if (!autoPlay) return undefined;
-    const t = setTimeout(() => play(0.9), 150);
-    return () => { clearTimeout(t); window.speechSynthesis?.cancel(); };
+    const t = setTimeout(() => play(false), 150);
+    return () => clearTimeout(t);
   }, [text, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => stopSpeech(), []);  // nothing keeps talking after the exercise is gone
   return (
     <div className="stack-sm">
       <div className="btn-row">
-        <button type="button" className="btn btn-primary lang-play" onClick={() => play(0.9)} aria-label={label}><Volume2 size={18} aria-hidden="true" /> {label}</button>
-        <button type="button" className="btn btn-quiet" onClick={() => play(0.55)} aria-label="Listen slowly"><Snail size={16} aria-hidden="true" /> Slow</button>
+        <button type="button" className="btn btn-primary lang-play" onClick={() => play(false)} aria-label={label}><Volume2 size={18} aria-hidden="true" /> {label}</button>
+        <button type="button" className="btn btn-quiet" onClick={() => play(true)} aria-label="Listen slowly"><Snail size={16} aria-hidden="true" /> Slow</button>
       </div>
       {note && <p className="notice notice-info">{note}</p>}
     </div>
@@ -73,13 +75,15 @@ function useCheck(onResult) {
 function TypedAnswer({ item, answers, onResult, retry, placeholder, children }) {
   const [value, setValue] = useState('');
   const [res, done, reset] = useCheck(onResult);
+  const input = useRef(null);
   const submit = (e) => { e.preventDefault(); if (!res && value.trim()) done(gradeText(value, answers), value); };
   return (
     <form className="stack-sm" onSubmit={submit}>
       {children}
-      <textarea className="input lang-input" rows={2} value={value} lang={item.lang || undefined} placeholder={placeholder}
+      <textarea ref={input} className="input lang-input" rows={2} value={value} lang={item.lang || undefined} placeholder={placeholder}
         readOnly={!!res} onChange={(e) => setValue(e.target.value)} aria-label="Your answer"
         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) submit(e); }} />
+      {!res && <LangKeyboard lang={item.lang} inputRef={input} value={value} onChange={setValue} />}
       {!res && <div className="btn-row"><button type="submit" className="btn btn-primary btn-sm" disabled={!value.trim()}><Check size={14} aria-hidden="true" /> Check</button></div>}
       {res && <Result ok={res.ok} note={res.note} answer={res.best} item={item} given={value} onRetry={retry ? () => { reset(); setValue(''); } : null} />}
     </form>

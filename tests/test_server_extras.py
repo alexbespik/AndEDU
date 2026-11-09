@@ -94,7 +94,7 @@ class StudioOwnerChecks(unittest.TestCase):
         tag = uuid.uuid4().hex[:6]
 
         def acct(name):
-            r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True}).json()
+            r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True, "privacy": True}).json()
             return {"Authorization": f"Bearer {r['token']}"}, r["user"]["id"]
         self.a, self.a_id = acct(f"Extras Alice {tag}")
         self.b, _ = acct(f"Extras Bob {tag}")
@@ -273,6 +273,212 @@ class TimelineEra(unittest.TestCase):
         self.assertIn('"type": "sort_by"', extras["lab"])
         self.assertIn('"type": "spot_the_bug"', extras["code"])
         self.assertIn('"type": "cloze"', extras["math"])
+
+
+class MultimodalUploadDisambiguation(unittest.TestCase):
+    def setUp(self):
+        server.AUTH_REQUIRED = False
+        self.c = TestClient(server.app, base_url=LOCAL)
+
+    def test_duplicate_filenames_disambiguated(self):
+        png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        files = [
+            ("files", ("screenshot.png", png, "image/png")),
+            ("files", ("screenshot.png", png, "image/png")),
+            ("files", ("screenshot (1).png", png, "image/png")),
+        ]
+        with mock.patch.object(server, "acall_gemini", side_effect=[
+            SimpleNamespace(text="First image content"),
+            SimpleNamespace(text="Second image content"),
+            SimpleNamespace(text="Third image content"),
+        ]):
+            r = self.c.post("/api/upload-multimodal", files=files)
+            self.assertEqual(r.status_code, 200, r.text)
+            data = r.json()
+            self.assertEqual(data["filenames"], ["screenshot.png", "screenshot (1).png", "screenshot (2).png"])
+            self.assertEqual(len(data["files"]), 3)
+            self.assertEqual(data["files"][0]["filename"], "screenshot.png")
+            self.assertEqual(data["files"][0]["extracted_text"], "First image content")
+            self.assertEqual(data["files"][1]["filename"], "screenshot (1).png")
+            self.assertEqual(data["files"][1]["extracted_text"], "Second image content")
+            self.assertEqual(data["files"][2]["filename"], "screenshot (2).png")
+            self.assertEqual(data["files"][2]["extracted_text"], "Third image content")
+
+
+class AgyPromptHistoryTest(unittest.TestCase):
+    def setUp(self):
+        server.AUTH_REQUIRED = False
+        self.c = TestClient(server.app, base_url=LOCAL)
+
+    def test_post_user_prompt_with_history(self):
+        seen = {}
+        async def fake_gemini(contents, **kw):
+            seen["contents"] = contents
+            return SimpleNamespace(text="Understood.", function_calls=[])
+
+        payload = {
+            "prompt": "What is the next step?",
+            "history": [
+                {"role": "model", "content": "Initial assistant greeting that should be popped"},
+                {"role": "user", "content": "Can we analyze the wedge?"},
+                {"role": "model", "content": "Yes, let's identify the coordinate axes."},
+            ]
+        }
+        with mock.patch.object(server, "run_agy_cli", return_value=""), \
+             mock.patch.object(server, "acall_gemini", side_effect=fake_gemini):
+            r = self.c.post("/api/agy/prompt", json=payload)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["status"], "ok")
+            self.assertEqual(r.json()["reply"], "Understood.")
+
+        contents = seen.get("contents")
+        self.assertIsNotNone(contents)
+        self.assertIsInstance(contents, list)
+        self.assertEqual(len(contents), 3)
+        self.assertEqual(contents[0].role, "user")
+        self.assertEqual(contents[0].parts[0].text, "Can we analyze the wedge?")
+        self.assertEqual(contents[1].role, "model")
+        self.assertEqual(contents[1].parts[0].text, "Yes, let's identify the coordinate axes.")
+        self.assertEqual(contents[2].role, "user")
+        self.assertEqual(contents[2].parts[0].text, "What is the next step?")
+
+    def test_post_user_prompt_consecutive_user_turns_merged_and_truncated(self):
+        seen = {}
+        async def fake_gemini(contents, **kw):
+            seen["contents"] = contents
+            return SimpleNamespace(text="Got it.", function_calls=[])
+
+        long_chunk = "A" * 1500
+        payload = {
+            "prompt": "B" * 1500,
+            "history": [
+                {"role": "user", "content": long_chunk},
+            ]
+        }
+        with mock.patch.object(server, "run_agy_cli", return_value=""), \
+             mock.patch.object(server, "acall_gemini", side_effect=fake_gemini):
+            r = self.c.post("/api/agy/prompt", json=payload)
+            self.assertEqual(r.status_code, 200)
+
+        contents = seen["contents"]
+        self.assertEqual(len(contents), 1)
+        self.assertEqual(contents[0].role, "user")
+        self.assertLessEqual(len(contents[0].parts[0].text), server.MAX_TURN_CHARS)
+
+
+class ReasoningAndNotesTests(unittest.TestCase):
+    def setUp(self):
+        server.AUTH_REQUIRED = False
+        server.GROUNDING_PAUSED_UNTIL = 0.0
+        self.c = TestClient(server.app, base_url=LOCAL)
+        self.user = server.db.get_or_create_user(f"NotesUser-{uuid.uuid4().hex[:6]}")
+        self.uid = self.user["id"]
+        self.tid = f"notes-topic-{uuid.uuid4().hex[:6]}"
+        self.c.post("/api/topics", json=topic(self.tid))
+
+    def test_notes_endpoints_get_and_put(self):
+        # Initial notes empty
+        r = self.c.get(f"/api/users/{self.uid}/notes")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["notes_text"], "")
+
+        # Save notes
+        r2 = self.c.put(f"/api/users/{self.uid}/notes", json={"notes_text": "Study Marcus Aurelius and Epictetus"})
+        self.assertEqual(r2.status_code, 200, r2.text)
+        self.assertTrue(r2.json()["saved"])
+
+        # Retrieve saved notes
+        r3 = self.c.get(f"/api/users/{self.uid}/notes")
+        self.assertEqual(r3.status_code, 200, r3.text)
+        self.assertEqual(r3.json()["notes_text"], "Study Marcus Aurelius and Epictetus")
+
+    def test_post_user_prompt_injects_student_notes(self):
+        server.db.save_student_notes(self.uid, "Key concept: Stoic dichotomy of control")
+        seen_config = {}
+
+        async def fake_gemini(contents, config=None, **kw):
+            seen_config["system_instruction"] = getattr(config, "system_instruction", "")
+            return SimpleNamespace(text="Understood.", function_calls=[])
+
+        with mock.patch.object(server, "run_agy_cli", return_value=""), \
+             mock.patch.object(server, "acall_gemini", side_effect=fake_gemini):
+            r = self.c.post("/api/agy/prompt", json={"prompt": "Explain virtue", "userId": self.uid})
+            self.assertEqual(r.status_code, 200)
+
+        sys_inst = seen_config.get("system_instruction", "")
+        self.assertIn("STUDENT'S WRITTEN NOTES & SCRATCHPAD:", sys_inst)
+        self.assertIn("Stoic dichotomy of control", sys_inst)
+
+    def test_call_gemini_thinking_config_and_search_tool_decoration(self):
+        from google.genai import types
+        # 1. Plain config gets thinking_config and google_search
+        cfg, search_injected = server._prepare_call_config(None, allow_search=True)
+        self.assertIsNotNone(cfg.thinking_config)
+        self.assertEqual(cfg.thinking_config.thinking_budget, -1)
+        self.assertTrue(search_injected)
+        self.assertTrue(any(getattr(t, "google_search", None) is not None for t in cfg.tools))
+
+        # 2. JSON MIME suppresses search tool but retains thinking_config
+        json_cfg = types.GenerateContentConfig(response_mime_type="application/json")
+        res_cfg, search_injected_json = server._prepare_call_config(json_cfg, allow_search=True)
+        self.assertFalse(search_injected_json)
+        self.assertIsNotNone(res_cfg.thinking_config)
+        self.assertFalse(any(getattr(t, "google_search", None) is not None for t in (res_cfg.tools or [])))
+
+        # 3. Forced function calling suppresses search tool
+        fn_cfg = types.GenerateContentConfig(
+            tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY"))
+        )
+        res_fn, search_injected_fn = server._prepare_call_config(fn_cfg, allow_search=True)
+        self.assertFalse(search_injected_fn)
+        self.assertIsNotNone(res_fn.thinking_config)
+
+    def test_call_gemini_circuit_breaker_on_quota_error(self):
+        import time
+        from google.genai.errors import ClientError
+        server.GROUNDING_PAUSED_UNTIL = 0.0
+
+        attempts = []
+        def mock_generate_content(model, contents, **kw):
+            cfg = kw.get("config")
+            has_search = any(getattr(t, "google_search", None) is not None for t in (getattr(cfg, "tools", []) or []))
+            attempts.append(has_search)
+            if has_search:
+                raise ClientError(429, {"error": {"message": "RESOURCE_EXHAUSTED: search grounding quota exceeded"}})
+            return SimpleNamespace(text="Ungrounded fallback reply")
+
+        mock_client = SimpleNamespace(
+            models=SimpleNamespace(generate_content=mock_generate_content)
+        )
+        real_fn = getattr(server, "_real_call_gemini", server.call_gemini)
+        with mock.patch.object(server, "client", mock_client), \
+             mock.patch.object(server, "spend_model_call", return_value=None):
+            resp = real_fn("Test prompt", role="planner")
+            self.assertEqual(resp.text, "Ungrounded fallback reply")
+
+        # Grounding should now be paused for ~1800s
+        self.assertGreater(server.GROUNDING_PAUSED_UNTIL, time.time() + 1700)
+        # First attempt had search, second attempt was immediately retried ungrounded
+        self.assertEqual(attempts, [True, False])
+
+    def test_notes_authorization_in_auth_mode(self):
+        other_user = "user-victim-999"
+        server.db.save_student_notes(other_user, "Secret personal thoughts")
+        session_token = server.db.create_session(self.uid)
+        auth_headers = {"Authorization": f"Bearer {session_token}"}
+
+        with mock.patch.object(server, "AUTH_REQUIRED", True):
+            # Attempt to pass victim's userId in agy prompt
+            r_prompt = self.c.post("/api/agy/prompt", json={"prompt": "Summarize", "userId": other_user}, headers=auth_headers)
+            self.assertEqual(r_prompt.status_code, 403)
+            self.assertIn("own notes", r_prompt.text)
+
+            # Attempt to pass victim's userId in lesson tutor
+            r_tutor = self.c.post("/api/tutor/lesson", json={"topicId": self.tid, "message": "Hi", "userId": other_user}, headers=auth_headers)
+            self.assertEqual(r_tutor.status_code, 403)
+            self.assertIn("own notes", r_tutor.text)
+
+
 
 
 if __name__ == "__main__":

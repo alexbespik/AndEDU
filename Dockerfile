@@ -19,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py db.py simspec.py chemspec.py engage.py advisor.py advisor_chat.py advisor_classifier.py wm_advising.py backend_puzzles.py practice_general.py practice_history.py practice_language_extra.py mcp_server.py mcp_tools_history.py mcp_tools_language.py mcp_tools_language_extra.py mcp_tools_general.py mcp_tools_studio.py ./
+COPY server.py db.py simspec.py chemspec.py engage.py advisor.py advisor_chat.py advisor_cart.py advisor_risk.py advisor_classifier.py explain.py sprint.py wm_advising.py backend_puzzles.py language_de.py language_tts.py practice_general.py practice_history.py practice_language_extra.py mcp_server.py mcp_tools_history.py mcp_tools_language.py mcp_tools_language_extra.py mcp_tools_general.py mcp_tools_studio.py ./
 COPY scripts ./scripts
 COPY content/topics ./seed/topics
 COPY --from=web /web/dist ./dist

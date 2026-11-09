@@ -47,7 +47,7 @@ class AccountsCase(unittest.TestCase):
         self.b, self.b_id = self.acct(f"Audit Bob {self.tag}")
 
     def acct(self, name):
-        r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True}).json()
+        r = self.c.post("/api/auth/register", json={"name": name, "password": "correct horse battery", "adult": True, "privacy": True}).json()
         return {"Authorization": f"Bearer {r['token']}"}, r["user"]["id"]
 
     def tearDown(self):
@@ -73,7 +73,7 @@ class AdminsAndSignUp(AccountsCase):
 
     def test_sign_up_cannot_claim_a_password_less_profile(self):
         local = db.get_or_create_user(f"Audit Carol {self.tag}")
-        r = self.c.post("/api/auth/register", json={"name": local["name"], "password": "correct horse battery", "adult": True})
+        r = self.c.post("/api/auth/register", json={"name": local["name"], "password": "correct horse battery", "adult": True, "privacy": True})
         self.assertEqual(r.status_code, 409)
         self.assertFalse(db.get_user(local["id"]).get("password_hash"))
 
@@ -83,7 +83,7 @@ class AdminsAndSignUp(AccountsCase):
                  for _ in range(11)]
         self.assertEqual(codes, [401] * 10 + [429])
         self.assertEqual(self.c.post("/api/auth/register", json={"name": f"Audit Dan {self.tag}", "password": "correct horse battery",
-                                                                  "adult": True}).status_code, 429)
+                                                                  "adult": True, "privacy": True}).status_code, 429)
 
 
 class PrivateLessons(AccountsCase):
@@ -186,7 +186,8 @@ class PersonalMode(unittest.TestCase):
     def test_voice_id_is_checked(self):
         bad = {"content_markdown": "x", "voice_id": "../../v1/user", "api_key": "k"}
         self.assertEqual(self.c.post("/api/elevenlabs-voiceover", json=bad).status_code, 400)
-        self.assertEqual(self.c.post("/api/elevenlabs-voiceover", json={"content_markdown": "x", "voice_id": "george"}).status_code, 200)
+        with mock.patch.object(server, "ELEVENLABS_ENABLED", False):  # never reach the real API with a local key
+            self.assertEqual(self.c.post("/api/elevenlabs-voiceover", json={"content_markdown": "x", "voice_id": "george"}).status_code, 200)
 
     def test_assistant_proposes_code_instead_of_running_it(self):
         cur = self.c.get("/api/agy/events").json()["cursor"]

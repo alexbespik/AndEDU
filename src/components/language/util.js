@@ -46,3 +46,19 @@ export function grammarSections(markdown) {
 export function itemsOfType(topics, type) {
   return (topics || []).flatMap((t) => (t.practice || []).filter((p) => p.type === type).map((p) => ({ topic: t, item: { ...p, topicId: t.id } })));
 }
+
+// German noun genders (Gender.jsx colours them): der m, die f, das n, plural die.
+const ARTICLE_GENDER = { der: 'm', das: 'n', die: 'f' };
+export const GENDER_LABEL = { m: 'masculine', f: 'feminine', n: 'neuter', pl: 'plural' };
+export const GERMAN_NOUN = /^(der|die|das)\s+(\p{Lu}.*)$/u;   // "der Apfel"; "Das ist ..." is a sentence, not a noun
+const langBase = (lang) => String(lang || '').toLowerCase().split(/[-_]/)[0];
+
+/** 'm' | 'f' | 'n' | 'pl' | null for a German card front ("die Eltern" + "(plural)" on the back is plural). */
+export function genderOf(front, lang, { gender, back } = {}) {
+  if (GENDER_LABEL[gender]) return gender;
+  if (langBase(lang) !== 'de') return null;
+  const m = GERMAN_NOUN.exec(String(front || '').trim());
+  if (!m) return null;
+  if (m[1] === 'die' && /\(plural\)/i.test(String(back || ''))) return 'pl';
+  return ARTICLE_GENDER[m[1]];
+}

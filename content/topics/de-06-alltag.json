@@ -1,0 +1,527 @@
+{
+  "id": "de-06-alltag",
+  "title": "German 6: Daily routine — separable verbs and time",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1)",
+  "summary": "Describe your day, tell the time, and send the prefix of separable verbs to the end of the sentence.",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 6: Daily routine — separable verbs and time\n\nDescribe your day, tell the time, and send the prefix of separable verbs to the end of the sentence.\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| aufstehen | — | to get up | /ˈaʊ̯fˌʃteːən/ |\n| anrufen | — | to call (on the phone) | /ˈanˌʁuːfn̩/ |\n| einkaufen | — | to go shopping | /ˈaɪ̯nˌkaʊ̯fn̩/ |\n| fernsehen | — | to watch TV | /ˈfɛʁnˌzeːən/ |\n| anfangen | — | to begin | /ˈanˌfaŋən/ |\n| frühstücken | — | to have breakfast | /ˈfʁyːˌʃtʏkn̩/ |\n| die Uhr | die Uhren | clock; o'clock | /uːɐ̯/ |\n| die Stunde | die Stunden | hour | /ˈʃtʊndə/ |\n| die Minute | die Minuten | minute | /miˈnuːtə/ |\n| der Morgen | die Morgen | morning | /ˈmɔʁɡn̩/ |\n| der Abend | die Abende | evening | /ˈaːbn̩t/ |\n| die Woche | die Wochen | week | /ˈvɔxə/ |\n| heute | — | today | /ˈhɔʏ̯tə/ |\n| morgen | — | tomorrow | /ˈmɔʁɡn̩/ |\n\n## Phrases\n\n- **Ich stehe um sieben Uhr auf.**: I get up at seven o'clock.\n- **Wann fängt der Film an?**: When does the film start?\n- **Am Abend sehe ich fern.**: In the evening I watch TV.\n- **Wie spät ist es?**: What time is it?\n- **Es ist halb acht.**: It is half past seven.\n- **Heute kaufe ich ein.**: Today I am going shopping.\n- **Ruf mich morgen an!**: Call me tomorrow!\n\n## Grammar: separable verbs and word order\n\n- Separable verbs split: the prefix goes to the **end**. *aufstehen* → *Ich stehe um sieben Uhr **auf**.*\n- In the infinitive (and after modal verbs) they stay together: *Ich muss früh **aufstehen**.*\n- Not every prefix separates: *frühstücken* is a normal verb (*Ich frühstücke*).\n- **The verb is always the second element.** If the sentence starts with a time, the subject moves after the verb:\n  *Am Abend **sehe ich** fern.*\n\n## Telling the time\n\n- *Es ist acht Uhr* (8:00) · *Viertel nach acht* (8:15) · ***halb neun*** (8:30: half *to* nine) · *Viertel vor neun* (8:45).\n- *um* + time = at: *um sieben Uhr*. *am* + part of the day: *am Morgen, am Abend*.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "aufstehen",
+          "to get up"
+        ],
+        [
+          "anrufen",
+          "to call (on the phone)"
+        ],
+        [
+          "einkaufen",
+          "to go shopping"
+        ],
+        [
+          "fernsehen",
+          "to watch TV"
+        ],
+        [
+          "anfangen",
+          "to begin"
+        ],
+        [
+          "frühstücken",
+          "to have breakfast"
+        ],
+        [
+          "die Uhr",
+          "clock; o'clock"
+        ],
+        [
+          "die Stunde",
+          "hour"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I get up at seven o'clock.",
+      "answer": "Ich stehe um sieben Uhr auf.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich stehe um sieben Uhr auf.",
+      "bank": [
+        "Ich",
+        "stehe",
+        "um",
+        "sieben",
+        "Uhr",
+        "auf",
+        "aufstehe",
+        "am",
+        "steht"
+      ],
+      "source": "I get up at seven o'clock.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich stehe um sieben Uhr auf.",
+      "answer": "Ich stehe um sieben Uhr auf.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "When does the film start?",
+      "answer": "Wann fängt der Film an?",
+      "accepted": [
+        "Wann beginnt der Film?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wann fängt der Film an?",
+      "bank": [
+        "Wann",
+        "fängt",
+        "der",
+        "Film",
+        "an",
+        "anfängt",
+        "den",
+        "Wie"
+      ],
+      "source": "When does the film start?",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wann fängt der Film an?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "When does the film start?"
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "In the evening I watch TV.",
+      "answer": "Am Abend sehe ich fern.",
+      "accepted": [
+        "Ich sehe am Abend fern."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Am Abend sehe ich fern.",
+      "bank": [
+        "Am",
+        "Abend",
+        "sehe",
+        "ich",
+        "fern",
+        "Im",
+        "fernsehe",
+        "sieht"
+      ],
+      "source": "In the evening I watch TV.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Am Abend sehe ich fern.",
+      "answer": "Am Abend sehe ich fern.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "What time is it?",
+      "answer": "Wie spät ist es?",
+      "accepted": [
+        "Wie viel Uhr ist es?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wie spät ist es?",
+      "bank": [
+        "Wie",
+        "spät",
+        "ist",
+        "es",
+        "Wann",
+        "sind",
+        "Uhr"
+      ],
+      "source": "What time is it?",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wie spät ist es?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "What time is it?"
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "It is half past seven.",
+      "answer": "Es ist halb acht.",
+      "accepted": [
+        "Es ist sieben Uhr dreißig."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Es ist halb acht.",
+      "bank": [
+        "Es",
+        "ist",
+        "halb",
+        "acht",
+        "sieben",
+        "Uhr",
+        "nach"
+      ],
+      "source": "It is half past seven.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Es ist halb acht.",
+      "answer": "Es ist halb acht.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Today I am going shopping.",
+      "answer": "Heute kaufe ich ein.",
+      "accepted": [
+        "Ich kaufe heute ein."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Heute kaufe ich ein.",
+      "bank": [
+        "Heute",
+        "kaufe",
+        "ich",
+        "ein",
+        "einkaufe",
+        "kauft",
+        "Morgen"
+      ],
+      "source": "Today I am going shopping.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Heute kaufe ich ein.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "Today I am going shopping."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Call me tomorrow!",
+      "answer": "Ruf mich morgen an!",
+      "accepted": [
+        "Ruf mich morgen an."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ruf mich morgen an!",
+      "bank": [
+        "Ruf",
+        "mich",
+        "morgen",
+        "an",
+        "Rufst",
+        "mir",
+        "auf"
+      ],
+      "source": "Call me tomorrow!",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ruf mich morgen an!",
+      "answer": "Ruf mich morgen an!",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "fill_blank",
+      "prompt": "Ich ___ um sieben Uhr auf.",
+      "explanation": "Separable: the verb part is conjugated, the prefix **auf** goes to the end.",
+      "concept": null,
+      "options": [
+        "stehe",
+        "aufstehe",
+        "steht",
+        "stehen"
+      ],
+      "answer": "stehe"
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Der Unterricht fängt um neun Uhr ___.",
+      "explanation": "anfangen → *fängt … **an***.",
+      "concept": null,
+      "options": [
+        "an",
+        "auf",
+        "ein",
+        "mit"
+      ],
+      "answer": "an"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "„Es ist halb neun“ means it is ___.",
+      "explanation": "**halb neun** = half way to nine = 8:30.",
+      "concept": null,
+      "options": [
+        "8:30",
+        "9:30",
+        "9:00",
+        "8:00"
+      ],
+      "answer": "8:30"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Am Abend ___ ich fern.",
+      "explanation": "Time first, then the verb (position 2), then the subject: *Am Abend **sehe** ich fern.*",
+      "concept": null,
+      "options": [
+        "sehe",
+        "fernsehe",
+        "siehst",
+        "sieht"
+      ],
+      "answer": "sehe"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "aufstehen",
+      "back": "to get up  /ˈaʊ̯fˌʃteːən/",
+      "hint": "Ich stehe um sieben Uhr auf.",
+      "lang": "de"
+    },
+    {
+      "front": "anrufen",
+      "back": "to call (on the phone)  /ˈanˌʁuːfn̩/",
+      "hint": "Ich rufe dich morgen an.",
+      "lang": "de"
+    },
+    {
+      "front": "einkaufen",
+      "back": "to go shopping  /ˈaɪ̯nˌkaʊ̯fn̩/",
+      "hint": "Wir kaufen am Samstag ein.",
+      "lang": "de"
+    },
+    {
+      "front": "fernsehen",
+      "back": "to watch TV  /ˈfɛʁnˌzeːən/",
+      "hint": "Er sieht am Abend fern.",
+      "lang": "de"
+    },
+    {
+      "front": "anfangen",
+      "back": "to begin  /ˈanˌfaŋən/",
+      "hint": "Der Kurs fängt um neun Uhr an.",
+      "lang": "de"
+    },
+    {
+      "front": "frühstücken",
+      "back": "to have breakfast  /ˈfʁyːˌʃtʏkn̩/",
+      "hint": "Wir frühstücken um acht.",
+      "lang": "de"
+    },
+    {
+      "front": "die Uhr",
+      "back": "clock; o'clock  /uːɐ̯/",
+      "hint": "Plural: die Uhren. Es ist acht Uhr.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "die Stunde",
+      "back": "hour  /ˈʃtʊndə/",
+      "hint": "Plural: die Stunden. Der Film dauert zwei Stunden.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "die Minute",
+      "back": "minute  /miˈnuːtə/",
+      "hint": "Plural: die Minuten. Ich komme in zehn Minuten.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "der Morgen",
+      "back": "morning  /ˈmɔʁɡn̩/",
+      "hint": "Plural: die Morgen. Am Morgen trinke ich Kaffee.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "der Abend",
+      "back": "evening  /ˈaːbn̩t/",
+      "hint": "Plural: die Abende. Am Abend lese ich.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Woche",
+      "back": "week  /ˈvɔxə/",
+      "hint": "Plural: die Wochen. Die Woche hat sieben Tage.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "heute",
+      "back": "today  /ˈhɔʏ̯tə/",
+      "hint": "Heute ist Montag.",
+      "lang": "de"
+    },
+    {
+      "front": "morgen",
+      "back": "tomorrow  /ˈmɔʁɡn̩/",
+      "hint": "Morgen habe ich frei.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 6,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

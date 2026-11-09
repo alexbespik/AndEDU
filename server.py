@@ -37,8 +37,11 @@ from chemspec import CHEM_GUIDE
 import db
 import engage
 import advisor
+import advisor_cart
 import advisor_chat
 import advisor_classifier
+import sprint
+import wm_advising
 
 ENV_FILE = Path(__file__).parent / ".env"
 if ENV_FILE.exists():
@@ -64,6 +67,7 @@ ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"} | {
 # their owner; the server refuses to listen beyond localhost without it.
 AUTH_REQUIRED = os.environ.get("SCIEDU_AUTH") == "1"
 PUBLIC_API = {"/api/status", "/api/auth/login", "/api/auth/register"}
+PRIVACY_VERSION = "2026-11-07"  # the privacy notice's version; a sign-in reports whether the user accepted this one
 CURRENT_USER: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("current_user", default=None)
 CLIENT_KEY: "contextvars.ContextVar[str]" = contextvars.ContextVar("client_key", default="local")
 LOCAL_DAY: contextvars.ContextVar = contextvars.ContextVar("local_day", default="")  # student's calendar day
@@ -71,7 +75,7 @@ LOCAL_DAY: contextvars.ContextVar = contextvars.ContextVar("local_day", default=
 # Requests that spend model quota, per signed-in user (or per client address without accounts), per hour.
 # SCIEDU_RATE_SCALE multiplies every limit; 0 turns limiting off.
 RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload": 30, "ide": 120, "chat": 240, "quiz": 600,
-               "language_roleplay": 120}
+               "language_roleplay": 120, "advisor": 60, "language_tts": 300, "explain": 20}
 RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
 _rate_hits: Dict[Tuple[str, str], List[float]] = {}
 _rate_lock = threading.Lock()
@@ -107,7 +111,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-Local-Day"],
 )
 
@@ -241,15 +245,63 @@ def models_for(role: Optional[str]) -> List[str]:
     preferred = MODEL_ROLES.get(role or "", [])
     return preferred + [m for m in CANDIDATE_MODELS if m not in preferred]
 
+GROUNDING_PAUSED_UNTIL = 0.0  # after a grounding quota error, skip search for a while instead of failing every check
+
+
+def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], allow_search: bool = True) -> Tuple[types.GenerateContentConfig, bool]:
+    global GROUNDING_PAUSED_UNTIL
+    if orig_config is None:
+        cfg = types.GenerateContentConfig()
+    else:
+        cfg = copy.copy(orig_config)
+
+    # 1. Inject thinking_config for deep reasoning by default
+    if getattr(cfg, "thinking_config", None) is None:
+        try:
+            cfg.thinking_config = types.ThinkingConfig(thinking_budget=-1)
+        except Exception:
+            pass
+
+    # 2. Inject Google Search tool if MIME != application/json, function calling is not forced, and search is not paused
+    is_json = getattr(cfg, "response_mime_type", None) == "application/json"
+    tool_cfg = getattr(cfg, "tool_config", None)
+    fn_calling_cfg = getattr(tool_cfg, "function_calling_config", None)
+    fn_mode = getattr(fn_calling_cfg, "mode", None)
+    mode_str = str(fn_mode).upper() if fn_mode is not None else ""
+    is_fn_forced = mode_str in ("ANY", "REQUIRED", "1", "2") or "ANY" in mode_str or "REQUIRED" in mode_str
+    search_paused = time.time() < GROUNDING_PAUSED_UNTIL
+
+    existing_tools = list(getattr(cfg, "tools", []) or [])
+    has_custom_tools = any(getattr(t, "function_declarations", None) or getattr(t, "code_execution", None) or (not getattr(t, "google_search", None)) for t in existing_tools)
+    has_search = any(getattr(t, "google_search", None) is not None for t in existing_tools)
+
+    search_injected = False
+    if allow_search and not is_json and not is_fn_forced and not search_paused and not has_custom_tools:
+        if not has_search:
+            try:
+                search_tool = types.Tool(google_search=types.GoogleSearch())
+                cfg.tools = existing_tools + [search_tool]
+                search_injected = True
+            except Exception:
+                pass
+    return cfg, search_injected
+
+
 def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = True, **kwargs):
     """Invokes Gemini with automatic model fallback for 429 quota, 503 load, and 404 deprecations."""
-    global client
+    global client, GROUNDING_PAUSED_UNTIL
     if client is None:
         key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
         if key:
             client = genai.Client(api_key=key, http_options=GEMINI_HTTP)
         else:
             raise RuntimeError("Gemini API key is not configured in .env")
+
+    raw_config = kwargs.get("config")
+    cfg, search_injected = _prepare_call_config(raw_config, allow_search=True)
+    call_kwargs = dict(kwargs)
+    call_kwargs["config"] = cfg
+
     last_err = None
     now = time.time()
     candidates = models_for(role)
@@ -261,13 +313,31 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
             return client.models.generate_content(
                 model=model_id,
                 contents=contents,
-                **kwargs
+                **call_kwargs
             )
         except ClientError as e:
             last_err = e
             err_str = str(e).lower()
-            if getattr(e, "code", None) in [429, 404, 500, 503] or "quota" in err_str or "resource_exhausted" in err_str:
-                code = getattr(e, "code", None)
+            code = getattr(e, "code", None)
+
+            # Circuit breaker: On 429 quota or tool conflict, pause search and retry ungrounded immediately
+            if search_injected and (code in (429, 400) or "quota" in err_str or "tool" in err_str or "search" in err_str or "conflict" in err_str or "grounding" in err_str):
+                GROUNDING_PAUSED_UNTIL = time.time() + 1800
+                ungrounded_cfg, _ = _prepare_call_config(raw_config, allow_search=False)
+                call_kwargs["config"] = ungrounded_cfg
+                search_injected = False
+                try:
+                    return client.models.generate_content(
+                        model=model_id,
+                        contents=contents,
+                        **call_kwargs
+                    )
+                except Exception as retry_err:
+                    last_err = retry_err
+                    err_str = str(retry_err).lower()
+                    code = getattr(retry_err, "code", None)
+
+            if code in [429, 404, 500, 503] or "quota" in err_str or "resource_exhausted" in err_str:
                 if not track_cooldown:
                     pass  # e.g. a search-grounding quota: says nothing about plain generation on this model
                 elif code == 429 or "quota" in err_str:
@@ -283,6 +353,20 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
         except Exception as e:
             last_err = e
             err_str = str(e).lower()
+            if search_injected and ("quota" in err_str or "tool" in err_str or "search" in err_str or "conflict" in err_str or "grounding" in err_str):
+                GROUNDING_PAUSED_UNTIL = time.time() + 1800
+                ungrounded_cfg, _ = _prepare_call_config(raw_config, allow_search=False)
+                call_kwargs["config"] = ungrounded_cfg
+                search_injected = False
+                try:
+                    return client.models.generate_content(
+                        model=model_id,
+                        contents=contents,
+                        **call_kwargs
+                    )
+                except Exception as retry_err:
+                    last_err = retry_err
+                    err_str = str(retry_err).lower()
             if "quota" in err_str or "429" in err_str or "resource_exhausted" in err_str:
                 print(f"[MODEL FALLBACK] Model {model_id} error {e}, attempting fallback...")
                 continue
@@ -292,11 +376,13 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
         raise last_err
     raise RuntimeError("No candidate models succeeded.")
 
+_real_call_gemini = call_gemini
+
+
 async def acall_gemini(contents, role: Optional[str] = None, **kwargs):
     """The genai client is blocking; run it off the event loop so polling endpoints stay responsive."""
     return await asyncio.to_thread(call_gemini, contents, role, **kwargs)
 
-GROUNDING_PAUSED_UNTIL = 0.0  # after a grounding quota error, skip search for a while instead of failing every check
 
 # ---------------------------------------------------------------------------
 # MCP TOOLS DECLARATIONS
@@ -633,21 +719,33 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
     return extract_document(file_bytes, filename)[0]
 
 SOCRATIC_PROMPT = """
-You are a senior Socratic mentor and master coach for '&edu'.
-Your objective is to lead the student to deep conceptual mastery with razor-sharp, concise guidance.
+You are a senior Socratic mentor and master coach for '&edu', embodying a Stoic, dignified, calm, and authoritative teaching presence.
+Your objective is to lead the student to first-principles conceptual mastery with structured, rigorous guidance grounded in Cognitive Apprenticeship (Collins) and Cognitive Load Theory (Sweller).
 
 Pedagogical Core Directives:
-1. Short, Concise & Leading (CRITICAL):
-   - Keep all responses strictly under 50-60 words!
-   - NO giant walls of text. Deliver one sharp insight and one leading check question.
-   - Give the actual task directly without preamble or boilerplate greetings.
-2. Theory First, Then Practice:
-   - Anchor the student in the foundational concept or invariant in one punchy sentence.
-3. Strict No-Spoilers:
-   - Never reveal the exact token, block order, or code unless '!reveal' is requested.
-   - Lead them with a targeted counterexample or boundary inspection.
-4. Review & Longitudinal Guidance:
-   - Help the student reflect on why an incorrect choice violates the problem invariant.
+1. Two-Tier Dynamic Response Sizing (Cognitive Load Optimization):
+   Never choke responses into rigid boilerplate paragraphs. Adapt response depth dynamically to the student's cognitive state:
+   - Diagnostic Turn (40-80 words): Triggered for direct questions, verification checks, or single-step hurdles. Deliver a concise, targeted diagnostic observation addressing the specific concept or assumption, ending with exactly ONE leading check question.
+   - Conceptual Scaffolding Turn (100-180 words): Triggered when the student exhibits a deep conceptual blocker, fundamental impasse, or derives a relationship from first principles. Structure the scaffolding sequentially:
+     * State Invariant: Anchor in the governing fundamental law or conservation principle (e.g. Newton's laws, energy/momentum conservation, Gauss's law).
+     * Isolate Mechanism/Geometry: Clarify the coordinate frame, free-body constraints, or physical mechanism.
+     * Diagnose Misconception: Directly diagnose why the student's intuition breaks down using a limiting case, extreme condition, or dimensional analysis.
+     * End with exactly ONE leading check question that guides the student to take the next deductive step.
+
+2. Strict Anti-Hallucination & Symbolic Integrity:
+   - For symbolic problems (deriving relationships in terms of variables like m, M, g, theta, mu, k, L):
+     * NEVER invent arbitrary numerical values or calculate using made-up numbers!
+     * Keep all analysis strictly symbolic unless explicit numerical values are provided in the problem statement.
+   - Strictly maintain dimensional homogeneity: every equation must have consistent physical dimensions ([M^a L^b T^c]). Never add or equate dimensionally mismatched quantities.
+   - No unverified arithmetic: never state an arbitrary unverified number as ground truth.
+
+3. Strict Vector KaTeX Typography:
+   - Always format unit vectors using dotless KaTeX notation: `$\\hat{\\imath}$`, `$\\hat{\\jmath}$`, `$\\hat{k}$` (or `$\\mathbf{\\hat{\\imath}}$`, `$\\mathbf{\\hat{\\jmath}}$`, `$\\mathbf{\\hat{k}}$`).
+   - Never write raw carets (like i^, j^, k^) or plain `\\hat{i}`, `\\hat{j}`.
+
+4. Strict No-Spoilers:
+   - Never give away final answers, code, or completed derivations unless explicitly requested with '!reveal'.
+   - Guide the student to discover each step through principled deduction.
 
 Adaptive Tools:
 - If the student requests an easier assignment or needs warm-up: emit_slot_puzzle
@@ -1911,30 +2009,52 @@ async def upload_multimodal(
 
     extracted_parts = []
     processed_names = []
+    files_meta = []
+    seen_names = set()
+    seen_names_lower = set()
 
     for f in target_files:
         try:
             file_bytes = await f.read(MAX_UPLOAD_BYTES + 1)  # never read more than the limit into memory
             if len(file_bytes) > MAX_UPLOAD_BYTES:
                 raise HTTPException(status_code=413, detail=f"{f.filename} is larger than {MAX_UPLOAD_BYTES // 1_000_000} MB.")
-            filename = f.filename or "uploaded_file"
-            ext = filename.lower().split('.')[-1]
+            raw_filename = f.filename or "uploaded_file"
+            dot_idx = raw_filename.rfind(".")
+            stem = raw_filename[:dot_idx] if dot_idx != -1 else raw_filename
+            ext = raw_filename[dot_idx:] if dot_idx != -1 else ""
 
-            if ext in ["png", "jpg", "jpeg", "webp"]:
-                mime_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
+            if raw_filename.lower() in seen_names_lower:
+                base_stem = re.sub(r"\s*\(\d+\)$", "", stem).strip() or stem
+                counter = 1
+                cand = f"{base_stem} ({counter}){ext}"
+                while cand.lower() in seen_names_lower:
+                    counter += 1
+                    cand = f"{base_stem} ({counter}){ext}"
+                filename = cand
+            else:
+                filename = raw_filename
+
+            seen_names.add(filename)
+            seen_names_lower.add(filename.lower())
+            file_ext = filename.lower().split('.')[-1] if '.' in filename else ""
+
+            if file_ext in ["png", "jpg", "jpeg", "webp"]:
+                mime_type = f"image/{file_ext if file_ext != 'jpg' else 'jpeg'}"
                 img_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
                 prompt = "Carefully transcribe and describe all text, equations, math formulas, code snippets, diagrams, and educational concepts in this image."
+                require_upload_consent()
                 rate_limit("upload")
                 try:
                     response = await acall_gemini(contents=[img_part, prompt])
                     text_content = response.text or ""
                 except Exception as e:
-                    print(f"[ERROR upload_multimodal image {filename}]:", e)
+                    print(f"[ERROR upload_multimodal image {filename!r:.80}]: {type(e).__name__} ({len(file_bytes)} bytes)")
                     text_content = f"[Image uploaded: {filename}]"
             else:
                 text_content, pages = await asyncio.to_thread(extract_document, file_bytes, filename)
-                if ext == "pdf" and len(text_content.strip()) < 200 * max(1, pages) // 4:
+                if file_ext == "pdf" and len(text_content.strip()) < 200 * max(1, pages) // 4:
                     # Scanned or handwritten PDF (little or no text layer): let Gemini read the pages (OCR).
+                    require_upload_consent()
                     rate_limit("upload")
                     try:
                         pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
@@ -1942,55 +2062,94 @@ async def upload_multimodal(
                             "equations in LaTeX ($...$), tables as Markdown, and describe each diagram in one sentence."])
                         text_content = (response.text or "").strip() or text_content
                     except Exception as e:
-                        print(f"[OCR fallback failed for {filename}]:", e)
+                        print(f"[OCR fallback failed for {filename!r:.80}]: {type(e).__name__} ({len(file_bytes)} bytes)")
 
             extracted_parts.append(f"=== DOCUMENT: {filename} ===\n{text_content}\n=== END DOCUMENT ===")
             processed_names.append(filename)
+            files_meta.append({"filename": filename, "extracted_text": text_content})
         except HTTPException:
             raise
         except Exception as e:
-            print(f"[ERROR parsing file {f.filename}]:", e)
+            print(f"[ERROR parsing file {f.filename!r:.80}]: {type(e).__name__}")  # never the content or a parser message quoting it
 
     combined_text = "\n\n".join(extracted_parts)
     return {
         "filename": processed_names[0] if len(processed_names) == 1 else f"{len(processed_names)} files uploaded",
         "filenames": processed_names,
         "extracted_text": combined_text,
+        "files": files_meta,
         "count": len(processed_names)
     }
+
+def _sanitize_puzzle_context(p_ctx: Any) -> Dict[str, Any]:
+    """Extract safe public metadata while stripping solutions, answers, and test assertion secrets."""
+    if not isinstance(p_ctx, dict):
+        return {}
+    prob = p_ctx.get("problem") if isinstance(p_ctx.get("problem"), dict) else {}
+    ch = p_ctx.get("chapter") if isinstance(p_ctx.get("chapter"), dict) else {}
+
+    clean_ctx = {
+        "chapter_title": ch.get("title") or prob.get("chapter_title") or p_ctx.get("chapter_title") or "Chapter",
+        "problem_title": prob.get("title") or p_ctx.get("problem_title") or "Problem",
+        "guiding_question": prob.get("guiding_question") or p_ctx.get("guiding_question") or "",
+        "concept_hint": prob.get("concept_hint") or prob.get("hint") or p_ctx.get("concept_hint") or "",
+        "starter_code": prob.get("starter_code") or prob.get("starter") or p_ctx.get("starter_code") or "",
+        "mode": (p_ctx.get("mode") or prob.get("mode") or "code").lower(),
+    }
+    if "difficulty" in prob:
+        clean_ctx["difficulty"] = prob["difficulty"]
+    elif "difficulty" in p_ctx:
+        clean_ctx["difficulty"] = p_ctx["difficulty"]
+    return clean_ctx
 
 @app.post("/api/tutor-chat")
 async def tutor_chat(payload: ChatPayload):
     rate_limit("chat")
     p_ctx = payload.puzzle_context or {}
+    safe_ctx = _sanitize_puzzle_context(p_ctx)
     prob = p_ctx.get("problem") or {}
     ch = p_ctx.get("chapter") or {}
-    mode = (p_ctx.get("mode") or prob.get("mode") or "code").lower()
+    mode = safe_ctx["mode"]
     cid = ch.get("id") or prob.get("chapter_id") or 1
-    ctitle = ch.get("title") or prob.get("chapter_title") or "Chapter"
+    ctitle = safe_ctx["chapter_title"]
 
-    system_text = f"{SOCRATIC_PROMPT}\nCURRENT LESSON CONTEXT:\n{json.dumps(p_ctx)[:MAX_DOCUMENT_CHARS]}"
-    
-    contents = []
-    for m in (payload.history or [])[-MAX_HISTORY_TURNS:]:
-        if not isinstance(m, dict):
+    system_text = f"{SOCRATIC_PROMPT}\nCURRENT LESSON CONTEXT:\n{json.dumps(safe_ctx)[:MAX_DOCUMENT_CHARS]}"
+
+    # Port robust multi-turn role alternating logic from post_user_prompt
+    history_contents = []
+    for turn in (payload.history or [])[-MAX_HISTORY_TURNS:]:
+        if not isinstance(turn, dict):
             continue
-        text = str(m.get("content") or "").strip()[:MAX_TURN_CHARS]
+        role = "user" if turn.get("role") == "user" else "model"
+        text = str(turn.get("content") or "").strip()
         if not text:
             continue
-        role = "model" if m.get("role") in ["model", "assistant"] else "user"
-        # Avoid duplicating consecutive identical turns
-        if contents and contents[-1].role == role and contents[-1].parts and contents[-1].parts[0].text == text:
-            continue
-        contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+        if history_contents and history_contents[-1].role == role:
+            prev_text = history_contents[-1].parts[0].text
+            merged_text = f"{prev_text}\n{text}"[:MAX_TURN_CHARS]
+            history_contents[-1] = types.Content(role=role, parts=[types.Part.from_text(text=merged_text)])
+        else:
+            history_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text[:MAX_TURN_CHARS])]))
+    while history_contents and history_contents[0].role != "user":
+        history_contents.pop(0)
 
     user_msg = (payload.message or "").strip()[:MAX_MESSAGE_CHARS]
     if user_msg:
-        if not (contents and contents[-1].role == "user" and contents[-1].parts and contents[-1].parts[0].text == user_msg):
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_msg)]))
-
-    if not contents:
-        contents = [types.Content(role="user", parts=[types.Part.from_text(text="I am ready to learn.")])]
+        if history_contents and history_contents[-1].role == "user":
+            prev_text = history_contents[-1].parts[0].text
+            merged_text = f"{prev_text}\n{user_msg}"[:MAX_TURN_CHARS]
+            history_contents[-1] = types.Content(role="user", parts=[types.Part.from_text(text=merged_text)])
+            contents = history_contents
+        else:
+            user_content = types.Content(role="user", parts=[types.Part.from_text(text=user_msg)])
+            contents = history_contents + [user_content] if history_contents else [user_content]
+    else:
+        if history_contents:
+            if history_contents[-1].role == "model":
+                history_contents.append(types.Content(role="user", parts=[types.Part.from_text(text="Please continue.")]))
+            contents = history_contents
+        else:
+            contents = [types.Content(role="user", parts=[types.Part.from_text(text="I am ready to learn.")])]
 
     try:
         response = await acall_gemini(
@@ -2616,6 +2775,21 @@ def repair_latex(text: str) -> str:
     t = re.sub(r"(?m)^([ \t]*\$\$[^$\n]+)\$[|<>][ \t]*$", r"\1$$", t)  # model typo: $$x$| or $$x$< closing a display formula
     t = re.sub(r"\\\[(.+?)\\\]", lambda m: f"$${m.group(1)}$$", t, flags=re.S)
     t = re.sub(r"\\\((.+?)\\\)", lambda m: f"${m.group(1).strip()}$", t, flags=re.S)
+
+    # Unit vector normalizations
+    t = re.sub(r"[iı]\u0302|î", r"\\hat{\\imath}", t)
+    t = re.sub(r"[jȷ]\u0302|ĵ", r"\\hat{\\jmath}", t)
+    t = re.sub(r"k\u0302", r"\\hat{k}", t)
+    t = re.sub(r"(^|[^\w\\])(?:i\^|ı\^)(?![a-zA-Z0-9_{\(])", r"\g<1>\\hat{\\imath}", t)
+    t = re.sub(r"(^|[^\w\\])(?:j\^|ȷ\^)(?![a-zA-Z0-9_{\(])", r"\g<1>\\hat{\\jmath}", t)
+    t = re.sub(r"(^|[^\w\\])k\^(?![a-zA-Z0-9_{\(])", r"\g<1>\\hat{k}", t)
+    t = re.sub(r"\\hat\{i\}", r"\\hat{\\imath}", t)
+    t = re.sub(r"\\hat\{j\}", r"\\hat{\\jmath}", t)
+    t = re.sub(r"\\hat\s+i\b", r"\\hat{\\imath}", t)
+    t = re.sub(r"\\hat\s+j\b", r"\\hat{\\jmath}", t)
+    t = re.sub(r"\\ihat\b", r"\\hat{\\imath}", t)
+    t = re.sub(r"\\jhat\b", r"\\hat{\\jmath}", t)
+    t = re.sub(r"\\khat\b", r"\\hat{k}", t)
     return t
 
 def _repair_all(value: Any) -> Any:
@@ -2688,7 +2862,8 @@ def normalize_topic(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     return topic, warnings
 
 def normalize_flashcards(items: Any) -> List[Dict[str, Any]]:
-    """{front, back, optional hint, optional lang (BCP-47, read aloud in the browser)}; at most 80."""
+    """{front, back, optional hint, optional lang (BCP-47, read aloud in the browser), optional noun gender
+    (m|f|n|pl) and article for der/die/das colours}; at most 80."""
     out = []
     for c in items if isinstance(items, list) else []:
         if isinstance(c, dict) and str(c.get("front", "")).strip() and str(c.get("back", "")).strip():
@@ -2697,6 +2872,10 @@ def normalize_flashcards(items: Any) -> List[Dict[str, Any]]:
                 card["hint"] = str(c["hint"])[:200]
             if re.fullmatch(r"[a-z]{2,3}(-[A-Za-z]{2,4})?", str(c.get("lang") or "")):
                 card["lang"] = c["lang"]
+            if c.get("gender") in ("m", "f", "n", "pl"):
+                card["gender"] = c["gender"]
+                if str(c.get("article") or "").strip():
+                    card["article"] = str(c["article"]).strip()[:12]
             out.append(card)
     return out[:80]
 
@@ -2880,8 +3059,11 @@ class AgyEventModel(BaseModel):
 
 class AgyPromptModel(BaseModel):
     prompt: str
-    topicId: Optional[str] = "rolling-without-slipping"
+    topicId: Optional[str] = None
     courseId: Optional[str] = None
+    level: Optional[int] = None
+    history: Optional[List[Dict[str, Any]]] = None
+    userId: Optional[str] = None
 
 # User ids (shown in the account menu), not names: anyone could sign up under an admin's name.
 ADMINS = {n.strip() for n in os.environ.get("SCIEDU_ADMINS", "").split(",") if n.strip()}
@@ -2916,16 +3098,22 @@ def require_topic_write(topic_id: str, incoming: Optional[Dict[str, Any]] = None
 
 def topic_visible(topic: Dict[str, Any], courses: Optional[Dict[str, Any]] = None) -> bool:
     """With accounts on, a lesson generated for someone's course is visible only to that person;
-    library topics (no course) stay shared. `courses` memoizes course lookups across one listing."""
+    library topics (no course) stay shared. Lessons of a cleared problem sprint are hidden from everyone until it is
+    restored or purged. `courses` memoizes owner lookups across one listing. Light queries only (cleared ids,
+    cached, and the owner column): listings call this once per topic."""
     cid = (topic.get("source") or {}).get("courseId")
-    if not AUTH_REQUIRED or not cid:
+    if not cid:
         return True
-    if courses is None:
-        course = db.get_course(cid)
-    else:
-        course = courses[cid] if cid in courses else courses.setdefault(cid, db.get_course(cid))
+    if cid in db.cleared_course_ids():
+        return False
+    if not AUTH_REQUIRED:
+        return True
     me = CURRENT_USER.get()
-    return bool(course and me and course["user_id"] == me["id"])
+    if courses is None:
+        owner = db.course_owner(cid)
+    else:
+        owner = courses[cid] if cid in courses else courses.setdefault(cid, db.course_owner(cid))
+    return bool(owner and me and owner == me["id"])
 
 # Parsed topic files keyed on (mtime_ns, size): agy and editors write the files directly, so the stat is the key.
 _TOPIC_CACHE: Dict[Path, Tuple[Tuple[int, int], Dict[str, Any]]] = {}
@@ -2958,6 +3146,7 @@ def read_topics_cached() -> List[Dict[str, Any]]:
 
 def _topics_version() -> str:
     stamp = "|".join(f"{p.name}:{p.stat().st_mtime_ns}" for p in sorted(TOPICS_DIR.glob("*.json")))
+    stamp += "|cleared:" + ",".join(sorted(db.cleared_course_ids()))  # clearing a sprint hides lessons, no file changes
     return f"{len(stamp)}-{hash(stamp) & 0xFFFFFFFF:08x}"
 
 @app.get("/api/topics/version")
@@ -2993,6 +3182,12 @@ def topic_opened(topic_id: str):
     if not topic or not topic_visible(topic):
         raise HTTPException(status_code=404, detail="Topic not found")
     klass = db.mark_class_opened(topic_id)
+    if klass:
+        course = db.get_course(klass["course_id"])
+        me = CURRENT_USER.get()
+        # only the course's owner opening it writes the next class (model spend), never a viewer of a shared lesson
+        if course and (not AUTH_REQUIRED or (me and course["user_id"] == me["id"])):
+            release_next_class(klass["course_id"])  # semester: start writing the class after this one
     return {"status": "ok", "classId": klass["id"] if klass else None}
 
 MATH_PRACTICE_PROMPT = """
@@ -3007,6 +3202,7 @@ Return JSON only:
   {{"type": "order_steps", "prompt": "Put the solution steps in order", "steps": ["...","...","..."], "explanation": "..."}}
 ]}}
 "compute" may use numbers, + - * / ** ( ), constants (pi, tau, e, phi), and functions: sqrt, cbrt, nthroot, exp, ln, log, log2, log10, sin, cos, tan, csc, sec, cot, asin, acos, atan, sinh, cosh, tanh, abs, sign, floor, ceil, round, clamp, gcd, lcm, mod, fact, factorial, nPr, nCr, erf, gamma.
+CRITICAL: NEVER use '^' for powers or exponents (in Python AST '^' is bitwise XOR and fails verification). ALWAYS use the Python exponent operator '**' (e.g. '2**3' or 'x**2'). Restrict all functions and constants strictly to the allowed _MATH_NAMES whitelist.
 Use radians in trig unless the prompt says degrees. Ask for decimal answers when the exact form is irrational.
 """
 
@@ -3093,6 +3289,22 @@ def safe_arith(expr: str) -> float:
         raise ValueError("too long")
     return float(ev(ast.parse(expr.replace("^", "**"), mode="eval")))
 
+def recheck_numeric(items: List[Dict[str, Any]]) -> List[bool]:
+    """Recomputes each item's "compute" expression and compares it with its stated "answer" (within 0.5%).
+    True: the answer is replaced by the computed value; False: the answer can't be trusted. Used by math practice
+    (failed items are dropped) and problem sprints (failed parts lose their automatic check)."""
+    out = []
+    for p in items:
+        try:
+            value, stated = safe_arith(str(p.get("compute") or "")), float(p.get("answer"))
+            ok = math.isfinite(value) and abs(value - stated) <= max(1e-9, 0.005 * abs(value))
+        except (ValueError, TypeError, ZeroDivisionError, OverflowError, SyntaxError):
+            ok = False
+        if ok:
+            p["answer"] = round(value, 6) if abs(value) >= 1e-3 else float(f"{value:.6g}")  # tiny physics values keep 6 digits
+        out.append(ok)
+    return out
+
 class MathPracticeRequest(BaseModel):
     topic: str
     level: Optional[str] = "high school"
@@ -3108,19 +3320,10 @@ async def math_practice(req: MathPracticeRequest):
     count = min(max(req.count or 6, 3), 10)
     data = await gemini_json(MATH_PRACTICE_PROMPT.format(count=count, topic=topic, level=(req.level or "high school")[:60]), role="lesson")
     raw = data.get("practice") if isinstance(data, dict) else None
-    checked, dropped = [], 0
-    for p in raw if isinstance(raw, list) else []:
-        if isinstance(p, dict) and p.get("type") == "numeric":
-            try:
-                value, stated = safe_arith(str(p.get("compute") or "")), float(p.get("answer"))
-                if not math.isfinite(value) or abs(value - stated) > max(1e-9, 0.005 * abs(value)):
-                    dropped += 1
-                    continue
-                p["answer"] = round(value, 6)
-            except (ValueError, TypeError, ZeroDivisionError, OverflowError, SyntaxError):
-                dropped += 1
-                continue
-        checked.append(p)
+    raw = raw if isinstance(raw, list) else []
+    numeric = [p for p in raw if isinstance(p, dict) and p.get("type") == "numeric"]
+    failed = {id(p) for p, ok in zip(numeric, recheck_numeric(numeric)) if not ok}
+    checked, dropped = [p for p in raw if id(p) not in failed], len(failed)
     items = normalize_practice(checked)
     if not items:
         raise HTTPException(status_code=502, detail="No problems passed the answer check. Try again or rephrase the topic.")
@@ -3172,7 +3375,8 @@ def submit_quiz_answer(sub: QuizSubmission):
     class_progress = db.record_attempt(sub.userId, sub.topicId, sub.questionId, sub.selected, sub.isCorrect)
     if class_progress:
         if class_progress.get("justCompleted"):
-            class_progress["adapted"] = adapt_next_class(class_progress)
+            class_progress["adapted"] = adapt_next_class(class_progress)  # first, so a released class gets its instruction
+            class_progress["released"] = release_next_class(class_progress["courseId"])
         course_event(class_progress["courseId"])
 
     rewards = None
@@ -3257,6 +3461,10 @@ def _review_question(topic_id: str, question_id: str) -> Optional[Dict[str, Any]
     q = find_quiz_question(topic, question_id)
     return {**q, "topicTitle": topic.get("title", "")} if q else None
 
+def in_cleared_course(topic_id: str) -> bool:
+    klass = db.class_for_topic(topic_id)
+    return bool(klass and klass["course_id"] in db.cleared_course_ids())
+
 class ActivityResult(BaseModel):
     topicId: str
     kind: str
@@ -3291,6 +3499,8 @@ def review_session(user_id: str):
     require_user(user_id)
     out = []
     for item in engage.due_items(user_id, today()):
+        if in_cleared_course(item["topic_id"]):
+            continue  # a cleared sprint's questions wait (it can still be restored); purging it ends them
         q = _review_question(item["topic_id"], item["question_id"])
         if not q:
             engage.drop_item(user_id, item["topic_id"], item["question_id"])  # lesson or question no longer exists
@@ -3324,9 +3534,12 @@ ADAPT_LOW, ADAPT_HIGH = 0.5, 0.9
 
 def adapt_next_class(progress: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Plan section 5: rewrite the next class the student hasn't started when they struggled (< 50%) or
-    breezed through (>= 90%), so the course doesn't overwhelm or bore them."""
+    breezed through (>= 90%), so the course doesn't overwhelm or bore them. Never in a problem sprint: each class
+    there is one of the student's own problems, not a level to adjust."""
     score = progress["score"]
     if ADAPT_LOW <= score < ADAPT_HIGH:
+        return None
+    if (db.get_course(progress["courseId"]) or {}).get("mode") == "problem_sprint":
         return None
     nxt = db.next_unstarted_class(progress["courseId"], progress["seq"])
     if not nxt or nxt["status"] == "generating":
@@ -3339,9 +3552,12 @@ def adapt_next_class(progress: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     else:
         instruction = (f"The student scored {pct}% on the previous class's quiz. Do not re-explain basics they have shown they "
                        "know: move faster, go deeper, and make the quiz and practice items harder (multi-step, less familiar setups).")
-    db.update_class(nxt["id"], status="pending", instruction=instruction, adapted_from=score)
-    db.reset_class_progress(nxt["id"], nxt.get("topic_id"))
-    queue_course_generation(progress["courseId"])
+    if nxt["status"] == "planned":  # semester class not written yet: it picks the instruction up when released
+        db.update_class(nxt["id"], instruction=instruction, adapted_from=score)
+    else:
+        db.update_class(nxt["id"], status="pending", instruction=instruction, adapted_from=score)
+        db.reset_class_progress(nxt["id"], nxt.get("topic_id"))
+        queue_course_generation(progress["courseId"])
     emit_event("CLASS_ADAPTED", {"courseId": progress["courseId"], "seq": nxt["seq"], "title": nxt["title"],
                                  "direction": "easier" if score < ADAPT_LOW else "harder", "score": score})
     return {"seq": nxt["seq"], "direction": "easier" if score < ADAPT_LOW else "harder"}
@@ -3359,7 +3575,8 @@ def get_agy_events(since: int = -1):
     return {"events": [{k: v for k, v in e.items() if k != "owner"} for e in events], "cursor": cursor, "timestamp": time.time()}
 
 PRIVATE_EVENT_TYPES = {"COURSE_UPDATED", "CLASS_ADAPTED", "NEW_MESSAGE", "JOB_UPDATE", "SWITCH_TOPIC", "SWITCH_TAB",
-                       "SWITCH_STUDIO_MODE", "SET_SIM_CONFIG", "MATH_GRAPH", "MATH_PREVIEW", "QUIZ_SUBMITTED", "CODE_PROPOSAL"}
+                       "SWITCH_STUDIO_MODE", "SET_SIM_CONFIG", "MATH_GRAPH", "MATH_PREVIEW", "GEOMETRY_PREVIEW", "QUIZ_SUBMITTED", "CODE_PROPOSAL"}
+EVENT_TYPES = PRIVATE_EVENT_TYPES | {"TOPIC_UPDATED", "TOPIC_CREATED"}
 
 @app.post("/api/agy/events")
 def push_agy_event(event: AgyEventModel):
@@ -3424,6 +3641,10 @@ def friendly_ai_error(e: Exception) -> str:
         return "No Gemini API key: add api_KEY=... to SciEdu-Studio/.env and restart the backend."
     if "429" in text or "quota" in text.lower() or "RESOURCE_EXHAUSTED" in text:
         return "Gemini quota exhausted for every fallback model. Try again in a minute."
+    if "nodename nor servname" in text or "gaierror" in text.lower() or "Errno 8" in text:
+        return "Network connection to Gemini API failed: unable to resolve host. Check your internet connection."
+    if isinstance(e, json.JSONDecodeError) or "JSONDecodeError" in type(e).__name__ or "Expecting" in text or "delimiter" in text:
+        return "The AI returned a malformed response while planning the course. Click 'Retry planning' to try again."
     return text[:300]
 
 def _job_visible(job: Dict[str, Any]) -> bool:
@@ -3472,20 +3693,193 @@ def repair_json_escapes(text: str) -> str:
         i += 1
     return "".join(out)
 
+def strip_trailing_commas(text: str) -> str:
+    """Removes trailing commas before } or ] outside string literals."""
+    out, in_str, i = [], False, 0
+    while i < len(text):
+        c = text[i]
+        if in_str:
+            if c == "\\" and i + 1 < len(text):
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+            out.append(c)
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == ",":
+            j = i + 1
+            while j < len(text) and text[j] in " \t\r\n":
+                j += 1
+            if j < len(text) and text[j] in "}]":
+                i += 1
+                continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+def repair_inner_quotes(text: str) -> str:
+    """Escapes a `"` inside a string that is not followed by `,` `}` `]` or (for keys) `:`;
+    distinguishes keys vs values so colons inside string values (like case "A": or formulas)
+    do not false-close strings."""
+    def closes(rest: str, top_type: str, is_key: bool) -> bool:
+        if not rest:
+            return True
+        n = rest[0]
+        if is_key:
+            return n == ":"
+        if n == ",":
+            after = rest[1:].lstrip()
+            if not after:
+                return True
+            if top_type == "{":
+                return after[0] in ('"', '}')
+            if top_type == "[":
+                return after[0] in '"{[-0123456789tfn' or after[0] == "]"
+            return True
+        if n == "}" and top_type == "{":
+            return True
+        if n == "]" and top_type == "[":
+            return True
+        if not top_type:
+            return n in ",}]"
+        return False
+
+    out, stack, in_str, i = [], [], False, 0
+    while i < len(text):
+        c = text[i]
+        if in_str and c == "\\" and i + 1 < len(text):
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+
+        if not in_str:
+            if c == "{":
+                stack.append({"type": "{", "state": "KEY"})
+            elif c == "[":
+                stack.append({"type": "[", "state": "VALUE"})
+            elif c == "}":
+                if stack and stack[-1]["type"] == "{":
+                    stack.pop()
+            elif c == "]":
+                if stack and stack[-1]["type"] == "[":
+                    stack.pop()
+            elif c == ":":
+                if stack and stack[-1]["type"] == "{":
+                    stack[-1]["state"] = "VALUE"
+            elif c == ",":
+                if stack and stack[-1]["type"] == "{":
+                    stack[-1]["state"] = "KEY"
+                elif stack and stack[-1]["type"] == "[":
+                    stack[-1]["state"] = "VALUE"
+
+        if c == '"':
+            top_type = stack[-1]["type"] if stack else ""
+            is_key = (stack[-1]["type"] == "{" and stack[-1]["state"] == "KEY") if stack else False
+            if not in_str:
+                in_str = True
+            elif closes(text[i + 1:].lstrip(), top_type, is_key):
+                in_str = False
+            else:
+                out.append('\\"')
+                i += 1
+                continue
+        elif in_str and c == "\n":
+            out.append("\\n")
+            i += 1
+            continue
+
+        out.append(c)
+        i += 1
+
+    return "".join(out)
+
+def repair_backward_quotes(text: str, max_attempts: int = 15) -> str:
+    """If json.loads throws JSONDecodeError, scans backwards from e.pos to find and escape
+    the unescaped quote that prematurely closed a string, then retries."""
+    def is_opening_quote(s: str, idx: int) -> bool:
+        k = idx - 1
+        while k >= 0 and s[k] in " \t\r\n":
+            k -= 1
+        return k >= 0 and s[k] in "{[:,"
+
+    s = text
+    for _ in range(max_attempts):
+        try:
+            json.loads(s)
+            return s
+        except json.JSONDecodeError as e:
+            pos = e.pos
+            idx = pos - 1
+            found = -1
+            while idx >= 0:
+                if s[idx] == '"':
+                    slashes = 0
+                    k = idx - 1
+                    while k >= 0 and s[k] == "\\":
+                        slashes += 1
+                        k -= 1
+                    if slashes % 2 == 0 and not is_opening_quote(s, idx):
+                        found = idx
+                        break
+                idx -= 1
+            if found == -1:
+                break
+            s = s[:found] + '\\"' + s[found + 1:]
+    return s
+
 def _parse_json_reply(text: str) -> Any:
     text = (text or "").strip()
-    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)
-    if fence:
-        text = fence.group(1)
-    return json.loads(repair_json_escapes(text))
+    whole = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)
+    m = None if whole or text[:1] in "{[" else re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if whole:  # a fence around the whole reply; a ``` inside a JSON string (code in a lesson) is content
+        text = whole.group(1)
+    elif m:
+        text = m.group(1).strip()
+    elif text[:1] not in "{[":
+        obj_start = text.find("{")
+        arr_start = text.find("[")
+        if obj_start != -1 and (arr_start == -1 or obj_start < arr_start):
+            obj_end = text.rfind("}")
+            if obj_end > obj_start:
+                text = text[obj_start:obj_end + 1]
+        elif arr_start != -1:
+            arr_end = text.rfind("]")
+            if arr_end > arr_start:
+                text = text[arr_start:arr_end + 1]
+
+    fixed = repair_json_escapes(text)
+    fixed = strip_trailing_commas(fixed)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        repaired = repair_inner_quotes(fixed)
+        repaired = strip_trailing_commas(repaired)
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            backward = repair_backward_quotes(repaired)
+            return json.loads(backward)
 
 async def gemini_json(prompt: str, temperature: float = 0.4, role: Optional[str] = None) -> Any:
-    response = await acall_gemini(
-        contents=prompt,
-        role=role,
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature),
-    )
-    return _parse_json_reply(response.text)
+    config = types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature)
+    response = await acall_gemini(contents=prompt, role=role, config=config)
+    try:
+        return _parse_json_reply(response.text)
+    except json.JSONDecodeError as e:
+        # one retry: show the model where its JSON broke instead of failing the whole job
+        snippet = (e.doc or "")[max(0, e.pos - 80):e.pos + 80]  # e.pos indexes the repaired text, not the raw reply
+        retry = (f"{prompt}\n\nYOUR PREVIOUS REPLY WAS NOT VALID JSON ({e.msg} near: {snippet!r}). "
+                 "Return the complete JSON again; escape every double quote inside a string as \\\" "
+                 "and every backslash as \\\\.")
+        response = await acall_gemini(contents=retry, role=role, config=config)
+        return _parse_json_reply(response.text)
 
 def _topic_brief(topic: Dict[str, Any], limit: int = 5000) -> str:
     cheat = "; ".join(f"{c.get('label')}: {c.get('formula')}" for c in topic.get("cheatSheet") or [])
@@ -3525,12 +3919,24 @@ FOCUS FOR THIS SIMULATION: {focus or 'the central concept of the topic'}
     else:
         prompt = f"""
 You design interactive teaching simulations for &.edu. Output ONE JSON object in the SimSpec v1
-format below and nothing else. Choose "particles" for anything that moves (mechanics, orbits, charges in
-fields, oscillators, collisions, fluids as particles) and "graph" for relationships and fields (waves,
-interference, gas laws, distributions, circuits over time, any y=f(x,t)). Give 2-5 sliders for the
-quantities a student should experiment with, use realistic SI values, keep the world box sized so motion
-stays visible, and add readouts/series that expose the key invariant (energy, momentum, period...).
-The description must tell the student what to try with the sliders and what to notice.
+format below and nothing else.
+
+PHYSICS SIMULATION ARCHITECTURE (MANDATORY FOR ALL PHYSICS CONCEPTS):
+For ANY physics concept that has a physical scenario (mechanics, kinematics, statics, dynamics, energy, momentum,
+gravity, pendulums, orbits, rotation, vibrations, waves on strings, electrostatics, Lorentz magnetic forces, collisions,
+elasticity, tensile/compressive stress, thermodynamics/piston chambers, fluid drag/buoyancy):
+- ALWAYS dynamically generate a real, working physical apparatus using `kind: "particles"` synthesized on the fly from the topic context.
+- NEVER output a static/dry function graph or abstract toy point-masses when a physical scenario exists.
+- Construct the working apparatus using SimSpec primitives:
+  * Fixed anchors, walls, ceilings, floors ("fixed": true, ground: true/false, walls: true/false)
+  * Rigid structural members & constraints ("links": [{{"type": "rod", "a": "body1", "b": "body2", "length": "L"}}])
+  * Elastic springs, cables, suspensions ("forces": [{{"type": "spring", "a": "body1", "b": "body2", "k": "k", "rest": "L", "damping": "d"}}])
+  * Moving bodies, masses, projectiles, charged particles, carts, pendulums, weights
+  * External fields & interactions: gravity, custom fields ("forces": [{{"type": "custom", ...}}], uniform forces)
+  * Enable physical overlays: set "overlays": {{"fbd": true, "stress": true}} so free-body diagram force vectors and stress states (red tension, blue compression) are live-rendered.
+  * Interactive sliders ("params"): 2-5 meaningful physical parameters with clear SI units, labels, and ranges.
+  * Live graphs & readouts: If the topic involves graphs (e.g. Energy vs time, velocity vs time, stress vs strain, position vs time), include them via "series" (which plots live time-series graphs below the physical canvas) and "readouts", so students get BOTH the interactive physical apparatus AND the live quantitative graphs simultaneously!
+- `kind: "graph"` is ONLY reserved for purely abstract mathematical functions with no physical bodies or motion.
 
 {SPEC_GUIDE}
 
@@ -3891,6 +4297,18 @@ def preview_math_sim(body: SpecBody):
     emit_event("MATH_PREVIEW", {"spec": spec})
     return {"status": "shown", "spec": spec}
 
+@app.post("/api/ui/geometry")
+def preview_geometry_sim(body: SpecBody):
+    """Shows an interactive geometry or free-body diagram in Math > Sim kit without saving it to a topic."""
+    spec_dict = dict(body.spec)
+    if spec_dict.get("kind") not in ("geometry", "fbd"):
+        spec_dict["kind"] = "geometry"
+    spec, errors = validate_spec(spec_dict)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    emit_event("GEOMETRY_PREVIEW", {"spec": spec})
+    return {"status": "shown", "spec": spec}
+
 
 @app.get("/api/topics/{topic_id}/flashcards")
 def get_topic_flashcards(topic_id: str):
@@ -3988,7 +4406,7 @@ TEXT:
 
 @app.get("/api/advisor/catalog")
 def catalog_search(q: str = "", dept: str = "", limit: int = 40):
-    return {"stats": advisor.stats(), "courses": advisor.search(q, dept, limit)}
+    return {"stats": advisor.stats(), "courses": advisor.search(q, dept, limit), "total": advisor.search_count(q, dept)}
 
 @app.get("/api/advisor/catalog/{code}")
 def catalog_course(code: str):
@@ -3999,7 +4417,9 @@ def catalog_course(code: str):
 
 @app.get("/api/advisor/catalog/{code}/sections")
 def catalog_course_sections(code: str, term: str = ""):
-    return {"code": code, "sections": advisor.list_sections(code=code, term=term)}
+    # `sections` (every term, or `term`) stays for older clients; the page shows only next_term_sections as scheduled
+    return {"code": code, "sections": advisor.list_sections(code=code, term=term),
+            **advisor_chat.section_summary(code)}
 
 @app.get("/api/advisor/classes")
 @app.get("/api/advisor/sections")
@@ -4008,8 +4428,20 @@ def catalog_classes(code: str = "", dept: str = "", term: str = "", q: str = "",
         lim = min(max(int(limit), 1), 200)
     except (ValueError, TypeError):
         lim = 50
+    wm = advisor_chat.wm_advising
+    nxt = wm.next_term()
+    word = term.strip().lower()
+    term = nxt if word == "next" else ("" if word == "all" else term.strip())  # "next"/"all" let callers ask explicitly
     secs = advisor.list_sections(code=code, dept=dept, term=term, q=q, limit=lim)
-    return {"sections": secs, "count": len(secs), "stats": advisor.stats()}
+    out = {"sections": secs, "count": len(secs), "stats": advisor.stats(),
+           "next_term": nxt, "next_term_name": wm.term_name(nxt)}
+    name = out["next_term_name"]
+    if term != nxt:
+        out["note"] = (f"These results are not limited to {name}: rows from other terms are history and their CRNs "
+                       f"are not {name} CRNs. A course is offered in {name} only if it has a {name} section.")
+    elif not secs:
+        out["note"] = f"No {name} sections matched. Use term=all to see other terms (history only, not {name})."
+    return out
 
 @app.post("/api/advisor/catalog/import")
 async def catalog_import(body: CatalogImport):
@@ -4023,6 +4455,7 @@ async def catalog_import(body: CatalogImport):
     if text:
         rows += advisor.parse_catalog_text(text)
         if not rows and body.useModel:
+            require_upload_consent()
             for chunk in [text[i:i + 30000] for i in range(0, min(len(text), 120000), 30000)]:
                 data = await gemini_json(CATALOG_EXTRACT_PROMPT.format(text=chunk), role="lesson")
                 rows += [r for r in (data.get("courses") or []) if isinstance(r, dict)] if isinstance(data, dict) else []
@@ -4084,8 +4517,7 @@ async def advisor_ask(user_id: str, req: AdvisorAsk):
     try:
         response = await acall_gemini(
             contents=contents, role="planner",
-            config=types.GenerateContentConfig(temperature=0.3, system_instruction=advisor_chat.SYSTEM_PROMPT.format(
-                context=context, catalog_note=advisor_chat.catalog_note())),
+            config=types.GenerateContentConfig(temperature=0.3, system_instruction=advisor_chat.render_system_prompt(context)),
         )
     except Exception as e:
         raise HTTPException(status_code=503, detail=friendly_ai_error(e))
@@ -4099,6 +4531,62 @@ async def advisor_ask(user_id: str, req: AdvisorAsk):
         if course_info:
             suggested.append(course_info)
     return {"reply": reply, "courses": codes, "suggested_courses": suggested}
+
+
+# ---------------------------------------------------------------------------
+# STUDIO LAUNCH (the planning cart's routes live in advisor_cart.py, mounted near the end of this file)
+# ---------------------------------------------------------------------------
+
+class LaunchCourseRequest(BaseModel):
+    code: str
+    term: Optional[str] = ""
+    plan_id: Optional[str] = None
+
+
+@app.post("/api/advisor/{user_id}/launch-course")
+def launch_planned_course(user_id: str, req: LaunchCourseRequest):
+    require_user(user_id)
+    rate_limit("course")
+    code = req.code.strip().upper()
+    course_info = advisor.get_course(code) or {"code": code, "title": code, "description": "", "syllabus": ""}
+
+    title = code
+    full_title = course_info.get("title") or code
+    goal = f"Master {code}: {full_title}"
+    materials_parts = [
+        f"# {code}: {full_title}",
+        course_info.get("description", ""),
+        course_info.get("syllabus", ""),
+    ]
+    materials_text = "\n\n".join(p for p in materials_parts if p.strip())
+
+    # Create new studio course
+    new_course = db.create_course(
+        user_id=user_id,
+        title=title,
+        goal=goal,
+        materials_text=materials_text,
+        filenames=[]
+    )
+    cid = new_course["id"]
+
+    # Start background diagnostic & syllabus generation job
+    try:
+        job = start_plan_job(cid, n_questions=8, class_count=4)
+        job_id = job.get("id")
+    except Exception:
+        job_id = None
+
+    # link the new course to the planning cart row, when the course is in the cart for that term
+    advisor_cart.set_studio_course(user_id, req.term or wm_advising.next_term(), code, cid)
+
+    return {
+        "course_id": cid,
+        "job_id": job_id,
+        "title": title,
+        "redirect_url": f"/courses?open={cid}"
+    }
+
 
 
 class ClassifyCatalogRequest(BaseModel):
@@ -4214,6 +4702,7 @@ async def check_drawing(body: DrawingCheck):
         prompt=body.prompt[:1500], criteria="\n".join(f"- {c}" for c in criteria),
         reference=f"Reference (what a correct drawing contains; do not quote it): {body.reference[:1500]}\n" if body.reference else "")
     part = types.Part.from_bytes(data=raw, mime_type=f"image/{m.group(1)}")
+    # Not gated by upload consent: a drawing made in the app isn't an uploaded file; the privacy notice discloses it.
     response = await acall_gemini(contents=[part, prompt], role="lesson",
                                   config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2))
     try:
@@ -4223,7 +4712,7 @@ async def check_drawing(body: DrawingCheck):
     if isinstance(data, list) and data and isinstance(data[0], dict):
         data = data[0] if "criteria" in data[0] or "score" in data[0] else {"criteria": data}
     if not isinstance(data, dict):
-        print("[draw check] unusable reply:", (response.text or "")[:400])
+        print(f"[draw check] unusable reply ({len(response.text or '')} chars)")
         raise HTTPException(status_code=502, detail="The checker returned nothing usable. Try again.")
     rows = [c for c in (data.get("criteria") or []) if isinstance(c, dict)]
     met = sum(1 for c in rows if c.get("met") is True)
@@ -4313,8 +4802,10 @@ class CourseRequest(BaseModel):
     filenames: Optional[List[str]] = []
     num_questions: Optional[int] = 8
     class_count: Optional[int] = None
-    mode: Optional[str] = "learn"          # learn | test_prep
+    mode: Optional[str] = "learn"          # learn | test_prep | readiness | semester | problem_sprint | thematic_reference
     exam_date: Optional[str] = None        # YYYY-MM-DD, test prep only
+    weeks: Optional[int] = None            # semester only: how many weeks the plan spans (1-20)
+    keep: Optional[bool] = False           # problem_sprint only: keep it in My courses after the last problem
 
 class ExtendRequest(BaseModel):
     goal: Optional[str] = ""
@@ -4344,10 +4835,19 @@ def require_course(course_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Course not found")
     return course
 
+CLEARED_DETAIL = "This problem sprint is cleared. Restore the course first."
+
+def require_not_cleared(course: Dict[str, Any]) -> Dict[str, Any]:
+    """A cleared sprint is waiting to be purged: nothing is rewritten or generated for it until it is restored."""
+    if course.get("status") == "cleared":
+        raise HTTPException(status_code=409, detail=CLEARED_DETAIL)
+    return course
+
 class AuthRequest(BaseModel):
     name: str
     password: str
     adult: Optional[bool] = None   # required on sign-up: the Gemini API terms require users to be 18+
+    privacy: Optional[bool] = None  # required on sign-up: the privacy notice (PRIVACY_VERSION) was accepted
 
 def _clean_name(raw: str) -> str:
     name = " ".join((raw or "").split())[:40]
@@ -4363,13 +4863,16 @@ def register(req: AuthRequest, request: Request):
     name = _clean_name(req.name)
     if req.adult is not True:
         raise HTTPException(status_code=422, detail="This service uses the Gemini API, which is for people 18 or older. Confirm your age to continue.")
+    if req.privacy is not True:
+        raise HTTPException(status_code=422, detail="Please accept the privacy notice.")
     if len(req.password) < 8:
         raise HTTPException(status_code=422, detail="Use a password of at least 8 characters.")
     # a name-only profile (from local use) is not up for grabs either: whoever typed its name first would own its courses
     if db.get_user_by_name(name):
         raise HTTPException(status_code=409, detail="That name is taken. Sign in, or choose another name.")
     user = db.create_account(name, req.password)
-    return {"token": db.create_session(user["id"]), "user": user}
+    db.set_consent(user["id"], "privacy", PRIVACY_VERSION)
+    return {"token": db.create_session(user["id"]), "user": user, "privacyAccepted": True}
 
 @app.post("/api/auth/login")
 def login(req: AuthRequest, request: Request):
@@ -4379,7 +4882,8 @@ def login(req: AuthRequest, request: Request):
     user = db.get_user_by_name(_clean_name(req.name))
     if not user or not db.check_password(req.password, user.get("password_hash")):
         raise HTTPException(status_code=401, detail="Wrong name or password.")
-    return {"token": db.create_session(user["id"]), "user": {"id": user["id"], "name": user["name"]}}
+    return {"token": db.create_session(user["id"]), "user": {"id": user["id"], "name": user["name"]},
+            "privacyAccepted": user.get("privacy_version") == PRIVACY_VERSION}
 
 @app.post("/api/auth/logout")
 def logout(request: Request):
@@ -4392,14 +4896,185 @@ def logout(request: Request):
 def me():
     return {"user": CURRENT_USER.get(), "authRequired": AUTH_REQUIRED}
 
+# ---------------------------------------------------------------- privacy: consent, export, delete (PRIVACY_AND_DEPLOYMENT.md §3)
+class ConsentRequest(BaseModel):
+    kind: str  # privacy | upload
+
+class DeleteAccountRequest(BaseModel):
+    confirmName: str
+    password: Optional[str] = None  # required with accounts on
+
+def require_upload_consent():
+    """Accounts mode: an uploaded file or image goes to Gemini only after its owner agreed to that once."""
+    if not AUTH_REQUIRED:
+        return
+    me = CURRENT_USER.get()
+    if not me or not db.get_consent(me["id"]).get("uploadConsentAt"):
+        raise HTTPException(status_code=428, detail="Confirm that this file may be sent to Google Gemini before uploading.")
+
+@app.post("/api/users/{user_id}/consent")
+def record_consent(user_id: str, body: ConsentRequest):
+    require_user(user_id)
+    if body.kind not in ("privacy", "upload"):
+        raise HTTPException(status_code=422, detail="Consent kind must be 'privacy' or 'upload'.")
+    db.set_consent(user_id, body.kind, PRIVACY_VERSION if body.kind == "privacy" else None)
+    consent = db.get_consent(user_id)
+    return {"consent": consent, "privacyAccepted": consent["privacyVersion"] == PRIVACY_VERSION}
+
+
+class StudentNotesRequest(BaseModel):
+    notes: Optional[str] = Field(default="", max_length=50_000)
+    notes_text: Optional[str] = Field(default="", max_length=50_000)
+
+
+@app.get("/api/users/{user_id}/notes")
+def get_user_notes(user_id: str):
+    require_user(user_id)
+    notes = db.get_student_notes(user_id)
+    return {"user_id": user_id, "notes": notes, "notes_text": notes}
+
+
+@app.put("/api/users/{user_id}/notes")
+def update_user_notes(user_id: str, req: StudentNotesRequest):
+    require_user(user_id)
+    raw_text = req.notes_text if req.notes_text is not None and req.notes_text != "" else (req.notes or "")
+    text = (raw_text or "")[:50_000]
+    res = db.save_student_notes(user_id, text)
+    return {"saved": True, "user_id": user_id, "notes": res["notes_text"], "notes_text": res["notes_text"], "updated_at": res["updated_at"]}
+
+
+def course_topic_files(course_ids) -> Dict[Path, str]:
+    """Topic files (path -> topic id) whose source.courseId is one of these courses, from the topic cache."""
+    wanted = set(course_ids)
+    if not wanted:
+        return {}
+    read_topics_cached()  # brings _TOPIC_CACHE up to date with the folder
+    with _topic_cache_lock:
+        items = list(_TOPIC_CACHE.items())
+    out = {}
+    for path, (_, t) in items:
+        source = t.get("source") if isinstance(t, dict) else None
+        if isinstance(source, dict) and source.get("courseId") in wanted:
+            out[path] = str(t.get("id") or path.stem)
+    return out
+
+def _unlink_topic(path: Optional[Path], topic_id: str) -> int:
+    """Removes a topic file and its notes; returns how many files were there."""
+    removed = 0
+    paths = [path] if path else []
+    if TOPIC_ID_RE.fullmatch(topic_id or ""):
+        paths += [TOPICS_DIR / f"{topic_id}.json", NOTES_DIR / f"{topic_id}.md"]
+    for p in dict.fromkeys(paths):
+        if p.exists():
+            removed += 1
+        p.unlink(missing_ok=True)
+        with _topic_cache_lock:
+            _TOPIC_CACHE.pop(p, None)
+    return removed
+
+def purge_course_artifacts(course_id: str) -> int:
+    """Deletes the topic files and notes of one course's lessons (found by source.courseId). Lesson rows stay."""
+    return sum(_unlink_topic(path, tid) for path, tid in course_topic_files([course_id]).items())
+
+def _user_quiz_log(user_id: str, drop: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+    """This user's quiz_results.jsonl records; with drop=True the file is rewritten without them."""
+    mine, kept = [], []
+    with _file_lock:
+        if not RESULTS_FILE.exists():
+            return [], 0
+        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    kept.append(line)
+                    continue
+                if isinstance(rec, dict) and rec.get("userId") == user_id:
+                    mine.append(rec)
+                else:
+                    kept.append(line)
+        if drop and mine:
+            tmp = RESULTS_FILE.with_suffix(RESULTS_FILE.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            os.replace(tmp, RESULTS_FILE)
+    return mine, len(mine)
+
+@app.get("/api/users/{user_id}/export")
+def export_my_data(user_id: str):
+    """Everything stored about this user as one JSON download. No password, session or token hashes."""
+    from fastapi.responses import JSONResponse
+    require_user(user_id)
+    data = db.export_user(user_id)
+    for c in data["courses"]:  # sprint answers and unrevealed steps stay locked in the export too
+        c["classes"] = [sprint.public_class(k) for k in c.get("classes") or []]
+    files = course_topic_files(c["id"] for c in data["courses"])
+    topics = {}
+    for path, tid in files.items():
+        hit = _TOPIC_CACHE.get(path)
+        if hit:
+            topics[tid] = hit[1]
+    notes = {}
+    for tid in sorted(set(topics) | {lesson["topic_id"] for lesson in data["lessons"]}):
+        note = NOTES_DIR / f"{tid}.md"
+        if TOPIC_ID_RE.fullmatch(tid) and note.exists():
+            notes[tid] = note.read_text(encoding="utf-8", errors="replace")
+    quiz_log, _ = _user_quiz_log(user_id)
+    body = {"format": "andedu-export", "version": 1, "exportedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            **data, "topics": topics, "notes": notes, "quizLog": quiz_log}
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "", user_id)
+    return JSONResponse(body, headers={
+        "Content-Disposition": f'attachment; filename="andedu-export-{safe_id}-{today()}.json"',
+        "Cache-Control": "no-store"})
+
+@app.post("/api/auth/delete-account")
+@app.post("/api/users/{user_id}/delete")
+def delete_account(body: DeleteAccountRequest, request: Request, user_id: Optional[str] = None):
+    """Deletes the user, their courses, lessons, progress, files and quiz log lines. Shared library lessons stay.
+    Accounts mode: the signed-in user, confirmed by password. Personal machine: /api/users/{id}/delete."""
+    if AUTH_REQUIRED:
+        auth_rate_limit(request)
+        user_id = user_id or CURRENT_USER.get()["id"]
+    elif not user_id:
+        raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
+    user = require_user(user_id)
+    if " ".join((body.confirmName or "").split()).casefold() != " ".join(user["name"].split()).casefold():
+        raise HTTPException(status_code=422, detail="Type your name exactly as it appears on your account to confirm.")
+    if AUTH_REQUIRED:
+        if not db.check_password(body.password or "", user.get("password_hash")):
+            raise HTTPException(status_code=401, detail="Wrong password")
+        if user_id in ADMINS:
+            raise HTTPException(status_code=409, detail="Remove your id from SCIEDU_ADMINS before deleting this account.")
+    course_ids = db.user_course_ids(user_id)
+    topic_ids = set(db.user_topic_ids(course_ids))
+    files = course_topic_files(course_ids)
+    removed_files = sum(_unlink_topic(path, tid) for path, tid in files.items())
+    removed_files += sum(_unlink_topic(None, tid) for tid in topic_ids - set(files.values()))
+    counts = db.delete_user(user_id)
+    removed_files += sum(purge_course_artifacts(cid) for cid in course_ids)  # a class finishing mid-delete
+    _, counts["quizLogLines"] = _user_quiz_log(user_id, drop=True)
+    counts["files"] = removed_files
+    gone_jobs = {jid for jid, job in list(JOBS.items()) if job.get("owner") == user_id}
+    for cid in course_ids:
+        gone_jobs.add(ACTIVE_COURSE_JOBS.pop(cid, None))
+    counts["jobs"] = sum(JOBS.pop(jid, None) is not None for jid in gone_jobs if jid)
+    with _events_lock:
+        ui_events_queue[:] = [e for e in ui_events_queue if e.get("owner") != user_id]
+    emit_event("TOPIC_UPDATED", {"autoSelect": False})
+    return {"status": "deleted", "removed": counts}
+
 def public_course(course: Dict[str, Any]) -> Dict[str, Any]:
-    """Course + classes for the UI. Diagnostic answer keys stay hidden until the student submits."""
+    """Course + classes for the UI. Diagnostic answer keys stay hidden until the student submits; problem sprint
+    steps and answers only as far as the student unlocked them (sprint.public_class)."""
     out = {k: v for k, v in course.items() if k != "materials_text"}
     out["workspace"] = course_workspace(course)
     if course["status"] in ("planning", "diagnostic_ready"):
         out["diagnostic"] = [{k: v for k, v in q.items() if k not in ("correctAnswer", "explanation")}
                              for q in course.get("diagnostic") or []]
-    out["classes"] = db.list_classes(course["id"])
+    classes = db.list_classes(course["id"])
+    out["classes"] = [sprint.public_class(k) for k in classes]
+    out["plannedCount"] = sum(k["status"] == "planned" for k in out["classes"])  # semester: outlined, written later
+    out["sprint"] = sprint.course_summary(course, classes)
     job = JOBS.get(course.get("job_id") or "")
     out["job"] = job and {k: job.get(k) for k in ("id", "status", "step", "progress", "error")}
     return out
@@ -4425,7 +5100,7 @@ Return JSON only:
 Rules:
 - 3 to 8 concepts that together cover the materials; every concept gets at least 1 question.
 - Exactly {n} questions, mixing recall, application (numbers with units) and conceptual traps.
-- correctAnswer is the 0-based index into options. Vary its position.
+- correctAnswer is the 0-based index into options (0, 1, 2, or 3). Enforce a balanced correctAnswer distribution evenly across 0, 1, 2, and 3 across the generated question set (do NOT default or skew toward 0).
 - Use LaTeX inside $...$ for every formula and variable.
 - Stay faithful to the materials; do not test things they don't cover.
 
@@ -4474,9 +5149,9 @@ Course materials are the source of truth:
 Return JSON only:
 {{"title": "{title}", "category": "{subject}", "difficulty": "{difficulty}",
   "summary": "1-2 sentences addressed to the student: what this class gives them and which earlier gap it fixes",
-  "markdownContent": "Full Markdown lesson: recap link to the previous class, intuition first, then step-by-step explanation/derivation with LaTeX ($...$ and $$...$$), one fully worked example with numbers and units, a common-mistakes section aimed at the misses above, and a short summary. 600-1200 words.",
+  "markdownContent": "Full Markdown lesson: recap link to the previous class, intuition first, then step-by-step explanation/derivation with LaTeX ($...$ and $$...$$), one fully worked example with numbers and units, a common-mistakes section aimed at the misses above, and a short summary. 600-1000 words.",
   "cheatSheet": [{{"label": "...", "formula": "LaTeX without $"}}],
-  "mermaid": "graph TD; ... concept map. Quote EVERY node label A[\\"label\\"] and edge label -->|\\"label\\"|; no LaTeX, $, braces or backslashes inside the diagram; or empty string",
+  "mermaid": "graph TD; ... concept map. Quote EVERY node label like A[\\"label\\"] and edge label like -->|\\"label\\"|; no LaTeX, $, braces or backslashes inside the diagram; or empty string",
   "quiz": [{{"id": "q1", "question": "...", "options": ["a","b","c","d"], "correctAnswer": 0, "hint": "...", "explanation": "..."}}],
   "practice": [
     {{"type": "fill_blank", "prompt": "sentence or equation with ___", "options": ["...","...","...","..."], "answer": "exact option text", "explanation": "..."}},
@@ -4484,7 +5159,7 @@ Return JSON only:
     {{"type": "numeric", "prompt": "a calculation with given values", "answer": 4.2, "tolerance": 0.02, "unit": "m/s", "explanation": "worked solution"}},
     {{"type": "true_false", "prompt": "a statement targeting a misconception", "answer": false, "explanation": "..."}}
   ]}}
-Write 5 quiz questions that check the objectives (vary the correctAnswer position) and 4-6 practice items using all four types.
+Write 5 quiz questions that check the objectives (vary the correctAnswer position evenly among 0, 1, 2, 3) and 4-6 practice items using all four types.
 Where drawing shows understanding (free-body diagram, circuit, graph sketch, cell, molecule, map, concept map, timeline),
 add 1 practice item of type "draw": {{"type": "draw", "prompt": "what to draw", "criteria": ["3-5 checkable things the drawing
 must show"], "reference": "what a correct drawing contains (hidden from the student)", "background": "grid|axes|blank"}}.
@@ -4494,6 +5169,8 @@ If the course involves programming (Python, algorithms, data), add 1-2 items of 
     Python only, standard library only, tests are plain assert lines covering normal and edge cases.
 Every variable, formula, exponent and unit with a power (e.g. $v_0$, $9.80\\,\\text{{m/s}}^2$) is LaTeX inside $...$, including inside
 options, steps, hints and answers; never write bare x^2 or v_0.
+Mermaid quoting rules: Quote EVERY node label like A["label"] and edge label like -->|"label"|.
+Completion ceiling: Keep output strictly between 600-1000 words; strictly complete JSON ending with }}.
 """
 
 TEST_PREP_SYLLABUS = """
@@ -4552,21 +5229,73 @@ READINESS_SYLLABUS = """
   assumes. Plan only bridge classes for gaps (2-4 classes), each ending with what the target course will build on.
 """
 
-def mode_rules(course: Dict[str, Any]) -> str:
+SEMESTER_SYLLABUS = """
+- This is a whole SEMESTER course over {weeks} weeks (about {per_week} classes a week). Group the classes into
+  3-6 units of related topics, in order.
+- After each unit add one review class (kind "review"); about halfway add a midterm review (kind "midterm"); the
+  LAST class is a final review of the whole course (kind "final"). Every other class is kind "lesson".
+- Keep every class compact (a short title and at most 2 objectives) so the whole plan fits in one reply.
+- Every class also has "week" (1-{weeks}, never decreasing), "unit" (short unit name) and "kind":
+  {{"title": "...", "concepts": [...], "objectives": [...], "week": 1, "unit": "Kinematics", "kind": "lesson"}}
+"""
+
+SEMESTER_EXTEND = """
+- This is a SEMESTER course: the new classes form a new unit that continues after the existing weeks. End the
+  unit with one review class (kind "review"). Keep every class compact (a short title, at most 2 objectives).
+- Every class also has "week" (from {week} on), "unit" (short unit name) and "kind" ("lesson" or "review").
+"""
+
+SEMESTER_KINDS = ("lesson", "review", "midterm", "final")
+SEMESTER_CLASS = {
+    "lesson": "SEMESTER COURSE: this is week {week} of {weeks}{unit}.",
+    "review": ("UNIT REVIEW{unit}: no new material. Recap the unit's earlier classes, connect them, fix the mistakes "
+               "students make most, and write quiz questions that mix every class of the unit."),
+    "midterm": ("MIDTERM REVIEW: no new material. Recap every earlier class, show how they connect, and write 8 mixed "
+                "exam-style quiz questions across all of them instead of 5."),
+    "final": ("FINAL REVIEW of the whole course: no new material. Summarise every unit, give a short exam-strategy "
+              "briefing, and write 10 mixed exam-style quiz questions across the whole course instead of 5."),
+}
+
+def semester_weeks(course: Dict[str, Any]) -> int:
+    return min(max(int(course.get("weeks") or 0) or -(-(course.get("plan_classes") or 24) // 2), 1), 20)
+
+def mode_rules(course: Dict[str, Any], extend_from_week: Optional[int] = None) -> str:
+    if course.get("mode") in sprint.MODES:  # problem sprint (its own planning prompt) | reference-only materials
+        return "\n" + sprint.mode_rules(course)
     if course.get("mode") == "readiness":
         return "\n" + READINESS_SYLLABUS.format(target=course.get("title", "the target course")).strip("\n")
+    if course.get("mode") == "semester":
+        if extend_from_week is not None:
+            return "\n" + SEMESTER_EXTEND.format(week=extend_from_week).strip("\n")
+        weeks = semester_weeks(course)
+        per_week = f"{round((course.get('plan_classes') or 24) / weeks, 1):g}"
+        return "\n" + SEMESTER_SYLLABUS.format(weeks=weeks, per_week=per_week).strip("\n")
     if course.get("mode") != "test_prep":
         return ""
     exam = f" (exam on {course['exam_date']})" if course.get("exam_date") else ""
     return "\n" + TEST_PREP_SYLLABUS.format(exam=exam).strip("\n")
 
 def mode_adjustment(course: Dict[str, Any], klass: Dict[str, Any]) -> str:
+    meta = klass.get("meta") or {}
+    if course.get("mode") in sprint.MODES:  # primer / one of the student's problems, or original problems only
+        return "\n" + sprint.class_adjustment(course, klass)
+    if course.get("mode") == "semester" or meta.get("kind") in SEMESTER_KINDS[1:]:
+        unit = f' (unit "{meta["unit"]}")' if meta.get("unit") else ""
+        text = SEMESTER_CLASS.get(meta.get("kind"), SEMESTER_CLASS["lesson"])
+        return "\n" + text.format(week=meta.get("week") or "?", weeks=semester_weeks(course), unit=unit)
     if course.get("mode") != "test_prep":
         return ""
     exam = f" on {course['exam_date']}" if course.get("exam_date") else ""
     mock = (" THIS CLASS IS THE MOCK EXAM: write 10 mixed questions across every earlier class, at full exam "
             "difficulty, and make the lesson a short exam-strategy briefing.") if klass["title"].lower().startswith("mock exam") else ""
     return "\n" + TEST_PREP_CLASS.format(exam=exam, mock=mock)
+
+def semester_meta(item: Dict[str, Any], default_week: int, max_week: int = 20) -> Dict[str, Any]:
+    """Keeps only a sane week (1-20), unit (60 chars) and kind from a planned class; the model's other keys are dropped."""
+    week = item.get("week")
+    week = week if isinstance(week, int) and not isinstance(week, bool) and 1 <= week <= max_week else default_week
+    kind = item.get("kind") if item.get("kind") in SEMESTER_KINDS else "lesson"
+    return {"week": week, "unit": str(item.get("unit") or "").strip()[:60], "kind": kind}
 
 EXTEND_PROMPT = """
 You are continuing an existing course with new material the student just added.
@@ -4645,8 +5374,34 @@ def with_workspace(topic: Dict[str, Any], cache: Optional[Dict[str, str]] = None
         ws = cache[cid]
     return {**topic, "source": {**src, "workspace": ws}}
 
+async def plan_sprint(course: Dict[str, Any], job) -> Dict[str, Any]:
+    """Problem sprints skip the diagnostic: the problems are listed, then a primer and one class per problem
+    (at most 11, so 2-12 classes) are written straight away."""
+    course_id = course["id"]
+    goal = course["goal"] or "Explain these problems"
+    _job_update(job, step="Finding the problems in your materials", progress=0.15)
+    data = await gemini_json(sprint.PLAN_PROMPT.format(
+        goal=goal, materials=course["materials_text"][:120000] or "(no files: the problems are in the goal)",
+        mode_rules=sprint.mode_rules(course)), role="planner")
+    data = data if isinstance(data, dict) else {}
+    concepts = [{"id": slugify(c.get("id") or c.get("name", ""), f"c{i}"), "name": c.get("name") or f"Concept {i + 1}",
+                 "summary": c.get("summary", "")} for i, c in enumerate(data.get("concepts") or []) if isinstance(c, dict)]
+    if not concepts:
+        concepts = [{"id": "core", "name": data.get("title") or "Core ideas", "summary": ""}]
+    outline = sprint.build_outline(data, {c["id"] for c in concepts})
+    if not outline:
+        raise RuntimeError("No problems were found in these materials. Upload or paste the problems you want explained.")
+    workspace = data.get("workspace") if data.get("workspace") in WORKSPACES else guess_workspace(data.get("subject", ""), data.get("title", ""), goal)
+    db.update_course(course_id, title=data.get("title") or course["title"], subject=data.get("subject") or "", workspace=workspace,
+                     concepts=concepts, diagnostic=[], plan_classes=len(outline), status="generating", error=None)
+    db.replace_classes(course_id, outline)  # start_plan_job queues the writing when this job is done
+    course_event(course_id)
+    return {"courseId": course_id, "problems": len(outline) - 1, "classes": len(outline)}
+
 async def plan_course(course_id: str, job, n_questions: int, class_count: Optional[int]):
     course = db.get_course(course_id)
+    if course.get("mode") == "problem_sprint":
+        return await plan_sprint(course, job)
     materials = course["materials_text"][:120000] or "(no files: plan from the goal)"
     goal = course["goal"] or "Master these materials"
     _job_update(job, step="Reading your materials and writing a diagnostic quiz", progress=0.1)
@@ -4672,17 +5427,31 @@ async def plan_course(course_id: str, job, n_questions: int, class_count: Option
 
     _job_update(job, step="Planning the sequence of classes", progress=0.55)
     count = class_count or min(max(len(concepts) + 1, 4), 8)
-    plan = await gemini_json(role="planner", prompt=SYLLABUS_PROMPT.format(
-        concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts), count=count, goal=goal,
-        materials=materials[:40000], mode_rules=mode_rules(course)))
+    semester = course.get("mode") == "semester"
+    try:
+        plan = await gemini_json(role="planner", prompt=SYLLABUS_PROMPT.format(
+            concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts), count=count, goal=goal,
+            materials=materials[:40000], mode_rules=mode_rules(course)))
+    except json.JSONDecodeError as e:  # a long outline cut off mid-reply: plan from the concepts instead
+        print(f"[plan] syllabus JSON unusable, falling back to concepts: {e}")
+        plan = {}
+    items = plan.get("classes") if isinstance(plan, dict) else None
     outline = []
-    for item in (plan.get("classes") or [])[:12]:
+    for item in (items if isinstance(items, list) else [])[:32 if semester else 12]:
         if isinstance(item, dict) and item.get("title"):
             outline.append({"title": str(item["title"])[:120],
                             "concepts": [c for c in (item.get("concepts") or []) if c in concept_ids],
-                            "objectives": [str(o) for o in (item.get("objectives") or [])][:5]})
+                            "objectives": [str(o) for o in (item.get("objectives") or [])][:5], "raw": item})
     if not outline:
         outline = [{"title": c["name"], "concepts": [c["id"]], "objectives": [c["summary"]] if c["summary"] else []} for c in concepts]
+    if semester:  # only class 1 is written now; the rest stay "planned" and are released as the student goes
+        weeks, last_week = semester_weeks(course), 1
+        for i, k in enumerate(outline):
+            k["meta"] = semester_meta(k.get("raw") or {}, 1 + i * weeks // len(outline), weeks)
+            k["meta"]["week"] = last_week = max(k["meta"]["week"], last_week)
+            k["status"] = "pending" if i == 0 else "planned"
+    for k in outline:
+        k.pop("raw", None)
 
     workspace = data.get("workspace") if data.get("workspace") in WORKSPACES else guess_workspace(data.get("subject", ""), data.get("title", ""), goal)
     db.update_course(course_id, title=data.get("title") or course["title"], subject=data.get("subject") or "", workspace=workspace,
@@ -4744,6 +5513,18 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
     topic["markdownContent"] = topic.get("markdownContent") or f"# {klass['title']}"
     if klass.get("instruction"):
         topic["source"]["adaptedBecause"] = klass["instruction"]
+    meta = klass.get("meta") or {}
+    private = None
+    if course.get("mode") == "problem_sprint" and meta.get("kind") == "problem":
+        # steps and answers go to classes.meta.sprint (database only); the topic keeps the statement, givens, pitfalls
+        public, private = sprint.split_problem(data.get("problem"), meta.get("statement", ""))
+        sprint.apply_checks(private["parts"], recheck_numeric(private["parts"]))
+        topic["practice"] = sprint.drop_answer_echoes(topic["practice"], private["parts"])
+        topic["sprintProblem"] = public
+    elif course.get("mode") == "thematic_reference":
+        topic["practice"], copied = sprint.drop_copied(topic["practice"], course.get("materials_text") or "")
+        if copied:
+            print(f"[reference] class {klass['seq']}: dropped {copied} practice item(s) copied from the materials")
     normalized, _ = normalize_topic(topic)
     quiz_check = verify_questions(normalized["quiz"], _topic_brief(normalized, 8000))
     if AUTHOR_SIMS:
@@ -4761,6 +5542,18 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
     saved, _ = normalize_topic(topic)
     saved["notesFile"] = write_notes_file(saved)
     saved, _ = save_topic(saved, event_type="TOPIC_CREATED", auto_select=False, course_id=course["id"])
+    if private is not None:
+        with sprint._lock:  # the same lock as /reveal and /check: the student may have worked on it meanwhile
+            current = next((k for k in db.list_classes(course["id"]) if k["id"] == klass["id"]), klass)
+            meta = current.get("meta") or {}
+            old = meta.get("sprint") or {}
+            if private["parts"] or "sprint" not in meta:
+                # changed parts start over (their answers changed); the same parts keep what the student unlocked;
+                # a rewrite that produced none keeps the earlier ones
+                same = private["parts"] == old.get("parts")
+                state = {"revealed": old.get("revealed") or {}, "attempts": old.get("attempts") or {}} if same else {"revealed": {}, "attempts": {}}
+                db.update_class(klass["id"], meta={**meta, "sprint": {**private, **state},
+                                                   "solved": (meta.get("solved") or {}) if same else {}})
     return saved
 
 VERIFY_PROMPT = """
@@ -4864,8 +5657,15 @@ async def verify_questions(questions: List[Dict[str, Any]], context: str, keep_m
         kept.append(dropped.pop(0))
     return kept
 
+_course_queue_lock = threading.Lock()  # check-and-start of a course's job: two callers never start two loops
+
 def queue_course_generation(course_id: str) -> Dict[str, Any]:
-    """Generates every pending class in order; one job per course, safe to call again to resume."""
+    """Generates every pending class in order ("planned" semester classes wait for release_next_class);
+    one job per course, safe to call again to resume."""
+    with _course_queue_lock:
+        return _queue_course_generation(course_id)
+
+def _queue_course_generation(course_id: str) -> Dict[str, Any]:
     running = ACTIVE_COURSE_JOBS.get(course_id)
     if running and JOBS.get(running, {}).get("status") in ("queued", "running"):
         return JOBS[running]
@@ -4889,13 +5689,17 @@ def queue_course_generation(course_id: str) -> Dict[str, Any]:
             try:
                 topic = await build_class(course, klass, classes)
                 if not db.get_course(course_id):  # deleted while this class was being written
-                    for path in (topic_path(topic["id"]), NOTES_DIR / f"{topic['id']}.md"):
-                        path.unlink(missing_ok=True)
+                    _unlink_topic(None, topic["id"])
+                    purge_course_artifacts(course_id)  # else an orphan file shows up as a library lesson
                     emit_event("TOPIC_UPDATED", {"autoSelect": False})
                     return {"courseId": course_id, "cancelled": True}
                 db.update_class(klass["id"], status="ready", topic_id=topic["id"])
                 built += 1
             except Exception as e:
+                if not db.get_course(course_id):  # failed because the course was deleted mid-build (e.g. its lesson row)
+                    purge_course_artifacts(course_id)
+                    emit_event("TOPIC_UPDATED", {"autoSelect": False})
+                    return {"courseId": course_id, "cancelled": True}
                 db.update_class(klass["id"], status="error", error=friendly_ai_error(e))
                 db.update_course(course_id, status="error", error=f"Class {klass['seq']} failed: {friendly_ai_error(e)}")
                 course_event(course_id)
@@ -4917,9 +5721,16 @@ def queue_course_generation(course_id: str) -> Dict[str, Any]:
     course_event(course_id)
     return job
 
+def release_next_class(course_id: str) -> bool:
+    """Semester courses: write the next planned class once the student is close to it (see db.release_next_planned)."""
+    if not db.release_next_planned(course_id):
+        return False
+    queue_course_generation(course_id)
+    return True
+
 async def resume_course_generation():
     """Classes interrupted by a restart pick up where they stopped."""
-    global MAIN_LOOP
+    global MAIN_LOOP, PURGE_TASK
     MAIN_LOOP = asyncio.get_running_loop()
     db.init_db()
     engage.init()
@@ -4932,11 +5743,50 @@ async def resume_course_generation():
     import_topic_files_into_db()
     for course_id in db.courses_with_pending_classes():
         queue_course_generation(course_id)
+    PURGE_TASK = asyncio.create_task(purge_cleared_loop())
+
+def delete_course_fully(course_id: str) -> int:
+    """A course and everything made for it: topic files, notes, lesson snapshots, then the row (classes cascade).
+    No owner check here: callers (DELETE /api/courses/{id}, the sprint purge) decide who may. Returns files removed."""
+    topic_ids = {k["topic_id"] for k in db.list_classes(course_id) if k.get("topic_id")} | set(db.user_topic_ids([course_id]))
+    removed = sum(_unlink_topic(None, tid) for tid in topic_ids) + purge_course_artifacts(course_id)
+    db.delete_lessons(list(topic_ids))
+    db.delete_course(course_id)
+    return removed
+
+def purge_cleared() -> List[str]:
+    """Hard-deletes finished auto-clean sprints once SCIEDU_SPRINT_RETAIN_DAYS have passed since they were cleared."""
+    with _purge_running:
+        gone = sprint.purge_cleared(delete_course_fully)
+    if gone:
+        print(f"[sprint] purged {len(gone)} finished problem sprint(s)")
+        emit_event("TOPIC_UPDATED", {"autoSelect": False})
+    return gone
+
+PURGE_TASK: Optional[asyncio.Task] = None
+# cancelling PURGE_TASK does not stop a purge already running in its worker thread: shutdown waits on this
+# before db.close_all(), which would otherwise close that thread's SQLite connection mid-query (a segfault)
+_purge_running = threading.Lock()
+
+async def purge_cleared_loop():
+    """At startup, then once a day."""
+    while True:
+        try:
+            await asyncio.to_thread(purge_cleared)
+        except Exception as e:
+            print(f"[sprint] purge failed: {e}")
+        await asyncio.sleep(86400)
 
 @contextlib.asynccontextmanager
 async def lifespan(_app):
     await resume_course_generation()
     yield
+    if PURGE_TASK:
+        PURGE_TASK.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await PURGE_TASK
+    with _purge_running:
+        db.close_all()  # uvicorn has finished the open requests by now
 
 app.router.lifespan_context = lifespan
 
@@ -4962,7 +5812,11 @@ def sign_in(req: UserRequest):
 @app.get("/api/users/{user_id}/courses")
 def list_user_courses(user_id: str):
     require_user(user_id)
-    return {"courses": [{**c, "workspace": course_workspace(c)} for c in db.list_courses(user_id)]}
+    days = sprint.retain_days()
+    return {"courses": [{**c, "workspace": course_workspace(c)} for c in db.list_courses(user_id)],
+            # finished sprints, hidden from the list above, that can still be restored
+            "cleared": [{**c, "undoUntil": c["cleared_at"] + days * 86400 if c.get("cleared_at") else None}
+                        for c in db.list_cleared(user_id)]}
 
 @app.post("/api/courses")
 def create_course(req: CourseRequest):
@@ -4971,16 +5825,29 @@ def create_course(req: CourseRequest):
         req.userId = CURRENT_USER.get()["id"]
     require_user(req.userId)
     materials = (req.materials_text or "").strip()
+    if materials and req.filenames:
+        require_upload_consent()  # text read from uploaded files goes to Gemini to plan the course
     goal = (req.goal or "").strip()
     if len(materials) + len(goal) < 20:
         raise HTTPException(status_code=422, detail="Add study materials or describe what you want to learn (at least a sentence).")
     n = min(max(req.num_questions or 8, 4), 15)
-    count = min(max(req.class_count, 2), 12) if req.class_count else None
-    mode = req.mode if req.mode in ("test_prep", "readiness") else "learn"
+    # problem_sprint: explain the student's own problems (no diagnostic, cleared when done unless keep);
+    # thematic_reference: a learn course that only takes the uploads as a model of topic, difficulty and format
+    mode = req.mode if req.mode in ("test_prep", "readiness", "semester", *sprint.MODES) else "learn"
+    weeks = None
+    if mode == "semester":  # a whole term: up to 30 classes, only the next ones written at any time
+        weeks = min(max(req.weeks, 1), 20) if req.weeks else None
+        count = min(max(req.class_count or (weeks * 2 if weeks else 24), 2), 30)
+        weeks = weeks or -(-count // 2)
+    elif mode == "problem_sprint":  # primer + one class per problem found, set when planning (2-12)
+        count = None
+    else:
+        count = min(max(req.class_count, 2), 12) if req.class_count else None
     exam_date = (req.exam_date or "")[:10] if mode == "test_prep" and re.fullmatch(r"\d{4}-\d{2}-\d{2}", req.exam_date or "") else None
     course = db.create_course(req.userId, goal[:80] or (req.filenames or ["New course"])[0], goal, materials[:200000],
                               req.filenames or [], mode, exam_date)
-    db.update_course(course["id"], plan_questions=n, plan_classes=count)
+    db.update_course(course["id"], plan_questions=n, plan_classes=count, weeks=weeks,
+                     auto_cleanup=int(mode == "problem_sprint" and not req.keep))
     job = start_plan_job(course["id"], n, count)
     return {"course": public_course(db.get_course(course["id"])), "job": job}
 
@@ -4993,7 +5860,15 @@ def start_plan_job(course_id: str, n_questions: int, class_count: Optional[int])
             course_event(course_id)
             raise
 
-    job = start_job("plan", "Diagnostic & syllabus", work)
+    def write_sprint():
+        # a problem sprint has no diagnostic: its classes are written once this plan job is done (not while it
+        # runs, or queue_course_generation would see this job as the course's running one and do nothing)
+        course = db.get_course(course_id)
+        if course and course.get("mode") == "problem_sprint" and db.list_classes(course_id):
+            queue_course_generation(course_id)
+
+    job = start_job("plan", "Diagnostic & syllabus", work, then=write_sprint)
+    ACTIVE_COURSE_JOBS[course_id] = job["id"]
     db.update_course(course_id, job_id=job["id"])
     return job
 
@@ -5002,6 +5877,8 @@ def extend_course(course_id: str, req: ExtendRequest):
     """Continue a course: new materials become new classes after the existing ones, then they are written."""
     rate_limit("course")
     course = require_course(course_id)
+    if course.get("mode") == "problem_sprint":
+        raise HTTPException(status_code=409, detail="A problem sprint covers the problems it was made from. Start a new sprint for new problems.")
     if course["status"] in ("planning", "diagnostic_ready") or not course.get("concepts"):
         raise HTTPException(status_code=409, detail="Finish setting up this course (its diagnostic) before adding to it.")
     running = ACTIVE_COURSE_JOBS.get(course_id)
@@ -5011,6 +5888,8 @@ def extend_course(course_id: str, req: ExtendRequest):
     goal = (req.goal or "").strip()
     if len(materials) + len(goal) < 20:
         raise HTTPException(status_code=422, detail="Add materials or say what to cover next (at least a sentence).")
+    if materials and req.filenames:
+        require_upload_consent()
     count = min(max(req.class_count, 1), 8) if req.class_count else None
 
     async def work(job):
@@ -5018,13 +5897,16 @@ def extend_course(course_id: str, req: ExtendRequest):
             _job_update(job, step="Planning the next classes from your new materials", progress=0.1)
             classes = db.list_classes(course_id)
             concepts = course.get("concepts") or []
+            semester = course.get("mode") == "semester"
+            next_week = min(max([(k.get("meta") or {}).get("week") or 0 for k in classes] or [0]) + 1, 20)
             plan = await gemini_json(role="planner", prompt=EXTEND_PROMPT.format(
-                title=course["title"], mode="test preparation" if course.get("mode") == "test_prep" else "learning",
+                title=course["title"], mode={"test_prep": "test preparation", "semester": "semester",
+                                             "thematic_reference": "learning, uploads as reference only"}.get(course.get("mode"), "learning"),
                 concepts=", ".join(f"{c['id']} ({c['name']})" for c in concepts) or "none",
                 classes="\n".join(f"{k['seq']}. {k['title']}" for k in classes) or "- none",
                 count=count or "2-5", goal=goal or "Continue the course with these materials",
                 materials=materials[:40000] or "(no files: plan from the request)",
-                mode_rules=mode_rules(course)))
+                mode_rules=mode_rules(course, extend_from_week=next_week if semester else None)))
             known = {c["id"] for c in concepts}
             new_concepts = []
             for i, c in enumerate(plan.get("concepts") or []):
@@ -5035,18 +5917,22 @@ def extend_course(course_id: str, req: ExtendRequest):
                         new_concepts.append({"id": cid, "name": c.get("name") or cid, "summary": c.get("summary", "")})
             outline = [{"title": str(item["title"])[:120],
                         "concepts": [c for c in (item.get("concepts") or []) if c in known],
-                        "objectives": [str(o) for o in (item.get("objectives") or [])][:5]}
+                        "objectives": [str(o) for o in (item.get("objectives") or [])][:5],
+                        **({"meta": semester_meta(item, next_week), "status": "planned"} if semester else {})}
                        for item in (plan.get("classes") or [])[:8] if isinstance(item, dict) and item.get("title")]
             if not outline:
                 raise RuntimeError("The plan for the new classes came back empty. Try adding more material.")
             # new material goes first: class prompts read the start of the materials
             added = f"--- Added {time.strftime('%Y-%m-%d')}: {', '.join(req.filenames or []) or 'notes'} ---\n{materials}\n\n" if materials else ""
-            db.update_course(course_id, concepts=concepts + new_concepts, status="generating", error=None,
+            db.update_course(course_id, concepts=concepts + new_concepts, error=None, **({} if semester else {"status": "generating"}),
                              materials_text=(added + (course.get("materials_text") or ""))[:200000],
                              filenames=(course.get("filenames") or []) + (req.filenames or []))
             first = db.append_classes(course_id, outline)
             course_event(course_id)
-            queue_course_generation(course_id)
+            if semester:  # the new unit is outlined; its classes are written as the student reaches them
+                release_next_class(course_id)
+            else:
+                queue_course_generation(course_id)
             return {"courseId": course_id, "added": len(outline), "firstSeq": first}
         except Exception as e:
             db.update_course(course_id, error=friendly_ai_error(e))
@@ -5088,10 +5974,23 @@ def skip_diagnostic(course_id: str):
 @app.post("/api/courses/{course_id}/resume")
 def resume_course(course_id: str):
     rate_limit("class")
-    course = require_course(course_id)
-    if not course.get("diagnostic"):
-        raise HTTPException(status_code=409, detail="Planning didn't finish; create the course again.")
+    course = require_not_cleared(require_course(course_id))
+    running = ACTIVE_COURSE_JOBS.get(course_id) or course.get("job_id")
+    if running and JOBS.get(running, {}).get("status") in ("queued", "running"):
+        raise HTTPException(status_code=409, detail="This course is already being worked on.")
+    planned = course.get("diagnostic") or (course.get("mode") == "problem_sprint" and db.list_classes(course_id))  # sprints have none
+    if not planned:
+        materials = (course.get("materials_text") or "").strip()
+        goal = (course.get("goal") or "").strip()
+        if len(materials) + len(goal) < 20:
+            raise HTTPException(status_code=422, detail="Add study materials or describe what you want to learn (at least a sentence).")
+        db.update_course(course_id, status="planning", error=None)
+        course_event(course_id)
+        job = start_plan_job(course_id, course.get("plan_questions") or 8, course.get("plan_classes"))
+        return {"course": public_course(db.get_course(course_id)), "job": job}
+    db.update_course(course_id, error=None)
     queue_course_generation(course_id)
+    release_next_class(course_id)
     return public_course(db.get_course(course_id))
 
 class RegenerateRequest(BaseModel):
@@ -5100,26 +5999,43 @@ class RegenerateRequest(BaseModel):
 @app.post("/api/courses/{course_id}/classes/{seq}/regenerate")
 def regenerate_class(course_id: str, seq: int, body: Optional[RegenerateRequest] = None):
     rate_limit("class")
-    require_course(course_id)
+    require_not_cleared(require_course(course_id))
     klass = next((k for k in db.list_classes(course_id) if k["seq"] == seq), None)
     if not klass:
         raise HTTPException(status_code=404, detail="Class not found")
     if klass["status"] == "generating":
         raise HTTPException(status_code=409, detail="This class is being written right now. Try again when it's done.")
     instruction = ((body.instruction if body else None) or "").strip()[:600] or klass.get("instruction")
+    if klass["status"] == "planned":  # not written yet: the guidance is used when its turn comes
+        db.update_class(klass["id"], instruction=instruction)
+        return public_course(db.get_course(course_id))
     db.update_class(klass["id"], status="pending", instruction=instruction)
     db.reset_class_progress(klass["id"], klass.get("topic_id"))
+    queue_course_generation(course_id)
+    return public_course(db.get_course(course_id))
+
+@app.post("/api/courses/{course_id}/classes/{seq}/generate")
+def generate_planned_class(course_id: str, seq: int):
+    """Semester courses: "write it now" for the next planned class, without waiting for the student to get close."""
+    rate_limit("class")
+    require_course(course_id)
+    classes = db.list_classes(course_id)
+    klass = next((k for k in classes if k["seq"] == seq), None)
+    if not klass:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if klass["status"] != "planned":
+        raise HTTPException(status_code=409, detail="This class is already written or being written.")
+    if klass["seq"] != min(k["seq"] for k in classes if k["status"] == "planned"):
+        raise HTTPException(status_code=400, detail="Classes are written in order: write the earlier planned class first.")
+    if not db.release_next_planned(course_id, max_ahead=None):
+        raise HTTPException(status_code=409, detail="Another class is being written right now. Try again when it's done.")
     queue_course_generation(course_id)
     return public_course(db.get_course(course_id))
 
 @app.delete("/api/courses/{course_id}")
 def remove_course(course_id: str):
     require_course(course_id)
-    for k in db.list_classes(course_id):
-        if k.get("topic_id"):
-            for p in (topic_path(k["topic_id"]), NOTES_DIR / f"{k['topic_id']}.md"):
-                p.unlink(missing_ok=True)
-    db.delete_course(course_id)
+    delete_course_fully(course_id)
     emit_event("TOPIC_UPDATED", {"autoSelect": False})
     return {"status": "deleted"}
 
@@ -5127,18 +6043,20 @@ def remove_course(course_id: str):
 # SOCRATIC LESSON TUTOR (carried over from &EDU's mentor, grounded in the class the student is reading)
 # ---------------------------------------------------------------------------
 LESSON_TUTOR_PROMPT = """
-You are a Socratic tutor sitting next to one student who is working through this lesson:
+You are a Socratic tutor sitting next to one student who is working through this lesson, embodying a calm, dignified, Stoic teaching presence grounded in Cognitive Apprenticeship (Collins) and Cognitive Load Theory (Sweller):
 
 {lesson}
 
 How you teach (from the &EDU mentor):
-- Lead, don't lecture: at most about 90 words, then ONE guiding question that moves them one step.
-- Start from what they just said or chose; name the specific misconception if you can see it.
-- No spoilers: do not give the final answer to a quiz or practice item they haven't answered yet. If they are
-  stuck twice in a row, give a more direct hint (a worked first step), still ending with a question.
-- When they answered wrong, help them see WHY their choice breaks the key idea, with a quick counterexample
-  or a limiting case (e.g. what if the angle were 0 or 90 degrees?).
-- Use the lesson's own notation; LaTeX in $...$. Plain, warm, specific. No headings, no bullet walls.
+- Two-Tier Dynamic Response Sizing (Cognitive Load Optimization):
+  * Diagnostic Turn (40-80 words): For direct questions, quick checks, or single-step hurdles. Directly target the immediate threshold or assumption and end with exactly ONE leading check question.
+  * Scaffolding Turn (100-180 words): For deep conceptual blockers or impasses. Structure sequentially: (1) state the governing physical invariant or mathematical law, (2) isolate the mechanism or geometric coordinate constraints, (3) diagnose the misconception using a limiting case or dimensional reasoning, and (4) conclude with exactly ONE leading check question.
+- Start from what they just said or chose; name the specific conceptual blocker or misconception directly.
+- Strict anti-hallucination and symbolic integrity: on symbolic problems, NEVER invent numbers or arbitrary worked examples with made-up numbers. Enforce dimensional homogeneity at every step.
+- Strict vector typography: always use proper KaTeX dotless unit vectors (`$\\hat{{\\imath}}$`, `$\\hat{{\\jmath}}$`, `$\\hat{{k}}$`).
+- No spoilers: do not give the final answer to a quiz or practice item they haven't answered yet. If they are stuck twice in a row, give a more direct hint (a worked first step), still ending with a question.
+- When they answered wrong, help them see WHY their choice breaks the key invariant, using a limiting case (e.g. what happens as the angle approaches 0 or 90 degrees?) or free-body equilibrium.
+- Use the lesson's own notation; LaTeX in $...$. Dignified, warm, clear, specific.
 {focus}
 """
 
@@ -5167,10 +6085,12 @@ def _timeline_brief(topic: Dict[str, Any], limit: int = 30) -> str:
     return "\n".join(rows)
 
 BRIEF_PROMPT = """
-In at most 60 words, brief a student before they read this lesson. Exactly three lines, in this format:
+In at most 60 words, brief a student before they read this lesson. Enforce a strict 3-line format under 60 words:
 **Goal:** what they will be able to do after this class (one sentence)
 **Key idea:** the one rule or invariant everything hangs on (one sentence, LaTeX in $...$ if useful)
 **Check yourself:** one short diagnostic question to keep in mind while reading
+
+Do not include any conversational preamble, greetings, or extra trailing lines. Exactly three lines.
 
 Lesson:
 {lesson}
@@ -5188,6 +6108,7 @@ class LessonTutorRequest(BaseModel):
     focus: Optional[Dict[str, Any]] = None  # {question, options, selected, correctAnswer} after a quiz answer
     persona: Optional[str] = ""             # persona mode: the historical figure the model plays
     era: Optional[str] = ""
+    userId: Optional[str] = None
 
 @app.post("/api/tutor/lesson")
 async def lesson_tutor(req: LessonTutorRequest):
@@ -5195,7 +6116,7 @@ async def lesson_tutor(req: LessonTutorRequest):
     topic = load_json_file(topic_path(req.topicId), None)
     if not topic or not topic_visible(topic):
         raise HTTPException(status_code=404, detail="Topic not found")
-    lesson = _topic_brief(topic, 7000)
+    lesson = _topic_brief(topic, 7000) + sprint.tutor_context(db.class_for_topic(req.topicId))  # sprint: revealed steps only
     system = None
     if req.mode == "persona":
         persona = (req.persona or "").strip()[:120]
@@ -5229,12 +6150,30 @@ async def lesson_tutor(req: LessonTutorRequest):
                                               parts=[types.Part.from_text(text=text[:2000])]))
         message = (req.message or "").strip() or ("Please introduce yourself." if system else "I'm ready. Where should I start?")
         contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message[:2000])]))
+        if AUTH_REQUIRED:
+            target_user = getattr(req, "userId", None)
+            if target_user and target_user != (CURRENT_USER.get() or {}).get("id"):
+                raise HTTPException(status_code=403, detail="You can only access your own notes.")
+            user_id = (CURRENT_USER.get() or {}).get("id") or ""
+        else:
+            user_id = (CURRENT_USER.get() or {}).get("id") or getattr(req, "userId", None) or ""
+        notes = db.get_student_notes(user_id) if user_id and hasattr(db, "get_student_notes") else ""
+        notes_block = ""
+        if notes and notes.strip():
+            safe_notes = notes.strip()[:2000].replace("<<<", "<<").replace(">>>", ">>")
+            notes_block = f"\n\nSTUDENT'S WRITTEN NOTES & SCRATCHPAD:\n<<<STUDENT_NOTES\n{safe_notes}\nSTUDENT_NOTES>>>"
+
+        base_inst = system or LESSON_TUTOR_PROMPT.format(lesson=lesson, focus=focus)
+        system_instruction = base_inst + notes_block
+
         response = await acall_gemini(
             contents=contents, role="lesson",
-            config=types.GenerateContentConfig(system_instruction=system or LESSON_TUTOR_PROMPT.format(lesson=lesson, focus=focus),
+            config=types.GenerateContentConfig(system_instruction=system_instruction,
                                                temperature=0.4),
         )
         return {"reply": (response.text or "").strip() or "Tell me which step you're on, and what you expected to happen."}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=503, detail=friendly_ai_error(e))
 
@@ -5945,7 +6884,30 @@ AGY_SYSTEM_PROMPT = (
     "- `set_simulation_config` changes the live billiard simulation (restitution e, impact offset, cue height, speed, friction).\n"
     "- `switch_page` navigates to a topic/tab or mode.\n"
     "- `execute_python_code` proposes Python that checks numeric work; the student decides whether to run it.\n"
-    "- `adjust_class` rewrites a class of the student's current course (too hard, too easy, missing a topic).\n"
+    "- `adjust_class` rewrites a class of the student's current course (too hard, too easy, missing a topic).\n\n"
+    "EXPLANATION LEVELS (adapt tone, rigor, and depth when a level is specified or requested in `[Explanation Level X: <title>]`):\n"
+    "- Level 0 (ELI5): Analogies, conversational, intuitive everyday metaphors, zero jargon.\n"
+    "- Level 1 (Beginner): High school level, basic concepts, simple definitions, minimal algebra.\n"
+    "- Level 2 (College): Standard undergraduate STEM rigor, standard textbook definitions, equations with units.\n"
+    "- Level 3 (Advanced): Upper-level undergraduate, rigorous mathematical & physical derivations, differential relations, free-body diagrams.\n"
+    "- Level 4 (Graduate): Formal continuum/tensor mechanics, constitutive relations, thermodynamic consistency, edge cases.\n"
+    "- Level 5 (Expert): First-principles axiomatic depth, advanced variational/tensor formalism, microstructural nuances.\n\n"
+    "PHYSICS SIMULATION & NOTE DIAGRAMMING RULES:\n"
+    "- For ANY physics concept that has a physical representation (mechanics, statics, dynamics, stress/strain, kinematics, energy, momentum, gravity, pendulums, orbits, rotation, vibrations, waves on strings, electrostatics, magnetic Lorentz forces, collisions, elasticity, thermodynamics, buoyancy):\n"
+    "  * ALWAYS dynamically generate a real, working physical apparatus on the fly using `create_simulation` with `kind: \"physics\"` or `kind: \"geometry\"` / `\"fbd\"`.\n"
+    "  * Compose real physical parts: fixed anchors, rigid links/rods, springs/cables, moving masses, FBD and stress overlays.\n"
+    "  * If graphs are needed (energy vs time, position vs time, etc.), include live `series` plots so the physical apparatus AND the graphs are displayed together.\n"
+    "  * NEVER generate a dry, static function graph when physical representation exists, and NEVER switch the workspace to unrelated built-ins like `rolling-without-slipping`.\n"
+    "- DIAGRAMS IN NOTES: Interactive geometric & free-body diagrams can be embedded directly in markdown using ```geometry or ```fbd blocks with declarative JSON specs (bodies, forces with magnitude/angle/projections, elements like angle_arc, right_angle, dimension).\n\n"
+    "VECTOR KATEX & FIRST-PRINCIPLES RIGOR:\n"
+    "- Always use dotless KaTeX unit vectors: `\\hat{{\\imath}}`, `\\hat{{\\jmath}}`, `\\hat{{k}}` (never raw carets `i^` or plain `\\hat{{i}}`).\n"
+    "- For symbolic problems, NEVER invent numbers or arbitrary calculations with made-up numbers; maintain dimensional homogeneity ([M^a L^b T^c]) at all times.\n\n"
+    "SOCRATIC TOOL USAGE & ACADEMIC INTEGRITY:\n"
+    "- Use tools (such as `execute_python_code`, `create_simulation`) to demonstrate intermediate principles, visualize mechanisms, or generate diagnostic scaffolding.\n"
+    "- NEVER use tools or responses to solve active student exercises, quizzes, or practice tasks directly or leak full solutions. Lead the student to discover the solution through guided inquiry.\n\n"
+    "NAVIGATION & VIEW RULES:\n"
+    "- NEVER randomly or forcibly teleport or switch the student away from their current page, topic, or workspace.\n"
+    "- Specifically, after answering a quiz, completing an exercise, or receiving rewards/XP, DO NOT call `switch_page` to send the student back to `home` or away from their current class. Keep the student on their current view unless they explicitly ask to navigate elsewhere.\n\n"
     "Explain with LaTeX ($...$). Existing topics: {topics}. The student is viewing: {active}.{course}"
 )
 
@@ -5958,6 +6920,8 @@ def course_context(course_id: Optional[str], open_topic: Optional[str] = None) -
         score = f", quiz {round(k['score'] * 100)}%" if k.get("score") is not None else ""
         here = " <- the student is reading this class now" if open_topic and k.get("topic_id") == open_topic else ""
         lines.append(f"  {k['seq']}. {k['title']} [{k['status']}{score}]{here}")
+        if here:
+            lines.append(sprint.tutor_context(k))  # problem sprint: only the steps the student revealed, never later ones
     return "\n".join(lines)
 
 @app.post("/api/agy/prompt")
@@ -5969,6 +6933,9 @@ async def post_user_prompt(data: AgyPromptModel):
         except HTTPException:
             data.courseId = None
     data.prompt = data.prompt[:MAX_MESSAGE_CHARS]
+    if data.level is not None and "[Explanation Level" not in data.prompt:
+        level_names = {0: "ELI5", 1: "Beginner", 2: "College", 3: "Advanced", 4: "Graduate", 5: "Expert"}
+        data.prompt = f"[Explanation Level {data.level}: {level_names.get(data.level, 'Level ' + str(data.level))}] {data.prompt}"
     user_msg = {"id": f"msg-{int(time.time()*1000)}", "sender": "user", "content": data.prompt, "timestamp": time.time()}
     reply_content = ""
 
@@ -5982,12 +6949,57 @@ async def post_user_prompt(data: AgyPromptModel):
     if not reply_content:
         courses: Dict[str, Any] = {}
         topic_ids = ", ".join(str(t.get("id")) for t in read_topics_cached() if t.get("id") and topic_visible(t, courses))
+
+        # Build multi-turn contents from data.history (alternating user and model turns)
+        history_contents = []
+        for turn in (data.history or [])[-16:]:
+            role = "user" if turn.get("role") == "user" else "model"
+            text = str(turn.get("content") or "").strip()
+            if not text:
+                continue
+            if history_contents and history_contents[-1].role == role:
+                prev_text = history_contents[-1].parts[0].text
+                merged_text = f"{prev_text}\n{text}"[:MAX_TURN_CHARS]
+                history_contents[-1] = types.Content(role=role, parts=[types.Part.from_text(text=merged_text)])
+            else:
+                history_contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text[:MAX_TURN_CHARS])]))
+        while history_contents and history_contents[0].role != "user":
+            history_contents.pop(0)
+
+        user_content = types.Content(role="user", parts=[types.Part.from_text(text=data.prompt)])
+        if history_contents:
+            if history_contents[-1].role == "user":
+                prev_text = history_contents[-1].parts[0].text
+                merged_text = f"{prev_text}\n{data.prompt}"[:MAX_TURN_CHARS]
+                history_contents[-1] = types.Content(role="user", parts=[types.Part.from_text(text=merged_text)])
+                gemini_contents = history_contents
+            else:
+                gemini_contents = history_contents + [user_content]
+        else:
+            gemini_contents = data.prompt
+
+        if AUTH_REQUIRED:
+            target_user = getattr(data, "userId", None)
+            if target_user and target_user != (CURRENT_USER.get() or {}).get("id"):
+                raise HTTPException(status_code=403, detail="You can only access your own notes.")
+            user_id = (CURRENT_USER.get() or {}).get("id") or ""
+        else:
+            user_id = (CURRENT_USER.get() or {}).get("id") or getattr(data, "userId", None) or ""
+        notes = db.get_student_notes(user_id) if user_id and hasattr(db, "get_student_notes") else ""
+        notes_prompt = ""
+        if notes and notes.strip():
+            safe_notes = notes.strip()[:2000].replace("<<<", "<<").replace(">>>", ">>")
+            notes_prompt = f"\n\nSTUDENT'S WRITTEN NOTES & SCRATCHPAD:\n<<<STUDENT_NOTES\n{safe_notes}\nSTUDENT_NOTES>>>"
+
+        base_system = AGY_SYSTEM_PROMPT.format(topics=topic_ids, active=data.topicId or "none",
+                                              course=course_context(data.courseId, data.topicId))
+        system_instruction = base_system + notes_prompt
+
         try:
             resp = await acall_gemini(
-                contents=data.prompt,
+                contents=gemini_contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=AGY_SYSTEM_PROMPT.format(topics=topic_ids, active=data.topicId,
-                                                                course=course_context(data.courseId, data.topicId)),
+                    system_instruction=system_instruction,
                     temperature=0.3,
                     tools=[agy_agent_tools]
                 )
@@ -6025,8 +7037,11 @@ async def post_user_prompt(data: AgyPromptModel):
 
                 elif call.name == "create_simulation":
                     tid = args.get("topic_id") or data.topicId
+                    if not tid:
+                        reply_content = "Please specify which topic you would like a simulation for."
+                        break
                     try:
-                        queue_simulation_job(tid, args.get("focus", ""), args.get("kind") if args.get("kind") in ("math", "physics", "chem") else "auto")
+                        queue_simulation_job(tid, args.get("focus", ""), args.get("kind") if args.get("kind") in ("math", "physics", "chem", "geometry", "fbd") else "auto")
                         reply_content = f"Building a new simulation for **{tid}** focused on: _{args.get('focus', 'the core concept')}_. It appears in the Simulation tab in about 20–40 seconds."
                     except HTTPException as e:
                         reply_content = (f"I couldn't find a topic called `{tid}`. Ask me to create the lesson first." if e.status_code == 404
@@ -6054,6 +7069,9 @@ async def post_user_prompt(data: AgyPromptModel):
                 elif call.name == "adjust_class":
                     if not data.courseId or not db.get_course(data.courseId):
                         reply_content = "Open the course first (My courses → your course), then ask me again so I know which class you mean."
+                        break
+                    if data.courseId in db.cleared_course_ids():
+                        reply_content = CLEARED_DETAIL  # the same rule as regenerate / resume (409 there)
                         break
                     klass = next((k for k in db.list_classes(data.courseId) if k["seq"] == int(args.get("seq", 0))), None)
                     if not klass:
@@ -6147,13 +7165,31 @@ def get_status():
         "active_jobs": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running")),
         "event_cursor": _event_seq,
         "auth_required": AUTH_REQUIRED,
-        "port": 8090,
+        "port": int(os.environ.get("SCIEDU_PORT", "8090")),
+        "privacy_version": PRIVACY_VERSION,
         "features": [
             "courses", "sqlite_storage", "simspec_simulations", "background_jobs", "code_sandbox",
             "multimodal_ingestion", "tutor_chat", "tutor_brief", "elevenlabs_voiceover",
             "curriculum_engine", "latex_derivations", "assessment_quiz", "agy_file_mailbox"
         ]
     }
+
+app.include_router(advisor_cart.build_router(rate_limit=rate_limit, require_user=require_user, current_user=CURRENT_USER.get,
+                                             auth_required=lambda: AUTH_REQUIRED))
+import language_tts  # noqa: E402  (spoken words, cached ElevenLabs audio, built-in German course seed)
+app.include_router(language_tts.build_router(rate_limit=rate_limit, require_user=require_user, current_user=CURRENT_USER.get,
+                                             auth_required=lambda: AUTH_REQUIRED, is_admin=is_admin,
+                                             save_topic=lambda t: save_topic(t, auto_select=False),
+                                             topic_exists=lambda tid: topic_path(tid).exists(), normalize_practice=normalize_practice))
+import explain  # noqa: E402  (guided "Explain it to me" walkthroughs, cached in content/explain_cache)
+app.include_router(explain.build_router(rate_limit=rate_limit, current_user=CURRENT_USER.get, auth_required=lambda: AUTH_REQUIRED,
+                                        gemini_json=lambda *a, **k: gemini_json(*a, **k),  # looked up per call (tests stub it)
+                                        load_topic=lambda tid: load_json_file(topic_path(tid), None),
+                                        topic_visible=lambda t: topic_visible(t), require_topic_write=lambda tid: require_topic_write(tid)))
+# problem sprints: step reveal, server-graded answers, keep / restore (sprint.py)
+app.include_router(sprint.build_router(rate_limit=rate_limit, require_course=lambda cid: require_course(cid),
+                                       public_course=lambda c: public_course(c), course_event=lambda cid: course_event(cid),
+                                       topics_changed=lambda: emit_event("TOPIC_UPDATED", {"autoSelect": False})))
 
 # Deployment: serve the built frontend (npm run build -> dist/) from the same server, so no Vite is needed.
 DIST_DIR = Path(__file__).parent / "dist"

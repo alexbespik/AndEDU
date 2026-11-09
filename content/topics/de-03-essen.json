@@ -1,0 +1,552 @@
+{
+  "id": "de-03-essen",
+  "title": "German 3: Food and the Akkusativ",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1)",
+  "summary": "Order food and drinks, say what you eat, and use the accusative case for the thing you eat, drink or buy.",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 3: Food and the Akkusativ\n\nOrder food and drinks, say what you eat, and use the accusative case for the thing you eat, drink or buy.\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| der Apfel | die Äpfel | apple | /ˈapfl̩/ |\n| das Brot | die Brote | bread | /bʁoːt/ |\n| der Käse | — | cheese | /ˈkɛːzə/ |\n| die Milch | — | milk | /mɪlç/ |\n| das Wasser | — | water | /ˈvasɐ/ |\n| der Kaffee | die Kaffees | coffee | /ˈkafe/ |\n| der Tee | die Tees | tea | /teː/ |\n| die Suppe | die Suppen | soup | /ˈzʊpə/ |\n| das Ei | die Eier | egg | /aɪ̯/ |\n| die Banane | die Bananen | banana | /baˈnaːnə/ |\n| essen | — | to eat | /ˈɛsn̩/ |\n| trinken | — | to drink | /ˈtʁɪŋkn̩/ |\n| möchten | — | would like | /ˈmœçtn̩/ |\n\n## Phrases\n\n- **Ich esse einen Apfel.**: I am eating an apple.\n- **Ich trinke einen Kaffee.**: I am drinking a coffee.\n- **Ich möchte eine Suppe, bitte.**: I would like a soup, please.\n- **Isst du gern Käse?**: Do you like eating cheese?\n- **Er trinkt keine Milch.**: He doesn't drink milk.\n- **Wir kaufen den Käse.**: We are buying the cheese.\n- **Ich habe keinen Hunger.**: I am not hungry.\n\n## Grammar: the accusative (Akkusativ)\n\nThe direct object (what you eat, drink, buy, have) is in the accusative. **Only the masculine changes**:\n\n| | masculine | feminine | neuter | plural |\n| --- | --- | --- | --- | --- |\n| nominative | der / ein / kein | die / eine / keine | das / ein / kein | die / — / keine |\n| accusative | **den / einen / keinen** | die / eine / keine | das / ein / kein | die / — / keine |\n\n- *Der Apfel ist rot.* → *Ich esse **einen** Apfel.*\n- **kein** negates a noun (*keine Milch, keinen Hunger*); **nicht** negates a verb or adjective.\n- *essen* changes its vowel: du **isst**, er **isst**.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "der Apfel",
+          "apple"
+        ],
+        [
+          "das Brot",
+          "bread"
+        ],
+        [
+          "der Käse",
+          "cheese"
+        ],
+        [
+          "die Milch",
+          "milk"
+        ],
+        [
+          "das Wasser",
+          "water"
+        ],
+        [
+          "der Kaffee",
+          "coffee"
+        ],
+        [
+          "der Tee",
+          "tea"
+        ],
+        [
+          "die Suppe",
+          "soup"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am eating an apple.",
+      "answer": "Ich esse einen Apfel.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich esse einen Apfel.",
+      "bank": [
+        "Ich",
+        "esse",
+        "einen",
+        "Apfel",
+        "ein",
+        "einem",
+        "isst"
+      ],
+      "source": "I am eating an apple.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich esse einen Apfel.",
+      "answer": "Ich esse einen Apfel.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am drinking a coffee.",
+      "answer": "Ich trinke einen Kaffee.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich trinke einen Kaffee.",
+      "bank": [
+        "Ich",
+        "trinke",
+        "einen",
+        "Kaffee",
+        "ein",
+        "trinkt",
+        "eine"
+      ],
+      "source": "I am drinking a coffee.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Ich trinke einen Kaffee.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "I am drinking a coffee."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I would like a soup, please.",
+      "answer": "Ich möchte eine Suppe, bitte.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich möchte eine Suppe, bitte.",
+      "bank": [
+        "Ich",
+        "möchte",
+        "eine",
+        "Suppe",
+        "bitte",
+        "einen",
+        "ein",
+        "möchtest"
+      ],
+      "source": "I would like a soup, please.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich möchte eine Suppe, bitte.",
+      "answer": "Ich möchte eine Suppe, bitte.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Do you like eating cheese?",
+      "answer": "Isst du gern Käse?",
+      "accepted": [
+        "Magst du Käse?"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Isst du gern Käse?",
+      "bank": [
+        "Isst",
+        "du",
+        "gern",
+        "Käse",
+        "Esst",
+        "Esse",
+        "gerne"
+      ],
+      "source": "Do you like eating cheese?",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Isst du gern Käse?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "Do you like eating cheese?"
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "He doesn't drink milk.",
+      "answer": "Er trinkt keine Milch.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Er trinkt keine Milch.",
+      "bank": [
+        "Er",
+        "trinkt",
+        "keine",
+        "Milch",
+        "kein",
+        "nicht",
+        "trinke"
+      ],
+      "source": "He doesn't drink milk.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Er trinkt keine Milch.",
+      "answer": "Er trinkt keine Milch.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We are buying the cheese.",
+      "answer": "Wir kaufen den Käse.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir kaufen den Käse.",
+      "bank": [
+        "Wir",
+        "kaufen",
+        "den",
+        "Käse",
+        "der",
+        "dem",
+        "kauft"
+      ],
+      "source": "We are buying the cheese.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir kaufen den Käse.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We are buying the cheese."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am not hungry.",
+      "answer": "Ich habe keinen Hunger.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich habe keinen Hunger.",
+      "bank": [
+        "Ich",
+        "habe",
+        "keinen",
+        "Hunger",
+        "kein",
+        "bin",
+        "hat"
+      ],
+      "source": "I am not hungry.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich habe keinen Hunger.",
+      "answer": "Ich habe keinen Hunger.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "conjugate",
+      "prompt": "Conjugate the verb",
+      "explanation": "",
+      "concept": null,
+      "verb": "essen",
+      "tense": "Präsens (present)",
+      "lang": "de",
+      "forms": [
+        [
+          "ich",
+          "esse"
+        ],
+        [
+          "du",
+          "isst"
+        ],
+        [
+          "er/sie/es",
+          "isst"
+        ],
+        [
+          "wir",
+          "essen"
+        ],
+        [
+          "ihr",
+          "esst"
+        ],
+        [
+          "sie/Sie",
+          "essen"
+        ]
+      ]
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Ich esse ___ Apfel.",
+      "explanation": "der Apfel is masculine: accusative **einen**.",
+      "concept": null,
+      "options": [
+        "einen",
+        "ein",
+        "eine",
+        "einem"
+      ],
+      "answer": "einen"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "Ich nehme ___ Suppe.",
+      "explanation": "die Suppe is feminine: the accusative stays **eine**.",
+      "concept": null,
+      "options": [
+        "eine",
+        "einen",
+        "ein",
+        "einer"
+      ],
+      "answer": "eine"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Sie kauft ___ Käse.",
+      "explanation": "der Käse → accusative **den** Käse.",
+      "concept": null,
+      "options": [
+        "den",
+        "der",
+        "dem",
+        "des"
+      ],
+      "answer": "den"
+    },
+    {
+      "id": "p27",
+      "type": "fill_blank",
+      "prompt": "Ich habe ___ Hunger.",
+      "explanation": "der Hunger is masculine: accusative **keinen**.",
+      "concept": null,
+      "options": [
+        "keinen",
+        "kein",
+        "nicht",
+        "keine"
+      ],
+      "answer": "keinen"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "der Apfel",
+      "back": "apple  /ˈapfl̩/",
+      "hint": "Plural: die Äpfel. Ich esse einen Apfel.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "das Brot",
+      "back": "bread  /bʁoːt/",
+      "hint": "Plural: die Brote. Das Brot ist frisch.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Käse",
+      "back": "cheese  /ˈkɛːzə/",
+      "hint": "Ich kaufe den Käse.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Milch",
+      "back": "milk  /mɪlç/",
+      "hint": "Die Milch ist kalt.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Wasser",
+      "back": "water  /ˈvasɐ/",
+      "hint": "Ein Wasser, bitte.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Kaffee",
+      "back": "coffee  /ˈkafe/",
+      "hint": "Plural: die Kaffees. Der Kaffee ist heiß.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "der Tee",
+      "back": "tea  /teː/",
+      "hint": "Plural: die Tees. Trinkst du gern Tee?",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Suppe",
+      "back": "soup  /ˈzʊpə/",
+      "hint": "Plural: die Suppen. Die Suppe ist lecker.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Ei",
+      "back": "egg  /aɪ̯/",
+      "hint": "Plural: die Eier. Ich esse ein Ei.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Banane",
+      "back": "banana  /baˈnaːnə/",
+      "hint": "Plural: die Bananen. Die Banane ist gelb.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "essen",
+      "back": "to eat  /ˈɛsn̩/",
+      "hint": "Er isst gern Obst.",
+      "lang": "de"
+    },
+    {
+      "front": "trinken",
+      "back": "to drink  /ˈtʁɪŋkn̩/",
+      "hint": "Wir trinken Wasser.",
+      "lang": "de"
+    },
+    {
+      "front": "möchten",
+      "back": "would like  /ˈmœçtn̩/",
+      "hint": "Ich möchte einen Tee.",
+      "lang": "de"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 3,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

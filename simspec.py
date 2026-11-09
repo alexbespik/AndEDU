@@ -34,7 +34,7 @@ FUNCTIONS = {
 CONSTANTS = {"pi", "PI", "tau", "TAU", "e", "E", "phi", "PHI", "inf", "infinity", "Infinity"}
 BODY_FIELDS = {"x", "y", "vx", "vy", "m", "r", "speed"}
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
-COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|accent|gold|green|cyan|pink|orange|purple|white)$")
+COLOR_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|accent|gold|green|cyan|pink|orange|purple|white|muted|gray|transparent)$")
 
 MAX_EXPR_LEN = 400
 MAX_PARAMS = 12
@@ -165,6 +165,8 @@ def validate_spec(spec: Any) -> Tuple[Dict[str, Any], List[str]]:
     kind = spec.get("kind")
     if kind == "math":
         return validate_math(spec)
+    if kind in ("geometry", "fbd"):
+        return validate_geometry(spec)
     if kind == "chem":
         try:
             import chemspec  # chemistry kit (agy): validate_chem(spec) -> (clean, errors)
@@ -172,7 +174,7 @@ def validate_spec(spec: Any) -> Tuple[Dict[str, Any], List[str]]:
             return {}, ["simulation.kind 'chem' is not available yet"]
         return chemspec.validate_chem(spec)
     if kind not in ("particles", "graph"):
-        return {}, ["simulation.kind must be 'particles', 'graph', 'math' or 'chem'"]
+        return {}, ["simulation.kind must be 'particles', 'graph', 'math', 'geometry', 'fbd' or 'chem'"]
 
     params = _clean_params(spec.get("params"), errors)
     param_names = {p["name"] for p in params}
@@ -428,6 +430,233 @@ def validate_math(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     if view:
         clean["view"] = v
     return clean, errors
+
+
+# ---------------------------------------------------------------- kind "geometry" / "fbd": interactive geometry & free-body diagram
+GEOMETRY_BODY_TYPES = {"box", "wedge", "ramp", "sphere", "circle", "rod", "wall", "surface", "pulley", "point"}
+GEOMETRY_ELEMENT_TYPES = {"line", "segment", "angle_arc", "right_angle", "dimension", "polygon"}
+MAX_GEOMETRY_BODIES = 24
+MAX_GEOMETRY_FORCES = 32
+MAX_GEOMETRY_ELEMENTS = 32
+
+
+def validate_geometry(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Validates an interactive geometry or free-body diagram specification."""
+    errors: List[str] = []
+    if not isinstance(spec, dict):
+        return {}, ["simulation must be a JSON object"]
+    kind = spec.get("kind")
+    if kind not in ("geometry", "fbd"):
+        kind = "geometry"
+
+    params = _clean_params(spec.get("params"), errors)
+    param_names = {p["name"] for p in params}
+
+    clean: Dict[str, Any] = {
+        "version": 1,
+        "kind": kind,
+        "title": str(spec.get("title") or ("Free-Body Diagram" if kind == "fbd" else "Geometry Simulation"))[:100],
+        "description": str(spec.get("description") or "")[:600],
+        "params": params,
+    }
+
+    # View
+    view = spec.get("view") if isinstance(spec.get("view"), dict) else {}
+    xmin = _num(view.get("xmin"), -5.0)
+    xmax = _num(view.get("xmax"), 5.0)
+    ymin = _num(view.get("ymin"), -5.0)
+    ymax = _num(view.get("ymax"), 5.0)
+    if xmax <= xmin:
+        errors.append("view: xmax must be greater than xmin")
+    if ymax <= ymin:
+        errors.append("view: ymax must be greater than ymin")
+    clean["view"] = {
+        "xmin": xmin, "xmax": xmax, "ymin": ymin, "ymax": ymax,
+        "grid": bool(view.get("grid", True)),
+        "axes": bool(view.get("axes", True)),
+    }
+
+    # Bodies
+    body_ids = set()
+    clean_bodies = []
+    raw_bodies = spec.get("bodies") if isinstance(spec.get("bodies"), list) else []
+    for i, b in enumerate(raw_bodies[:MAX_GEOMETRY_BODIES]):
+        if not isinstance(b, dict):
+            continue
+        b_type = str(b.get("type", "box")).lower()
+        if b_type not in GEOMETRY_BODY_TYPES:
+            errors.append(f"bodies[{i}]: unknown type '{b_type}' (use {', '.join(sorted(GEOMETRY_BODY_TYPES))})")
+            continue
+        b_id = str(b.get("id", f"body_{i}"))
+        if b.get("id") and not NAME_RE.match(b_id):
+            errors.append(f"bodies[{i}]: needs a valid 'id' like 'block' or 'ramp'")
+            continue
+        if b_id in body_ids:
+            errors.append(f"bodies[{i}]: duplicate body id '{b_id}'")
+            continue
+        body_ids.add(b_id)
+
+        cb: Dict[str, Any] = {
+            "id": b_id,
+            "type": b_type,
+            "color": _clean_color(b.get("color"), "gold"),
+            "fill": str(b.get("fill") or "")[:80] if b.get("fill") else None,
+            "label": str(b.get("label") or "")[:60],
+        }
+
+        # Check expressions for geometry bodies
+        if b_type in ("box", "wedge", "ramp"):
+            for field, default in (("x", 0), ("y", 0), ("width", 1), ("height", 1)):
+                val = b.get(field, default)
+                _check_expr(val, param_names, f"bodies[{i}].{field}", errors)
+                cb[field] = val
+            if "angle" in b:
+                _check_expr(b["angle"], param_names, f"bodies[{i}].angle", errors)
+                cb["angle"] = b["angle"]
+        elif b_type in ("sphere", "circle", "pulley"):
+            for field, default in (("x", 0), ("y", 0), ("radius", 0.5)):
+                val = b.get(field, default)
+                _check_expr(val, param_names, f"bodies[{i}].{field}", errors)
+                cb[field] = val
+        elif b_type in ("rod", "wall", "surface"):
+            for field, default in (("x1", 0), ("y1", 0), ("x2", 1), ("y2", 1)):
+                val = b.get(field, default)
+                _check_expr(val, param_names, f"bodies[{i}].{field}", errors)
+                cb[field] = val
+            if "thickness" in b:
+                cb["thickness"] = _num(b["thickness"], 4.0)
+        elif b_type == "point":
+            for field, default in (("x", 0), ("y", 0)):
+                val = b.get(field, default)
+                _check_expr(val, param_names, f"bodies[{i}].{field}", errors)
+                cb[field] = val
+
+        clean_bodies.append(cb)
+    clean["bodies"] = clean_bodies
+
+    # Forces
+    clean_forces = []
+    raw_forces = spec.get("forces") if isinstance(spec.get("forces"), list) else []
+    for i, f in enumerate(raw_forces[:MAX_GEOMETRY_FORCES]):
+        if not isinstance(f, dict):
+            continue
+        cf: Dict[str, Any] = {
+            "id": str(f.get("id") or f"f_{i}")[:32],
+            "label": str(f.get("label") or "")[:60],
+            "color": _clean_color(f.get("color"), "cyan"),
+            "projections": bool(f.get("projections", True)),
+        }
+        if "body" in f:
+            if f["body"] not in body_ids:
+                errors.append(f"forces[{i}].body: unknown body '{f['body']}'")
+            cf["body"] = f["body"]
+        if "origin" in f:
+            orig = f["origin"]
+            if isinstance(orig, (list, tuple)) and len(orig) >= 2:
+                _check_expr(orig[0], param_names, f"forces[{i}].origin[0]", errors)
+                _check_expr(orig[1], param_names, f"forces[{i}].origin[1]", errors)
+                cf["origin"] = [orig[0], orig[1]]
+            else:
+                cf["origin"] = orig
+        if "x" in f and "y" in f:
+            _check_expr(f["x"], param_names, f"forces[{i}].x", errors)
+            _check_expr(f["y"], param_names, f"forces[{i}].y", errors)
+            cf["x"] = f["x"]
+            cf["y"] = f["y"]
+        if "magnitude" in f:
+            _check_expr(f["magnitude"], param_names, f"forces[{i}].magnitude", errors)
+            cf["magnitude"] = f["magnitude"]
+        else:
+            cf["magnitude"] = 1.0
+        if "angle" in f:
+            _check_expr(f["angle"], param_names, f"forces[{i}].angle", errors)
+            cf["angle"] = f["angle"]
+        else:
+            cf["angle"] = 0.0
+        clean_forces.append(cf)
+    clean["forces"] = clean_forces
+
+    # Elements
+    clean_elements = []
+    raw_elements = spec.get("elements") if isinstance(spec.get("elements"), list) else []
+    for i, el in enumerate(raw_elements[:MAX_GEOMETRY_ELEMENTS]):
+        if not isinstance(el, dict):
+            continue
+        el_type = str(el.get("type", "line")).lower()
+        if el_type not in GEOMETRY_ELEMENT_TYPES:
+            errors.append(f"elements[{i}]: unknown type '{el_type}'")
+            continue
+        cel: Dict[str, Any] = {
+            "type": el_type,
+            "color": _clean_color(el.get("color"), "muted"),
+            "label": str(el.get("label") or "")[:60],
+        }
+        if el_type in ("line", "segment", "dimension"):
+            for field, default in (("x1", 0), ("y1", 0), ("x2", 1), ("y2", 1)):
+                val = el.get(field, default)
+                _check_expr(val, param_names, f"elements[{i}].{field}", errors)
+                cel[field] = val
+            if el_type == "line":
+                cel["dashed"] = bool(el.get("dashed", False))
+                cel["arrow"] = bool(el.get("arrow", False))
+        elif el_type == "angle_arc":
+            for field, default in (("x", 0), ("y", 0), ("radius", 1.0), ("startAngle", 0), ("endAngle", 90)):
+                val = el.get(field, default)
+                _check_expr(val, param_names, f"elements[{i}].{field}", errors)
+                cel[field] = val
+        elif el_type == "right_angle":
+            for field, default in (("x", 0), ("y", 0), ("size", 0.4), ("angle", 0)):
+                val = el.get(field, default)
+                _check_expr(val, param_names, f"elements[{i}].{field}", errors)
+                cel[field] = val
+        elif el_type == "polygon":
+            raw_pts = el.get("points")
+            if not isinstance(raw_pts, list) or len(raw_pts) < 3:
+                errors.append(f"elements[{i}] (polygon): needs at least 3 points")
+            else:
+                pts = []
+                for p_idx, pt in enumerate(raw_pts):
+                    if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                        _check_expr(pt[0], param_names, f"elements[{i}].points[{p_idx}][0]", errors)
+                        _check_expr(pt[1], param_names, f"elements[{i}].points[{p_idx}][1]", errors)
+                        pts.append([pt[0], pt[1]])
+                cel["points"] = pts
+            if "fill" in el:
+                cel["fill"] = str(el["fill"])[:80]
+        clean_elements.append(cel)
+    clean["elements"] = clean_elements
+
+    # Optional rotated/custom axes
+    if isinstance(spec.get("axes"), dict):
+        ax = spec["axes"]
+        cax: Dict[str, Any] = {
+            "xLabel": str(ax.get("xLabel") or "x'")[:20],
+            "yLabel": str(ax.get("yLabel") or "y'")[:20],
+        }
+        for field, default in (("x", 0), ("y", 0), ("angle", 0)):
+            val = ax.get(field, default)
+            _check_expr(val, param_names, f"axes.{field}", errors)
+            cax[field] = val
+        clean["axes"] = cax
+
+    return clean, errors
+
+
+GEOMETRY_GUIDE = """
+kind "geometry" / "fbd": interactive geometry & free-body diagram simulations (Cartesian, +y up).
+{"kind":"geometry","title":"...","description":"...","params":[{"name":"theta","label":"Angle","min":0,"max":90,"value":30,"step":1,"unit":"deg"}],
+ "view":{"xmin":-4,"xmax":6,"ymin":-2,"ymax":6,"grid":true,"axes":true},
+ "bodies":[{"id":"ramp","type":"wedge","x":-2,"y":0,"width":6,"height":"6*tan(theta*pi/180)","color":"muted","fill":"rgba(116,124,120,0.15)"},
+           {"id":"block","type":"box","x":1,"y":"3*tan(theta*pi/180)+0.3","width":1.2,"height":0.8,"angle":"theta","color":"gold","label":"m"}],
+ "forces":[{"id":"fg","body":"block","origin":"center","angle":270,"magnitude":"m*0.98","label":"m\\\\vec{g}","color":"pink"},
+           {"id":"fn","body":"block","origin":"center","angle":"90+theta","magnitude":"m*0.98*cos(theta*pi/180)","label":"\\\\vec{F}_N","color":"cyan"}],
+ "elements":[{"type":"angle_arc","x":-2,"y":0,"radius":1.5,"startAngle":0,"endAngle":"theta","label":"\\\\theta","color":"gold"},
+             {"type":"right_angle","x":4,"y":0,"size":0.4,"angle":90,"color":"muted"}]}
+Body types: box (x,y,width,height,angle), wedge/ramp (x,y,width,height), sphere/circle (x,y,radius), rod (x1,y1,x2,y2,thickness), wall/surface (x1,y1,x2,y2), pulley (x,y,radius), point (x,y).
+Element types: line (x1,y1,x2,y2,dashed,arrow), angle_arc (x,y,radius,startAngle,endAngle), right_angle (x,y,size,angle), dimension (x1,y1,x2,y2,label), polygon (points).
+"""
+
+SPEC_GUIDE += "\n" + GEOMETRY_GUIDE
 
 
 MATH_GUIDE = """

@@ -1,0 +1,525 @@
+{
+  "id": "de-10-weil-dass-wenn",
+  "title": "German 10: weil, dass, wenn — linking ideas",
+  "category": "Languages · German",
+  "difficulty": "Elementary (A2)",
+  "summary": "Give reasons, report what you think, and set conditions. After weil, dass and wenn the verb goes to the end.",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 10: weil, dass, wenn — linking ideas\n\nGive reasons, report what you think, and set conditions. After weil, dass and wenn the verb goes to the end.\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| weil | — | because | /vaɪ̯l/ |\n| dass | — | that (conjunction) | /das/ |\n| wenn | — | if; when(ever) | /vɛn/ |\n| aber | — | but | /ˈaːbɐ/ |\n| denn | — | because (normal word order) | /dɛn/ |\n| oder | — | or | /ˈoːdɐ/ |\n| und | — | and | /ʊnt/ |\n| glauben | — | to believe; to think | /ˈɡlaʊ̯bn̩/ |\n| wissen | — | to know (a fact) | /ˈvɪsn̩/ |\n| krank | — | ill; sick | /kʁaŋk/ |\n| müde | — | tired | /ˈmyːdə/ |\n| das Wetter | — | weather | /ˈvɛtɐ/ |\n| der Regen | — | rain | /ˈʁeːɡn̩/ |\n\n## Phrases\n\n- **Ich bleibe zu Hause, weil ich krank bin.**: I am staying at home because I am ill.\n- **Ich glaube, dass er heute kommt.**: I think that he is coming today.\n- **Wenn es regnet, nehme ich den Bus.**: If it rains, I take the bus.\n- **Ich bin müde, denn ich habe schlecht geschlafen.**: I am tired because I slept badly.\n- **Weißt du, dass Anna Geburtstag hat?**: Do you know that it is Anna's birthday?\n- **Wir gehen spazieren, wenn das Wetter schön ist.**: We go for a walk when the weather is nice.\n- **Er lernt Deutsch, weil er in Berlin arbeiten will.**: He is learning German because he wants to work in Berlin.\n\n## Grammar: subordinate clauses\n\nAfter **weil** (because), **dass** (that) and **wenn** (if, when) the conjugated verb goes to the **end** of its clause:\n\n- *Ich bleibe zu Hause, **weil** ich krank **bin**.*\n- *Ich glaube, **dass** er heute **kommt**.*\n- With a modal verb, the modal is last: *…, weil er in Berlin arbeiten **will**.*\n- A clause first counts as position 1, so the main verb comes right after the comma: *Wenn es regnet, **nehme** ich den Bus.*\n- **und, aber, oder, denn** do not change the word order: *…, **denn** ich **habe** schlecht geschlafen.*\n- *dass* (conjunction) has two s; *das* is the article or \"that\" as a pronoun.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "weil",
+          "because"
+        ],
+        [
+          "dass",
+          "that (conjunction)"
+        ],
+        [
+          "wenn",
+          "if; when(ever)"
+        ],
+        [
+          "aber",
+          "but"
+        ],
+        [
+          "denn",
+          "because (normal word order)"
+        ],
+        [
+          "oder",
+          "or"
+        ],
+        [
+          "und",
+          "and"
+        ],
+        [
+          "glauben",
+          "to believe; to think"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am staying at home because I am ill.",
+      "answer": "Ich bleibe zu Hause, weil ich krank bin.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich bleibe zu Hause, weil ich krank bin.",
+      "bank": [
+        "Ich",
+        "bleibe",
+        "zu",
+        "Hause",
+        "weil",
+        "ich",
+        "krank",
+        "bin",
+        "ist",
+        "bist",
+        "Haus"
+      ],
+      "source": "I am staying at home because I am ill.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ich bleibe zu Hause, weil ich krank bin.",
+      "answer": "Ich bleibe zu Hause, weil ich krank bin.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I think that he is coming today.",
+      "answer": "Ich glaube, dass er heute kommt.",
+      "accepted": [
+        "Ich glaube, er kommt heute."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich glaube, dass er heute kommt.",
+      "bank": [
+        "Ich",
+        "glaube",
+        "dass",
+        "er",
+        "heute",
+        "kommt",
+        "kommen",
+        "das",
+        "kommst"
+      ],
+      "source": "I think that he is coming today.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Ich glaube, dass er heute kommt.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "I think that he is coming today."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "If it rains, I take the bus.",
+      "answer": "Wenn es regnet, nehme ich den Bus.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wenn es regnet, nehme ich den Bus.",
+      "bank": [
+        "Wenn",
+        "es",
+        "regnet",
+        "nehme",
+        "ich",
+        "den",
+        "Bus",
+        "nimmt",
+        "dem",
+        "regnen"
+      ],
+      "source": "If it rains, I take the bus.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Wenn es regnet, nehme ich den Bus.",
+      "answer": "Wenn es regnet, nehme ich den Bus.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "I am tired because I slept badly.",
+      "answer": "Ich bin müde, denn ich habe schlecht geschlafen.",
+      "accepted": [
+        "Ich bin müde, weil ich schlecht geschlafen habe."
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ich bin müde, denn ich habe schlecht geschlafen.",
+      "bank": [
+        "Ich",
+        "bin",
+        "müde",
+        "denn",
+        "ich",
+        "habe",
+        "schlecht",
+        "geschlafen",
+        "bist",
+        "geschlaft",
+        "hat"
+      ],
+      "source": "I am tired because I slept badly.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Ich bin müde, denn ich habe schlecht geschlafen.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "I am tired because I slept badly."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Do you know that it is Anna's birthday?",
+      "answer": "Weißt du, dass Anna Geburtstag hat?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Weißt du, dass Anna Geburtstag hat?",
+      "bank": [
+        "Weißt",
+        "du",
+        "dass",
+        "Anna",
+        "Geburtstag",
+        "hat",
+        "Wisst",
+        "das",
+        "habe"
+      ],
+      "source": "Do you know that it is Anna's birthday?",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Weißt du, dass Anna Geburtstag hat?",
+      "answer": "Weißt du, dass Anna Geburtstag hat?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "We go for a walk when the weather is nice.",
+      "answer": "Wir gehen spazieren, wenn das Wetter schön ist.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wir gehen spazieren, wenn das Wetter schön ist.",
+      "bank": [
+        "Wir",
+        "gehen",
+        "spazieren",
+        "wenn",
+        "das",
+        "Wetter",
+        "schön",
+        "ist",
+        "sind",
+        "der",
+        "gehst"
+      ],
+      "source": "We go for a walk when the weather is nice.",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wir gehen spazieren, wenn das Wetter schön ist.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "We go for a walk when the weather is nice."
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "He is learning German because he wants to work in Berlin.",
+      "answer": "Er lernt Deutsch, weil er in Berlin arbeiten will.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Er lernt Deutsch, weil er in Berlin arbeiten will.",
+      "bank": [
+        "Er",
+        "lernt",
+        "Deutsch",
+        "weil",
+        "er",
+        "in",
+        "Berlin",
+        "arbeiten",
+        "will",
+        "willst",
+        "wollen",
+        "arbeitet"
+      ],
+      "source": "He is learning German because he wants to work in Berlin.",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Er lernt Deutsch, weil er in Berlin arbeiten will.",
+      "answer": "Er lernt Deutsch, weil er in Berlin arbeiten will.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "fill_blank",
+      "prompt": "Ich komme nicht, weil ich keine Zeit ___.",
+      "explanation": "After **weil** the verb goes to the end: … weil ich keine Zeit **habe**.",
+      "concept": null,
+      "options": [
+        "habe",
+        "hast",
+        "haben",
+        "hat"
+      ],
+      "answer": "habe"
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "Ich weiß, ___ du recht hast.",
+      "explanation": "The conjunction *that* is **dass** (two s).",
+      "concept": null,
+      "options": [
+        "dass",
+        "das",
+        "weil",
+        "wenn"
+      ],
+      "answer": "dass"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "___ ich Zeit habe, komme ich.",
+      "explanation": "**Wenn** starts a subordinate clause; denn, aber and oder cannot.",
+      "concept": null,
+      "options": [
+        "Wenn",
+        "Denn",
+        "Aber",
+        "Oder"
+      ],
+      "answer": "Wenn"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "Ich bin müde, denn ich ___ schlecht geschlafen.",
+      "explanation": "**denn** keeps normal word order: *ich habe … geschlafen*.",
+      "concept": null,
+      "options": [
+        "habe",
+        "hat",
+        "bin",
+        "ist"
+      ],
+      "answer": "habe"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "weil",
+      "back": "because  /vaɪ̯l/",
+      "hint": "Ich lerne, weil ich eine Prüfung habe.",
+      "lang": "de"
+    },
+    {
+      "front": "dass",
+      "back": "that (conjunction)  /das/",
+      "hint": "Ich weiß, dass du recht hast.",
+      "lang": "de"
+    },
+    {
+      "front": "wenn",
+      "back": "if; when(ever)  /vɛn/",
+      "hint": "Wenn ich Zeit habe, lese ich.",
+      "lang": "de"
+    },
+    {
+      "front": "aber",
+      "back": "but  /ˈaːbɐ/",
+      "hint": "Ich bin müde, aber glücklich.",
+      "lang": "de"
+    },
+    {
+      "front": "denn",
+      "back": "because (normal word order)  /dɛn/",
+      "hint": "Ich gehe, denn es ist spät.",
+      "lang": "de"
+    },
+    {
+      "front": "oder",
+      "back": "or  /ˈoːdɐ/",
+      "hint": "Kaffee oder Tee?",
+      "lang": "de"
+    },
+    {
+      "front": "und",
+      "back": "and  /ʊnt/",
+      "hint": "Anna und Paul sind Freunde.",
+      "lang": "de"
+    },
+    {
+      "front": "glauben",
+      "back": "to believe; to think  /ˈɡlaʊ̯bn̩/",
+      "hint": "Ich glaube, er kommt.",
+      "lang": "de"
+    },
+    {
+      "front": "wissen",
+      "back": "to know (a fact)  /ˈvɪsn̩/",
+      "hint": "Weißt du das?",
+      "lang": "de"
+    },
+    {
+      "front": "krank",
+      "back": "ill; sick  /kʁaŋk/",
+      "hint": "Ich bin krank.",
+      "lang": "de"
+    },
+    {
+      "front": "müde",
+      "back": "tired  /ˈmyːdə/",
+      "hint": "Bist du müde?",
+      "lang": "de"
+    },
+    {
+      "front": "das Wetter",
+      "back": "weather  /ˈvɛtɐ/",
+      "hint": "Das Wetter ist schön.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Regen",
+      "back": "rain  /ˈʁeːɡn̩/",
+      "hint": "Der Regen hört nicht auf.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 10,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

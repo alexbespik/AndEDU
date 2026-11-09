@@ -1,5 +1,5 @@
-import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange } from 'lucide-react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange, Sparkles } from 'lucide-react';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
 import { FlashcardDeck, SpeedRound, TimelineView, ScoreStrip } from './Activities';
@@ -9,6 +9,8 @@ import Md, { MdInline } from './Md';
 import { api } from '../lib/api';
 import LessonTutor from './LessonTutor';
 import MoreMenu from './MoreMenu';
+import TextSelectionAskAgy from './TextSelectionAskAgy';
+import ExplainPlayer from './ExplainPlayer';
 
 // simulations load when the Simulation tab opens, not with every lesson
 const RollingWithoutSlippingSim = lazy(() => import('../simulations/RollingWithoutSlippingSim'));
@@ -26,8 +28,24 @@ function SimulationTab({ topic, liveSimConfig }) {
   return sim && <Suspense fallback={<p className="hint">Loading the simulation…</p>}>{sim}</Suspense>;
 }
 
-function LessonTab({ topic }) {
+/** The diagram's node labels ("A[Incident] --> B[Evanescent]" -> "Incident, Evanescent"), for the walkthrough writer. */
+function diagramLabels(src) {
+  const labels = [...String(src).matchAll(/[[({]+"?([^\])}"\n]{1,60})"?[\])}]+/g)].map((m) => m[1].trim()).filter(Boolean);
+  return (labels.length ? labels.join(', ') : String(src)).slice(0, 160);
+}
+
+function LessonTab({ topic, explainAsk, onExplainUsed }) {
   const [copied, setCopied] = useState(null);
+  const [touring, setTouring] = useState(false);  // the "Explain it to me" walkthrough is open
+  const rootRef = useRef(null);
+  const explainBtn = useRef(null);
+  // "Explain it to me" from the More menu: start here once, then forget the request
+  useEffect(() => {
+    if (!explainAsk) return;
+    setTouring(true);
+    onExplainUsed?.();
+  }, [explainAsk, onExplainUsed]);
+  const closeTour = useCallback(() => { setTouring(false); explainBtn.current?.focus({ preventScroll: true }); }, []);
   const copy = async (text, i) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -37,13 +55,23 @@ function LessonTab({ topic }) {
   };
 
   return (
-    <div className="stack">
+    <div className="stack" ref={rootRef}>
+      {topic.markdownContent && (
+        <div className="explain-cta">
+          <button type="button" ref={explainBtn} className="btn btn-primary explain-btn" onClick={() => setTouring(true)}
+            aria-describedby="explain-cta-note" aria-expanded={touring}>
+            <Sparkles size={16} aria-hidden="true" /> Explain it to me
+          </button>
+          <span id="explain-cta-note" className="hint">A narrated walkthrough that points at each idea on this page.</span>
+        </div>
+      )}
       {topic.cheatSheet?.length > 0 && (
         <section className="stack-sm" aria-labelledby="formulas-h">
           <h2 id="formulas-h" style={{ fontSize: '1.2rem' }}>Key formulas</h2>
           <div className="formula-grid">
             {topic.cheatSheet.map((item, i) => (
-              <div key={i} className="formula">
+              <div key={i} className="formula" data-explain={`f${i}`}
+                data-explain-text={`${item.label || item.name ? `${item.label || item.name}: ` : ''}${item.formula}`}>
                 <div style={{ minWidth: 0 }}>
                   {(item.label || item.name) && <span className="lbl"><MdInline>{item.label || item.name}</MdInline></span>}
                   <div className="tex"><MdInline>{`$${item.formula}$`}</MdInline></div>
@@ -57,14 +85,23 @@ function LessonTab({ topic }) {
           </div>
         </section>
       )}
-      {topic.mermaid && <MermaidViewer chart={topic.mermaid} />}
-      <Md className="prose">{topic.markdownContent}</Md>
+      {topic.mermaid && (
+        <div data-explain="diagram" data-explain-text={diagramLabels(topic.mermaid)}>
+          <MermaidViewer chart={topic.mermaid} />
+        </div>
+      )}
+      <TextSelectionAskAgy topicId={topic.id} courseId={topic.source?.courseId}>
+        <Md className="prose" explainIds>{topic.markdownContent}</Md>
+      </TextSelectionAskAgy>
+      {touring && <ExplainPlayer topic={topic} rootRef={rootRef} onClose={closeTour} />}
     </div>
   );
 }
 
 export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimConfig, userId, course, onOpenCourse, onHome, prevClass, nextClass, onOpenClass, embedded = false }) {
   const [tutorFocus, setTutorFocus] = useState(null);
+  const [explainAsk, setExplainAsk] = useState(0);  // the More menu asked for the walkthrough
+  const explainUsed = useCallback(() => setExplainAsk(0), []);
   const solvedRef = useRef(new Set());  // practice items solved in this visit (for the practice & games score)
   useEffect(() => { solvedRef.current = new Set(); }, [topic?.id]);
 
@@ -127,7 +164,8 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
           {topic.difficulty && <span>{topic.difficulty}</span>}
         </div>
         {topic.summary && <p className="summary"><MdInline>{topic.summary}</MdInline></p>}
-        <MoreMenu key={topic.id} topic={topic} courseTitle={course?.title || src.courseTitle} />
+        <MoreMenu key={topic.id} topic={topic} courseTitle={course?.title || src.courseTitle}
+          onExplain={topic.markdownContent ? () => { setActiveTab('theory'); setExplainAsk((n) => n + 1); } : undefined} />
         <ScoreStrip topicId={topic.id} userId={userId} />
         <div className="tabs" role="tablist" aria-label="Topic sections">
           {tabs.map(({ id, label, icon: Icon, count, note }) => (
@@ -142,7 +180,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
       </header>
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'theory' && <LessonTab topic={topic} />}
+        {tab === 'theory' && <LessonTab key={topic.id} topic={topic} explainAsk={explainAsk} onExplainUsed={explainUsed} />}
         {tab === 'simulation' && <SimulationTab key={topic.id} topic={topic} liveSimConfig={liveSimConfig} />}
         {tab === 'quiz' && (
           <QuizEngine key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId}

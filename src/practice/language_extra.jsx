@@ -6,7 +6,7 @@ import { Volume2, Play, Pause, RotateCcw, Check, Send, Loader2, Eye, EyeOff, Fla
 import Md, { MdInline } from '../components/Md';
 import { MatchPairs } from '../components/Activities';
 import { ExplainAnswerButton } from '../components/ExplainDialog';
-import { speak, noVoiceHelp, languageName } from '../lib/speech';
+import { speakAudio, stopSpeech, isSpeaking, noVoiceHelp, languageName } from '../lib/speech';
 import { gradeText } from '../lib/langgrade';
 import { api } from '../lib/api';
 import { SCRIPT_LANG, speakerStyles, correctionsOf } from '../components/language/util';
@@ -20,8 +20,7 @@ function untilQuiet(stop) {
   const t0 = Date.now();
   return new Promise((resolve) => {
     const tick = () => {
-      const s = window.speechSynthesis;
-      const quiet = !s || (!s.speaking && !s.pending);
+      const quiet = !isSpeaking();
       if (stop() || (quiet && Date.now() - t0 > 300) || Date.now() - t0 > 30000) resolve();
       else setTimeout(tick, 150);
     };
@@ -59,13 +58,13 @@ export function StoryPlayer({ item, onResult, retry = true, listenOnly = false }
   const [openTr, setOpenTr] = useState({});
   const [note, setNote] = useState(null);
   const run = useRef(0), shownRef = useRef(0), auto = useRef(false), reported = useRef(false);
-  useEffect(() => () => { clearTimeout(resume.current); run.current++; window.speechSynthesis?.cancel(); }, []);
+  useEffect(() => () => { clearTimeout(resume.current); run.current++; stopSpeech(); }, []);
   useEffect(() => setShowText(!listenOnly), [listenOnly]);
 
   const waitingAt = (i) => questions.some((q, k) => q.after === i && !(k in picks));
   const blocked = shown > 0 && waitingAt(shown - 1);
   const say = async (line, stop) => {
-    const r = await speak(line.text, item.lang, styles[line.speaker]);
+    const r = await speakAudio(line.text, item.lang, styles[line.speaker]);
     if (!r.ok) { setNote(voiceNote(r)); return; }
     await untilQuiet(stop);
   };
@@ -83,7 +82,7 @@ export function StoryPlayer({ item, onResult, retry = true, listenOnly = false }
     if (!stop()) setPlaying(false);
   };
   const resume = useRef(null);  // the short pause before playing on after a question
-  const pause = () => { clearTimeout(resume.current); run.current++; auto.current = false; setPlaying(false); window.speechSynthesis?.cancel(); };
+  const pause = () => { clearTimeout(resume.current); run.current++; auto.current = false; setPlaying(false); stopSpeech(); };
   const replay = (line) => { run.current++; setPlaying(false); say(line, () => false); };
   const pick = (k, opt) => {
     if (k in picks) return;
@@ -169,7 +168,7 @@ export function DialogueChat({ item, onResult }) {
   const [done, setDone] = useState(false);
   const [note, setNote] = useState(null);
   const alive = useRef(true), conv = useRef(0);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; window.speechSynthesis?.cancel(); }; }, []);  // StrictMode remounts
+  useEffect(() => { alive.current = true; return () => { alive.current = false; stopSpeech(); }; }, []);  // StrictMode remounts
   const turns = msgs.filter((m) => m.role === 'user').length;
 
   const finish = (all) => {
@@ -213,7 +212,7 @@ export function DialogueChat({ item, onResult }) {
     if (last?.role === 'user') send(last.text, msgs.slice(0, -1));
     else send('');
   };
-  const hear = (text) => speak(text, item.lang).then((r) => setNote(r.ok ? null : voiceNote(r)));
+  const hear = (text) => speakAudio(text, item.lang).then((r) => setNote(r.ok ? null : voiceNote(r)));
   const restart = () => { conv.current++; setMsgs([]); setDone(false); setOffline(false); setError(null); setBusy(false); };
   const allCorrections = msgs.flatMap((m) => m.corrections || []);
 
@@ -335,7 +334,7 @@ export function ScriptMatch({ item, onResult }) {
     const col = btn?.parentElement;
     if (!btn || !col || col !== col.parentElement?.firstElementChild) return;  // only the glyph column speaks
     const glyph = btn.textContent.trim();
-    speak(item.say?.[glyph] || glyph, lang, { rate: 0.75 }).then((r) => setNote(r.ok ? null : voiceNote(r)));
+    speakAudio(item.say?.[glyph] || glyph, lang, { slow: true, rate: 0.75 }).then((r) => setNote(r.ok ? null : voiceNote(r)));
   };
   return (
     <div className="stack-sm lx-script" onClickCapture={hear} lang={lang}>

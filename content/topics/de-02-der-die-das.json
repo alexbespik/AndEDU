@@ -1,0 +1,527 @@
+{
+  "id": "de-02-der-die-das",
+  "title": "German 2: der, die, das — genders and plurals",
+  "category": "Languages · German",
+  "difficulty": "Beginner (A1)",
+  "summary": "Every German noun has a gender: der (masculine), die (feminine) or das (neuter). Learn each noun with its article and plural.",
+  "workspace": "language",
+  "lang": "de",
+  "markdownContent": "# German 2: der, die, das — genders and plurals\n\nEvery German noun has a gender: der (masculine), die (feminine) or das (neuter). Learn each noun with its article and plural.\n\n## Words\n\n| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n| der Mann | die Männer | man | /man/ |\n| das Kind | die Kinder | child | /kɪnt/ |\n| der Tisch | die Tische | table | /tɪʃ/ |\n| die Lampe | die Lampen | lamp | /ˈlampə/ |\n| das Buch | die Bücher | book | /buːx/ |\n| der Stuhl | die Stühle | chair | /ʃtuːl/ |\n| die Tür | die Türen | door | /tyːɐ̯/ |\n| das Fenster | die Fenster | window | /ˈfɛnstɐ/ |\n| der Schlüssel | die Schlüssel | key | /ˈʃlʏsl̩/ |\n| die Tasche | die Taschen | bag | /ˈtaʃə/ |\n| das Handy | die Handys | mobile phone | /ˈhɛndi/ |\n| die Leute | — | people | /ˈlɔʏ̯tə/ |\n\n## Phrases\n\n- **Das ist ein Buch.**: That is a book.\n- **Der Tisch ist groß.**: The table is big.\n- **Die Lampe ist neu.**: The lamp is new.\n- **Das Kind ist klein.**: The child is small.\n- **Die Bücher sind alt.**: The books are old.\n- **Wo ist mein Schlüssel?**: Where is my key?\n- **Ist das eine Tasche?**: Is that a bag?\n\n## Grammar: articles and plurals\n\n| | masculine | feminine | neuter | plural |\n| --- | --- | --- | --- | --- |\n| the | **der** Tisch | **die** Lampe | **das** Buch | **die** Bücher |\n| a | **ein** Tisch | **eine** Lampe | **ein** Buch | — |\n\n- Always learn the article with the noun: *der Stuhl*, *die Tür*, *das Fenster*.\n- Helpful patterns: nouns in **-e** are often feminine (*die Lampe, die Tasche*); **-chen** and **-lein** are always neuter.\n- The plural article is always **die**. Plural endings vary: *-e (Tische), -er (Kinder), -en (Türen), -s (Handys)*, or none (*Fenster*), often with an umlaut (*Bücher, Stühle, Männer*).\n- *Leute* (people) exists only in the plural.\n",
+  "quiz": [],
+  "practice": [
+    {
+      "id": "p1",
+      "type": "match_pairs",
+      "prompt": "Match each word to its meaning",
+      "explanation": "",
+      "concept": null,
+      "pairs": [
+        [
+          "der Mann",
+          "man"
+        ],
+        [
+          "das Kind",
+          "child"
+        ],
+        [
+          "der Tisch",
+          "table"
+        ],
+        [
+          "die Lampe",
+          "lamp"
+        ],
+        [
+          "das Buch",
+          "book"
+        ],
+        [
+          "der Stuhl",
+          "chair"
+        ],
+        [
+          "die Tür",
+          "door"
+        ],
+        [
+          "das Fenster",
+          "window"
+        ]
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "That is a book.",
+      "answer": "Das ist ein Buch.",
+      "accepted": [
+        "Das ist ein Buch"
+      ],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p3",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Das ist ein Buch.",
+      "bank": [
+        "Das",
+        "ist",
+        "ein",
+        "Buch",
+        "eine",
+        "einen",
+        "sind"
+      ],
+      "source": "That is a book.",
+      "lang": "de"
+    },
+    {
+      "id": "p4",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Das ist ein Buch.",
+      "answer": "Das ist ein Buch.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p5",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The table is big.",
+      "answer": "Der Tisch ist groß.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p6",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Der Tisch ist groß.",
+      "bank": [
+        "Der",
+        "Tisch",
+        "ist",
+        "groß",
+        "Die",
+        "Das",
+        "sind"
+      ],
+      "source": "The table is big.",
+      "lang": "de"
+    },
+    {
+      "id": "p7",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Der Tisch ist groß.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "The table is big."
+    },
+    {
+      "id": "p8",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The lamp is new.",
+      "answer": "Die Lampe ist neu.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p9",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Die Lampe ist neu.",
+      "bank": [
+        "Die",
+        "Lampe",
+        "ist",
+        "neu",
+        "Der",
+        "Das",
+        "sind"
+      ],
+      "source": "The lamp is new.",
+      "lang": "de"
+    },
+    {
+      "id": "p10",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Die Lampe ist neu.",
+      "answer": "Die Lampe ist neu.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p11",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The child is small.",
+      "answer": "Das Kind ist klein.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p12",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Das Kind ist klein.",
+      "bank": [
+        "Das",
+        "Kind",
+        "ist",
+        "klein",
+        "Der",
+        "Die",
+        "Kinder"
+      ],
+      "source": "The child is small.",
+      "lang": "de"
+    },
+    {
+      "id": "p13",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Das Kind ist klein.",
+      "lang": "de",
+      "ipa": "",
+      "translation": "The child is small."
+    },
+    {
+      "id": "p14",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "The books are old.",
+      "answer": "Die Bücher sind alt.",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p15",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Die Bücher sind alt.",
+      "bank": [
+        "Die",
+        "Bücher",
+        "sind",
+        "alt",
+        "Das",
+        "ist",
+        "Buchs"
+      ],
+      "source": "The books are old.",
+      "lang": "de"
+    },
+    {
+      "id": "p16",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Die Bücher sind alt.",
+      "answer": "Die Bücher sind alt.",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p17",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Where is my key?",
+      "answer": "Wo ist mein Schlüssel?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p18",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Wo ist mein Schlüssel?",
+      "bank": [
+        "Wo",
+        "ist",
+        "mein",
+        "Schlüssel",
+        "meine",
+        "sind",
+        "Wer"
+      ],
+      "source": "Where is my key?",
+      "lang": "de"
+    },
+    {
+      "id": "p19",
+      "type": "speak",
+      "prompt": "Say it",
+      "explanation": "",
+      "concept": null,
+      "target": "Wo ist mein Schlüssel?",
+      "lang": "de",
+      "ipa": "",
+      "translation": "Where is my key?"
+    },
+    {
+      "id": "p20",
+      "type": "translate",
+      "prompt": "Translate",
+      "explanation": "",
+      "concept": null,
+      "source": "Is that a bag?",
+      "answer": "Ist das eine Tasche?",
+      "accepted": [],
+      "lang": "de",
+      "sourceLang": null
+    },
+    {
+      "id": "p21",
+      "type": "word_bank",
+      "prompt": "Build the sentence",
+      "explanation": "",
+      "concept": null,
+      "answer": "Ist das eine Tasche?",
+      "bank": [
+        "Ist",
+        "das",
+        "eine",
+        "Tasche",
+        "ein",
+        "einen",
+        "Sind"
+      ],
+      "source": "Is that a bag?",
+      "lang": "de"
+    },
+    {
+      "id": "p22",
+      "type": "listen_type",
+      "prompt": "Type what you hear",
+      "explanation": "",
+      "concept": null,
+      "audio_text": "Ist das eine Tasche?",
+      "answer": "Ist das eine Tasche?",
+      "accepted": [],
+      "lang": "de"
+    },
+    {
+      "id": "p23",
+      "type": "fill_blank",
+      "prompt": "___ Fenster ist offen.",
+      "explanation": "**das** Fenster: neuter.",
+      "concept": null,
+      "options": [
+        "Das",
+        "Der",
+        "Die",
+        "option_4"
+      ],
+      "answer": "Das"
+    },
+    {
+      "id": "p24",
+      "type": "fill_blank",
+      "prompt": "___ Tür ist zu.",
+      "explanation": "**die** Tür: feminine.",
+      "concept": null,
+      "options": [
+        "Die",
+        "Der",
+        "Das",
+        "option_4"
+      ],
+      "answer": "Die"
+    },
+    {
+      "id": "p25",
+      "type": "fill_blank",
+      "prompt": "___ Stuhl ist bequem.",
+      "explanation": "**der** Stuhl: masculine.",
+      "concept": null,
+      "options": [
+        "Der",
+        "Die",
+        "Das",
+        "option_4"
+      ],
+      "answer": "Der"
+    },
+    {
+      "id": "p26",
+      "type": "fill_blank",
+      "prompt": "ein Kind, zwei ___",
+      "explanation": "das Kind → die **Kinder** (plural -er).",
+      "concept": null,
+      "options": [
+        "Kinder",
+        "Kinds",
+        "Kinden",
+        "Kindes"
+      ],
+      "answer": "Kinder"
+    },
+    {
+      "id": "p27",
+      "type": "fill_blank",
+      "prompt": "ein Buch, drei ___",
+      "explanation": "das Buch → die **Bücher** (umlaut + -er).",
+      "concept": null,
+      "options": [
+        "Bücher",
+        "Buchs",
+        "Buche",
+        "Büchen"
+      ],
+      "answer": "Bücher"
+    }
+  ],
+  "flashcards": [
+    {
+      "front": "der Mann",
+      "back": "man  /man/",
+      "hint": "Plural: die Männer. Der Mann ist groß.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "das Kind",
+      "back": "child  /kɪnt/",
+      "hint": "Plural: die Kinder. Das Kind spielt.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Tisch",
+      "back": "table  /tɪʃ/",
+      "hint": "Plural: die Tische. Der Tisch ist neu.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Lampe",
+      "back": "lamp  /ˈlampə/",
+      "hint": "Plural: die Lampen. Die Lampe ist hell.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Buch",
+      "back": "book  /buːx/",
+      "hint": "Plural: die Bücher. Das Buch ist interessant.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Stuhl",
+      "back": "chair  /ʃtuːl/",
+      "hint": "Plural: die Stühle. Der Stuhl ist bequem.",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Tür",
+      "back": "door  /tyːɐ̯/",
+      "hint": "Plural: die Türen. Die Tür ist zu.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Fenster",
+      "back": "window  /ˈfɛnstɐ/",
+      "hint": "Plural: die Fenster. Das Fenster ist offen.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "der Schlüssel",
+      "back": "key  /ˈʃlʏsl̩/",
+      "hint": "Plural: die Schlüssel. Wo ist der Schlüssel?",
+      "lang": "de",
+      "gender": "m",
+      "article": "der"
+    },
+    {
+      "front": "die Tasche",
+      "back": "bag  /ˈtaʃə/",
+      "hint": "Plural: die Taschen. Die Tasche ist schwer.",
+      "lang": "de",
+      "gender": "f",
+      "article": "die"
+    },
+    {
+      "front": "das Handy",
+      "back": "mobile phone  /ˈhɛndi/",
+      "hint": "Plural: die Handys. Das Handy ist kaputt.",
+      "lang": "de",
+      "gender": "n",
+      "article": "das"
+    },
+    {
+      "front": "die Leute",
+      "back": "people (plural)  /ˈlɔʏ̯tə/",
+      "hint": "Die Leute sind nett.",
+      "lang": "de",
+      "gender": "pl",
+      "article": "die"
+    }
+  ],
+  "source": {
+    "workspace": "language",
+    "lang": "de",
+    "courseTitle": "German A1-A2 (built in)",
+    "classSeq": 2,
+    "classTotal": 10,
+    "builtin": "de"
+  },
+  "cheatSheet": []
+}

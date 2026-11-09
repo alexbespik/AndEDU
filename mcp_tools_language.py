@@ -14,39 +14,77 @@ def _item(a, **fields):
             **{k: v for k, v in fields.items() if k != "default_prompt" and v not in (None, "")}}
 
 
+# Noun articles by grammatical gender (m, f, n, pl) for languages whose cards show them; others may pass `article`.
+ARTICLES = {"de": {"m": "der", "f": "die", "n": "das", "pl": "die"}}
+
+
+def _article(w, lang):
+    return w.get("article") or ARTICLES.get(str(lang).split("-")[0], {}).get(w.get("gender") or "")
+
+
+def _front(w, lang):
+    """The word as it is learned: German nouns with their article (der Apfel), everything else as given."""
+    art = _article(w, lang)
+    return f"{art} {w['word']}" if art and not w["word"].lower().startswith(art.lower() + " ") else w["word"]
+
+
+def _plural(w, lang):
+    pl = str(w.get("plural") or "").strip()
+    art = ARTICLES.get(str(lang).split("-")[0], {}).get("pl")
+    return f"{art} {pl}" if pl and art and not pl.lower().startswith(art + " ") else pl
+
+
 def _card(w, lang):
-    back = w["meaning"] + (f"  /{w['ipa'].strip('/')}/" if w.get("ipa") else "")
-    return {"front": w["word"], "back": back, "lang": lang, **({"hint": w["example"]} if w.get("example") else {})}
+    meaning = w["meaning"] + (" (plural)" if w.get("gender") == "pl" and "plural" not in w["meaning"] else "")
+    back = meaning + (f"  /{w['ipa'].strip('/')}/" if w.get("ipa") else "")
+    hint = " ".join(x for x in ((f"Plural: {_plural(w, lang)}." if w.get("plural") else ""), w.get("example") or "") if x)
+    card = {"front": _front(w, lang), "back": back, "lang": lang, **({"hint": hint[:200]} if hint else {})}
+    if w.get("gender"):  # kept for clients; the article is in `front` either way
+        card["gender"], card["article"] = w["gender"], _article(w, lang)
+    return card
 
 
 def unit_topic(a):
     """A complete language unit (topic JSON) from a word list and optional phrases; no model calls."""
     lang, words, phrases = a["lang"], a.get("words") or [], a.get("phrases") or []
-    rows = "\n".join(f"| {w['word']} | {w['meaning']} | {('/' + w['ipa'].strip('/') + '/') if w.get('ipa') else ''} |" for w in words)
-    md = f"# {a['title']}\n\n{a.get('intro', '')}\n\n## Words\n\n| Word | Meaning | Pronunciation |\n| --- | --- | --- |\n{rows}\n"
+    ipa = lambda w: ('/' + w['ipa'].strip('/') + '/') if w.get('ipa') else ''
+    if any(w.get("gender") or w.get("plural") for w in words):  # nouns with gender: article and plural columns
+        rows = "\n".join(f"| {_front(w, lang)} | {_plural(w, lang) or '—'} | {w['meaning']} | {ipa(w)} |" for w in words)
+        table = f"| Word | Plural | Meaning | Pronunciation |\n| --- | --- | --- | --- |\n{rows}\n"
+    else:
+        rows = "\n".join(f"| {w['word']} | {w['meaning']} | {ipa(w)} |" for w in words)
+        table = f"| Word | Meaning | Pronunciation |\n| --- | --- | --- |\n{rows}\n"
+    md = f"# {a['title']}\n\n{a.get('intro', '')}\n\n## Words\n\n{table}"
     if phrases:
         md += "\n## Phrases\n\n" + "\n".join(f"- **{p['text']}**: {p['meaning']}" for p in phrases) + "\n"
+    if a.get("notes"):
+        md += f"\n{a['notes'].strip()}\n"
     practice = []
     if len(words) >= 3:
-        practice.append({"type": "match_pairs", "prompt": "Match each word to its meaning", "pairs": [[w["word"], w["meaning"]] for w in words[:8]]})
+        practice.append({"type": "match_pairs", "prompt": "Match each word to its meaning", "pairs": [[_front(w, lang), w["meaning"]] for w in words[:8]]})
     all_tiles = [t for p in phrases for t in re.findall(r"[\w'’]+", p["text"])]
     for i, p in enumerate(phrases[:8]):
         tiles = re.findall(r"[\w'’]+", p["text"])
-        extra = [t for t in dict.fromkeys(all_tiles) if t not in tiles][:3] or [w["word"] for w in words if w["word"] not in tiles][:3]
+        extra = (list(p.get("distractors") or []) or [t for t in dict.fromkeys(all_tiles) if t not in tiles][:3]
+                 or [w["word"] for w in words if w["word"] not in tiles][:3])
         practice.append({"type": "translate", "prompt": "Translate", "source": p["meaning"], "answer": p["text"], "accepted": p.get("accepted") or [], "lang": lang})
         if 4 <= len(tiles) + len(extra) <= 14:
             practice.append({"type": "word_bank", "prompt": "Build the sentence", "source": p["meaning"], "answer": p["text"], "bank": tiles + extra, "lang": lang})
         practice.append({"type": "listen_type", "prompt": "Type what you hear", "audio_text": p["text"], "lang": lang} if i % 2 == 0 else
                         {"type": "speak", "prompt": "Say it", "target": p["text"], "translation": p["meaning"], "ipa": p.get("ipa", ""), "lang": lang})
-    return {"id": a.get("id") or _slug(a["title"]), "title": a["title"], "category": a.get("category") or "Languages",
-            "difficulty": a.get("level") or "Beginner", "summary": a.get("intro") or f"Words and phrases: {a['title']}.",
-            "workspace": "language", "markdownContent": md, "quiz": [], "practice": practice,
-            "flashcards": [_card(w, lang) for w in words]}
+    practice += [dict(p) for p in a.get("practice") or [] if isinstance(p, dict)]  # extra items (fill_blank, conjugate, ...)
+    out = {"id": a.get("id") or _slug(a["title"]), "title": a["title"], "category": a.get("category") or "Languages",
+           "difficulty": a.get("level") or "Beginner", "summary": a.get("intro") or f"Words and phrases: {a['title']}.",
+           "workspace": "language", "lang": lang, "markdownContent": md, "quiz": [], "practice": practice,
+           "flashcards": [_card(w, lang) for w in words]}
+    if isinstance(a.get("source"), dict):
+        out["source"] = dict(a["source"])
+    return out
 
 
 def tools(call, q, S, STR, OBJ, ARR):
     LANG = lambda: STR("target language, BCP-47 such as es, fr, de, uk, ja")
-    WORDS = {"type": "array", "items": {"type": "object"}, "description": "[{word, meaning, ipa?, example?}]"}
+    WORDS = {"type": "array", "items": {"type": "object"}, "description": "[{word, meaning, ipa?, example?, gender? (m|f|n|pl: German nouns get der/die/das), plural?}]"}
     practice = lambda tid, *items: call("POST", f"/api/topics/{q(tid)}/practice", {"items": list(items)})
     event = lambda payload: call("POST", "/api/agy/events", {"type": "SWITCH_STUDIO_MODE", "payload": {"mode": "language", **payload}})
 
@@ -128,6 +166,9 @@ def tools(call, q, S, STR, OBJ, ARR):
         ("language_overview", "Every language unit with word counts, languages and exercise counts by type; with user_id also XP, "
          "streak and goals. (Crowns and word strength live in the student's browser.)",
          S(user_id=STR("profile id", optional=True)), overview),
+        ("seed_language_course", "Install the built-in offline course for a language (German A1-A2: 10 units with genders, plurals, "
+         "cases, separable and modal verbs, Perfekt, weil/dass/wenn). Never overwrites a lesson that already exists; admin-only with accounts.",
+         S(lang=STR("course language", enum=["de"])), lambda a: call("POST", "/api/language/seed", {"lang": a.get("lang") or "de"})),
         ("start_roleplay", "Open a conversational Roleplay Partner session on the student's screen (Languages > Roleplay).",
          S(scenario=STR("scenario id or description", optional=True)),
          lambda a: event({"tab": "roleplay", "scenario": a.get("scenario")})),

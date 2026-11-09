@@ -7,6 +7,7 @@ from unittest import mock
 from test_lab import LOCAL, server  # noqa: E402  (sets up the temporary data folder and offline Gemini)
 import advisor  # noqa: E402
 import advisor_chat  # noqa: E402
+import wm_advising  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
@@ -99,7 +100,7 @@ class AdvisorChat(unittest.TestCase):
     def test_accounts_mode_blocks_other_students_record(self):
         server.AUTH_REQUIRED = True
         tok = self.c.post("/api/auth/register", json={"name": f"Eve {uuid.uuid4().hex[:6]}", "password": "correct horse battery",
-                                                       "adult": True}).json()["token"]
+                                                       "adult": True, "privacy": True}).json()["token"]
         r = self.c.post(f"/api/advisor/{self.uid}/ask", json={"message": "What did they take?"},
                         headers={"Authorization": f"Bearer {tok}"})
         self.assertEqual(r.status_code, 403)
@@ -184,6 +185,71 @@ class AdvisorChat(unittest.TestCase):
         # duplicate ref on same day gets 0
         dup = engage.award(u, day, "practice_correct", "q_0")
         self.assertEqual(dup["xp"], 0)
+
+    def test_stoic_topic_expansion_without_cs_dumping(self):
+        # Student with CS history asks about Stoic philosophy
+        user = server.db.get_or_create_user(f"StoicStudent-{uuid.uuid4().hex[:6]}")["id"]
+        advisor.upsert_courses([
+            {"code": "CSCI 141", "title": "Modern Programming", "credits": "4"},
+            {"code": "CSCI 241", "title": "Data Structures", "credits": "3", "prereqs": "CSCI 141"},
+            {"code": "CSCI 243", "title": "Discrete Structures", "credits": "3", "prereqs": "CSCI 141"},
+            {"code": "PHIL 231", "title": "Greek Philosophy", "credits": "3", "description": "Ancient Greek and Roman thinkers, Epictetus, Seneca, Stoic philosophy."},
+            {"code": "PHIL 303", "title": "Ethics", "credits": "3", "description": "Moral theory, virtue ethics, and stoicism."},
+            {"code": "CLCV 208", "title": "Roman Culture", "credits": "3", "description": "Life in ancient Rome, Marcus Aurelius, and stoic principles."},
+        ], "test")
+        advisor.add_completed(user, [{"code": "CSCI 141", "grade": "A"}, {"code": "CSCI 241", "grade": "A"}], "test")
+
+        # 1. Topic expansions mapping exists
+        self.assertIn("stoic", advisor_chat.TARGET_DEPARTMENTS)
+        self.assertIn("PHIL", advisor_chat.TARGET_DEPARTMENTS["stoic"])
+        self.assertIn("CLCV", advisor_chat.TARGET_DEPARTMENTS["stoic"])
+
+        # 2. Context detects topic interest and injects matching courses
+        ctx = advisor_chat.build_context(user, "Are there any courses on Stoic philosophy?")
+        self.assertIn("COURSES MATCHING STUDENT'S TOPIC INTEREST:", ctx)
+        self.assertTrue("PHIL 231" in ctx or "PHIL 303" in ctx or "CLCV 208" in ctx)
+
+        # 3. De-biased recommend ranks topical courses high instead of drowning in CS continuation
+        recs = advisor.recommend(user, "stoic philosophy", limit=5)
+        rec_codes = [c["code"] for c in recs]
+        self.assertTrue(any(c.startswith("PHIL") or c.startswith("CLCV") for c in rec_codes))
+        # Top course should be a philosophy/classics course matching the topic, not CSCI
+        self.assertTrue(rec_codes[0].startswith("PHIL") or rec_codes[0].startswith("CLCV"))
+
+    def test_student_notes_persistence_and_context_injection(self):
+        user = server.db.get_or_create_user(f"NotesStudent-{uuid.uuid4().hex[:6]}")["id"]
+        notes = "Interested in Marcus Aurelius Meditations and Epictetus Enchiridion."
+        saved = server.db.save_student_notes(user, notes)
+        self.assertEqual(saved["notes_text"], notes)
+        self.assertEqual(server.db.get_student_notes(user), notes)
+
+        ctx = advisor_chat.build_context(user, "What should I take?")
+        self.assertIn("STUDENT'S WRITTEN NOTES & SCRATCHPAD:", ctx)
+        self.assertIn("Marcus Aurelius Meditations", ctx)
+
+    def test_schedule_conflicts_detection(self):
+        c1 = {"code": "PHIL 231", "meeting_times": [{"meet_day": "1", "start_time": "1100", "end_time": "1220"}]}
+        c2 = {"code": "CSCI 241", "meets": "TR 11:30-12:50p"}
+        c3 = {"code": "MATH 111", "meets": "MWF 9-9:50a"}
+        conflicts = wm_advising.check_schedule_conflicts([c1, c2, c3])
+        self.assertEqual(len(conflicts), 1)
+        self.assertTrue(conflicts[0]["conflict"])
+        self.assertEqual(conflicts[0]["day"], "T")
+        self.assertIn(conflicts[0]["course_a"], ("PHIL 231", "CSCI 241"))
+        self.assertIn(conflicts[0]["course_b"], ("PHIL 231", "CSCI 241"))
+
+    def test_launch_course_creates_a_studio_course_and_links_the_cart(self):
+        advisor.upsert_courses([{"code": "PHIL 205", "title": "Meaning in Life", "credits": "3", "prereqs": "none"}], "test")
+        term = wm_advising.next_term()
+        self.assertEqual(self.c.post(f"/api/advisor/{self.uid}/cart", json={"code": "PHIL 205", "term": term}).status_code, 200)
+        launch_res = self.c.post(f"/api/advisor/{self.uid}/launch-course", json={"code": "PHIL 205", "term": term})
+        self.assertEqual(launch_res.status_code, 200, launch_res.text)
+        body = launch_res.json()
+        self.assertIn("redirect_url", body)
+        self.assertEqual(server.db.get_course(body["course_id"])["user_id"], self.uid)
+        self.assertEqual(self.c.get(f"/api/advisor/{self.uid}/semester-plan").status_code, 404)  # the Auto-Plan is gone
+        item = self.c.get(f"/api/advisor/{self.uid}/cart?term={term}").json()["items"][0]
+        self.assertEqual(item["studio_course_id"], body["course_id"])
 
 
 if __name__ == "__main__":
