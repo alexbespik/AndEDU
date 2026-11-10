@@ -19,9 +19,9 @@ While we look for specific philosophy offerings on Stoicism, your completed cour
 COLL 150, MATH 111, CSCI 141, CSCI 241, CSCI 243
 ```
 This failure occurred because of three distinct architectural misalignments:
-1. **Keyword Extraction & Semantic Blindspot**: In [advisor_chat.py](file://advisor_chat.py#L116-L120), `_keywords` extracted raw words of length $\ge 4$ (`['could', 'find', 'some', 'stoic']`). The catalog search queried these words literally against `catalog_courses`. Courses teaching Stoicism at William & Mary are cataloged under Philosophy (`PHIL 231`: Greek Philosophy, `PHIL 303`: Ethics, `PHIL 205`: Meaning in Life) and Classical Studies (`CLCV 208`: Roman Culture, `CLCV 316`), where descriptions mention Epictetus, Seneca, Marcus Aurelius, or Hellenistic ethics, not necessarily the standalone token "stoic".
-2. **Recommendation Bias toward Completed Departments**: In [advisor.py](file://advisor.py#L775-L778), `recommend()` awarded $+3$ points for any course in departments the student already took (`CSCI`, `MATH`), plus $+2$ per satisfied prerequisite. Consequently, `CSCI 241` and `CSCI 243` scored 5.0–7.0, while un-prerequited Philosophy courses scored 0. When injected into prompt context under *"COURSES WHOSE LISTED PREREQUISITES THE STUDENT MEETS"*, the model treated them as primary recommendations.
-3. **Bureaucratic Prompt Inversion**: In [advisor_chat.py](file://advisor_chat.py#L17-L23), `SYSTEM_PROMPT` instructed: *"When the student's request is broad or ambiguous... ask thoughtful, targeted clarifying questions... before making specific course recommendations"* and pushed gateway pathways (`CSCI 141 -> 241`). The model treated a specific intellectual inquiry as "ambiguous", interrogating the student and regurgitating their existing STEM pathway.
+1. **Keyword Extraction & Semantic Blindspot**: In [advisor_chat.py](../../advisor_chat.py#L116-L120), `_keywords` extracted raw words of length $\ge 4$ (`['could', 'find', 'some', 'stoic']`). The catalog search queried these words literally against `catalog_courses`. Courses teaching Stoicism at William & Mary are cataloged under Philosophy (`PHIL 231`: Greek Philosophy, `PHIL 303`: Ethics, `PHIL 205`: Meaning in Life) and Classical Studies (`CLCV 208`: Roman Culture, `CLCV 316`), where descriptions mention Epictetus, Seneca, Marcus Aurelius, or Hellenistic ethics, not necessarily the standalone token "stoic".
+2. **Recommendation Bias toward Completed Departments**: In [advisor.py](../../advisor.py#L775-L778), `recommend()` awarded $+3$ points for any course in departments the student already took (`CSCI`, `MATH`), plus $+2$ per satisfied prerequisite. Consequently, `CSCI 241` and `CSCI 243` scored 5.0–7.0, while un-prerequited Philosophy courses scored 0. When injected into prompt context under *"COURSES WHOSE LISTED PREREQUISITES THE STUDENT MEETS"*, the model treated them as primary recommendations.
+3. **Bureaucratic Prompt Inversion**: In [advisor_chat.py](../../advisor_chat.py#L17-L23), `SYSTEM_PROMPT` instructed: *"When the student's request is broad or ambiguous... ask thoughtful, targeted clarifying questions... before making specific course recommendations"* and pushed gateway pathways (`CSCI 141 -> 241`). The model treated a specific intellectual inquiry as "ambiguous", interrogating the student and regurgitating their existing STEM pathway.
 
 ### 1.2 Missing Universal Internet Grounding & Reasoning
 Several AI entry points (`advisor_ask`, `agy_prompt`, `lesson_tutor`) previously invoked Gemini with plain text configurations or incomplete toolsets without live Google Search grounding or reasoning thinking budgets.
@@ -82,7 +82,7 @@ The student notes written in `MathLab.jsx` were saved strictly to browser `local
 ### 3.1 Component 1: Advisor Semantic Expansion & Direct Answer Routing
 
 #### A. Semantic Topic Expansion Ontology (`advisor_chat.py`)
-Introduce `TOPIC_EXPANSIONS` in [advisor_chat.py](file://advisor_chat.py). When keywords in student queries match known intellectual topics, the search engine expands query boundaries to related departments and conceptual terms:
+Introduce `TOPIC_EXPANSIONS` in [advisor_chat.py](../../advisor_chat.py). When keywords in student queries match known intellectual topics, the search engine expands query boundaries to related departments and conceptual terms:
 
 ```python
 TOPIC_EXPANSIONS = {
@@ -114,7 +114,7 @@ TOPIC_EXPANSIONS = {
 ```
 
 #### B. De-biasing Course Recommendations (`advisor.py:recommend`)
-In [advisor.py](file://advisor.py#L760-L781):
+In [advisor.py](../../advisor.py#L760-L781):
 When the caller provides specific non-empty interest keywords:
 - Detect if interest tokens contain academic topics.
 - Increase the weight of matched topic words to $+10$ points per keyword.
@@ -220,7 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_plans_user ON semester_plans(user_id, term);
 ```
 
 #### B. Schedule Conflict & Credit Engine
-A pure validation module [wm_advising.py](file://wm_advising.py) evaluates planned courses:
+A pure validation module [wm_advising.py](../../wm_advising.py) evaluates planned courses:
 1. **Credit Meter**: Sum of credits. Validates against:
    - Minimum full-time: 12.0 credits
    - Standard recommended: 14.0–16.0 credits
@@ -299,7 +299,7 @@ In `NotebookTab`:
 
 | Component | Target Verification | Command / Check |
 |---|---|---|
-| **Topic Expansion** | `PHIL 231`, `PHIL 303`, `CLCV 208` recommended for "stoic courses" | `PYTHONPATH=tests:.venv/lib/python3.14/site-packages .venv/bin/python -m unittest tests/test_advisor_chat.py` |
+| **Topic Expansion** | `PHIL 231`, `PHIL 303`, `CLCV 208` recommended for "stoic courses" | `.venv/bin/python -m unittest tests/test_advisor_chat.py` |
 | **Direct Answer Prompt** | Advisor answers directly without survey questionnaire | Test with mock Gemini response asserting direct recommendation |
 | **Search & Reasoning** | `call_gemini` includes `GoogleSearch` and `ThinkingConfig` | Unit test checking `call_gemini` config decoration and MIME compatibility fallback |
 | **Semester Planner** | Plan generates 14–16 credits, detects conflicts, persists in SQLite | Unit tests for `/api/advisor/{user_id}/semester-plan` and conflict detection |
