@@ -51,8 +51,8 @@ This document is the authoritative architectural specification and system map fo
 | :--- | :--- | :--- | :--- | :--- |
 | **API Gateway & Orchestrator** | `server.py` | Request routing, auth verification, model fallback chains, rate limiting, event bus (`ui_events_queue`), and agent tool calling. | `fastapi`, `google-genai`, `uvicorn`, `pydantic` | In-memory event stream, in-memory job status, client rate buckets. |
 | **Persistence Engine** | `db.py` | SQLite schema management, WAL journal initialization, profile sessions, courses, sequential classes, topic snapshots, and quiz attempts. | `sqlite3` (std library) | `content/edu_studio.db` tables: `users`, `sessions`, `courses`, `classes`, `lessons`, `quiz_attempts`. |
-| **Pedagogical Engagement** | `engage.py` | gamified positive engagement loop: XP ledger, daily goals, streak freezes, quests, 12 badges, and Leitner spaced-review scheduler. | `db.py` | Tables: `xp_events`, `engage_prefs`, `freeze_days`, `activity_results`, `review_items`. |
-| **Language Acquisition & AI** | `src/components/LanguageLab.jsx`, `src/components/LanguageRoleplay.jsx`, `src/lib/langgrade.js`, `src/practice/language.jsx` | gamified practice drills (translate, word bank, listen, speak), AI roleplay conversational partner with Web Speech API audio, and Socratic explain-answer tutoring. | Web Speech API, `src/lib/speech.js` | Browser localStorage preferences (`andedu_pron_lang`, roleplay history). |
+| **Pedagogical Engagement** | `engage.py` | Gamified positive engagement loop: XP ledger, daily goals, streak freezes, quests, 12 badges, and Leitner spaced-review scheduler. | `db.py` | Tables: `xp_events`, `engage_prefs`, `freeze_days`, `activity_results`, `review_items`. |
+| **Language Acquisition & AI** | `src/components/LanguageLab.jsx`, `src/components/LanguageRoleplay.jsx`, `src/lib/langgrade.js`, `src/practice/language.jsx` | Gamified practice drills (translate, word bank, listen, speak), AI roleplay conversational partner with Web Speech API audio, and Socratic explain-answer tutoring. | Web Speech API, `src/lib/speech.js` | Browser localStorage preferences (`andedu_pron_lang`, roleplay history). |
 | **Interactive History Engine** | `src/components/HistoryLab.jsx`, `src/components/HistoryCrisisLab.jsx`, `src/components/PrimarySourceLab.jsx` | Branching counterfactual decision dilemmas ("What If?"), primary source document interrogator with SHEG sourcing criteria, and chronological ordering challenges. | React 19, Lucide | Curated crisis decision trees, primary source document library. |
 | **Academic Advisor & Semester Planner** | `advisor.py`, `advisor_chat.py`, `wm_advising.py` | University course catalog ingest (W&M focus), class section schedules, prerequisite dependency graphing (CNF tree), degree audit (W&M COLL curriculum + proficiencies), readiness diagnostics, topic expansion ontology, semester course planning with schedule conflict detection, and dynamic Studio course launch. | `db.py`, `server.py` | Tables: `catalog_courses`, `completed_courses`, `catalog_sections`, `semester_plans`. |
 | **Student Notes & Scratchpad Engine** | `db.py`, `server.py`, `src/components/MathLab.jsx` | Unified student written notes synchronization across devices and persistent storage in SQLite, automatically injected into prompt context across Advisor, AGY Drawer, and Lesson Tutor. | `db.py` | Table: `student_notes`. |
@@ -492,7 +492,7 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 6. **Languages (`language`)**: Five interactive tools rendered via `src/components/LanguageLab.jsx`:
    - `class`: Current sequential language class with lesson text and activities.
    - `courses`: Enrolled language courses, CEFR proficiency levels (A1 to C2), and syllabus outlines.
-   - `practice`: gamified Practice Hub aggregating interactive drills (`translate`, `word_bank`, `listen_type`, `listen_choose`, `speak`).
+   - `practice`: Practice Hub aggregating interactive drills (`translate`, `word_bank`, `listen_type`, `listen_choose`, `speak`).
    - `roleplay`: AI conversational AI partner with real-time speech synthesis/recognition and instant grammar feedback.
    - `cards`: Spaced-repetition vocabulary flashcards read aloud via native Web Speech synthesis.
    - `speech`: Speech Lab & IPA reference chart (`PronounceTab.jsx`) with microphone voice-matching.
@@ -593,7 +593,7 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 
 ### 8.1 Tool Catalog by Discipline
 
-#### Language Acquisition & gamified Drills
+#### Language Acquisition & Gamified Drills
 - `add_translation_exercise`: Append translation exercises with source text, target language, and alternate acceptable phrasing.
 - `add_word_bank`: Append sentence chip scramble puzzles with distractor tokens.
 - `add_listening_exercise`: Append audio dictation (`listen_type`) or audio multiple-choice (`listen_choose`) comprehension drills with normal and turtle speeds.
@@ -601,7 +601,7 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 - `build_language_unit`: Append a complete language unit including vocabulary, dialogue, and comprehensive drill decks.
 - `start_language_practice`: Dispatch `SWITCH_STUDIO_MODE {mode: "language", tab: "practice"}` to launch drills for a specific target language.
 
-#### AI AI Features
+#### AI Features
 - `start_roleplay`: Launch an interactive conversational scenario on the student's screen (`SWITCH_STUDIO_MODE {mode: "language", tab: "roleplay"}`), seeding scenario context, avatar persona, and initial greeting.
 - `explain_answer`: Query the Socratic pedagogical tutor (`POST /api/tutor/explain-answer`) for an in-depth breakdown of grammar rules, conjugation tables, or false friends for any problem.
 

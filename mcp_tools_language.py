@@ -114,7 +114,7 @@ def tools(call, q, S, STR, OBJ, ARR):
         return out
 
     return [
-        ("add_translation_exercise", "gamified translation: the student types the translation of `source`. Typos and missing accents "
+        ("add_translation_exercise", "Translation: the student types the translation of `source`. Typos and missing accents "
          "are forgiven; give other correct translations in `accepted`.",
          S(topic_id=STR("topic id"), source=STR("text to translate"), answer=STR("best translation"), lang=LANG(),
            accepted={"type": "array", "items": {"type": "string"}, "description": "other correct answers (up to 6)", "optional": True},

@@ -120,6 +120,7 @@ export function FiguresTab({ topics }) {
     .filter((c) => names.some((n) => n && String(c.front).toLowerCase().includes(n)) || looksLikeName(c.front)), [topics, names.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="stack">
+      <p className="hint">Only historical figures who have died, or fictional characters: impersonating living people is not allowed.</p>
       {figures.length ? (
         <>
           <div className="hist-list">

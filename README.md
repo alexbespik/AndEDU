@@ -56,6 +56,16 @@ python -m unittest discover -s tests -v    # the full suite (292 tests on 2026-1
 
 `PROJECT_GUIDE.md` describes the earlier SciEdu Studio version and is kept for history.
 
+## Using it responsibly
+
+- **Honor codes:** problem sprints explain your own problems step by step. For graded work you must follow your
+  school's honor code and your instructor's rules on outside help.
+- **People:** History figures and roleplay partners are historical figures who have died, or fictional and generic
+  characters. Impersonating real living people is not allowed.
+- **Class schedules:** term section data (CRNs, meeting times, seats) is not included. If you run an instance, obtain
+  it yourself by legitimate means and load it with `advisor.upsert_sections(rows)` (format in
+  `PRIVACY_AND_DEPLOYMENT.md`).
+
 ## License
 
 Copyright (C) 2026 Oleksii Besporochnyi. Licensed under the GNU Affero General Public License v3.0 (`LICENSE`):
