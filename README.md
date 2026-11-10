@@ -12,7 +12,7 @@ of classes, and rewrites the next class when a quiz shows you are struggling or 
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688)
 ![Gemini](https://img.shields.io/badge/Gemini-API-8e75b2)
 
-<img src="docs/images/home-light.png" alt="My courses: streak, daily XP goal, quests and the new course panel" width="900">
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png"><img src="docs/images/home-light.png" alt="My courses: streak, daily XP goal, quests and the new course panel" width="900"></picture>
 
 </div>
 
@@ -62,20 +62,14 @@ flowchart LR
 
 | | |
 | --- | --- |
-| <img src="docs/images/sim-light.png" alt="Lab: rolling without slipping simulation" width="440"> | <img src="docs/images/math-light.png" alt="Math: graphing with sliders" width="440"> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/sim-dark.png"><img src="docs/images/sim-light.png" alt="Lab: rolling without slipping simulation" width="440"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/math-dark.png"><img src="docs/images/math-light.png" alt="Math: graphing with sliders" width="440"></picture> |
 | **Lab**: physics and chemistry lessons, live simulations, quizzes, speed rounds and a tutor. | **Math**: graphing with sliders, a LaTeX notebook, checked practice and a simulation kit. |
-| <img src="docs/images/language-light.png" alt="Languages: German A1-A2 learning path" width="440"> | <img src="docs/images/code-dark.png" alt="IDE: code slots and a Socratic mentor" width="440"> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/language-dark.png"><img src="docs/images/language-light.png" alt="Languages: German A1-A2 learning path" width="440"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/code-dark.png"><img src="docs/images/code-light.png" alt="IDE: code slots and a Socratic mentor" width="440"></picture> |
 | **Languages**: a path of units, listening and speaking drills, stories, dialogues and IPA. A German A1–A2 course is built in and works offline. | **IDE**: practice sets made from your materials, code slots, a console and a Socratic mentor. |
-| <img src="docs/images/history-light.png" alt="History workspace" width="440"> | <img src="docs/images/advisor-light.png" alt="Course advisor: degree progress and planning cart" width="440"> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/history-dark.png"><img src="docs/images/history-light.png" alt="History workspace" width="440"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/advisor-dark.png"><img src="docs/images/advisor-light.png" alt="Course advisor: degree progress and planning cart" width="440"></picture> |
 | **History**: a crisis simulator, primary sources, an offline map, figures to interview, daily games and a timeline. | **Advisor**: your course record, the catalog, readiness checks, and a planning cart for each term with a credit gauge and time conflicts. |
 
-<details>
-<summary>Dark theme</summary>
-
-The app follows your system theme, or you can choose light or dark yourself.
-
-<img src="docs/images/physics-dark.png" alt="Lab lesson in the dark theme" width="900">
-</details>
+Screenshots follow your GitHub theme. The app itself has light, dark and system themes.
 
 ## Quick start
 
@@ -131,10 +125,6 @@ SCIEDU_AUTH=1 SCIEDU_HOST=0.0.0.0 SCIEDU_ALLOWED_HOSTS=lab.example.edu python se
 
 The backend serves the built app and the API on one port (8090). Data lives in `content/` (the SQLite
 database, lessons and notes), or in the folder `SCIEDU_CONTENT_DIR` names.
-
-> [!WARNING]
-> The Dockerfile has not been built on this project's dev machine, because Docker isn't installed there.
-> The non-Docker path above has been tested.
 
 ## For coding agents
 
