@@ -60,3 +60,4 @@ python -m unittest discover -s tests -v    # the full suite (292 tests on 2026-1
 
 Copyright (C) 2026 Oleksii Besporochnyi. Licensed under the GNU Affero General Public License v3.0 (`LICENSE`):
 you may use, change and share it, and anyone who runs a changed version as a network service must offer its source to its users.
+Contributions are accepted under the [Contributor License Agreement](CLA.md): contributors keep their copyright and allow the project to be offered under other licenses as well. See `CONTRIBUTING.md`.
