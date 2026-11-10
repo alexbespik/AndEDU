@@ -55,3 +55,8 @@ python -m unittest discover -s tests -v    # the full suite (292 tests on 2026-1
 | `tests/` | Regression tests |
 
 `PROJECT_GUIDE.md` describes the earlier SciEdu Studio version and is kept for history.
+
+## License
+
+Copyright (C) 2026 Oleksii Besporochnyi. Licensed under the GNU Affero General Public License v3.0 (`LICENSE`):
+you may use, change and share it, and anyone who runs a changed version as a network service must offer its source to its users.
