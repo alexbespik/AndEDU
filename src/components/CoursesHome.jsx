@@ -334,6 +334,7 @@ export function StudyHub({ userId, courses = [], preset, onOpened, onCodePractic
           <span className="hint">{keepSprint ? 'The sprint stays in My courses.'
             : 'Unchecked: once every problem is done the sprint is hidden, and deleted for good a few days later (the date shows when you finish; you can undo until then).'}</span>
           <p className="hint sprint-honesty">Use it to understand your own work: steps open one at a time, and each answer shows only after you try.</p>
+          <p className="hint sprint-honesty">For graded work you must follow your school's honor code and your instructor's rules on outside help.</p>
           <p className="hint">The problems found in your files become the classes straight away; there is no diagnostic.</p>
         </div>
       )}

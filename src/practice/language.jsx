@@ -1,4 +1,4 @@
-// gamified language exercises: translate, word_bank, listen_type, listen_choose, speak.
+// Language exercises: translate, word_bank, listen_type, listen_choose, speak.
 // Each body takes {item, onResult(ok, given), retry}; ok === null means skipped (no microphone, no voice).
 // Used by PracticeDeck (lesson practice) and by the Languages session (LanguageLab).
 import React, { useEffect, useMemo, useRef, useState } from 'react';

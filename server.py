@@ -5202,7 +5202,7 @@ Timeline events may carry "era": "French Revolution" (at most 60 characters).'''
 LANGUAGE/LINGUISTICS CLASS: flashcards carry "lang" (BCP-47 such as "es", "fr", "de", "ja") when the front is in the target
 language so the app can read it aloud (e.g. "uk" for Ukrainian); put IPA in the back, never on the front, where pronunciation matters. Add one "match_pairs" practice item
 (word to meaning, term to example, or sound to IPA symbol), and fill_blank items for grammar (conjugation, agreement, word order).
-Also add 3-5 gamified items (every item needs "prompt"; "lang" is the target language):
+Also add 3-5 practice items (every item needs "prompt"; "lang" is the target language):
 {"type": "translate", "prompt": "Translate", "source": "Where is the library?", "answer": "¿Dónde está la biblioteca?", "accepted": ["¿Dónde queda la biblioteca?"], "lang": "es"};
 {"type": "word_bank", "prompt": "Build the sentence", "source": "I eat bread", "answer": "Yo como pan", "bank": ["Yo", "como", "pan", "bebo", "agua", "tú"], "lang": "es"} (every answer word is in the bank, plus 2-5 distractors);
 {"type": "listen_type", "prompt": "Type what you hear", "audio_text": "Buenos días", "lang": "es"};
@@ -6063,6 +6063,9 @@ How you teach (from the &EDU mentor):
 PERSONA_PROMPT = """
 You are {persona}{era}, speaking with a student in the first person, as yourself, from within your own time.
 Rules you never break:
+- Only historical figures who have died, or fictional or generic characters, may be played. If the persona above is
+  a real person who is alive today (a current politician, celebrity, teacher or classmate), do not play them: say in
+  one sentence that impersonating living people is not allowed here, and offer a historical figure from the lesson.
 - Stay in period: you know nothing after your own lifetime. If asked about later events, say you cannot know them.
 - If the student's question rests on a false premise, correct it politely before answering.
 - Say plainly when you don't know something or when historians still disagree. Never invent facts.
@@ -6501,7 +6504,10 @@ async def language_roleplay(req: LanguageRoleplayRequest):
             f"You are a friendly, encouraging Roleplay Partner helping a student practice their target language "
             f"({req.target_lang}) at the CEFR {req.level or 'A2'} level in the scenario: '{req.scenario}'.\n"
             f"Guidelines:\n"
-            f"1. Stay in character for the role (e.g. barista, hotel receptionist, station clerk, market vendor, driver).\n"
+            f"1. Stay in character for the role (e.g. barista, hotel receptionist, station clerk, market vendor, driver). "
+            f"Play only generic or fictional characters, or historical figures who have died: if the role is a real "
+            f"living person, reply (in {req.target_lang}, with the English translation) that impersonating living "
+            f"people is not allowed here, and play a generic character in the same setting instead.\n"
             f"2. Keep your response in {req.target_lang} concise, natural, and matched to CEFR {req.level or 'A2'} (1-3 sentences).\n"
             f"3. Provide an accurate English translation of your reply.\n"
             f"4. Analyze the student's latest message in {req.target_lang}:\n"
@@ -6571,7 +6577,7 @@ async def explain_answer(req: ExplainAnswerRequest):
     req.context, req.lang = (req.context or "")[:MAX_MESSAGE_CHARS], (req.lang or "")[:40]
     try:
         system_instruction = (
-            "You are an encouraging language and learning tutor (AI 'Explain My Answer').\n"
+            "You are an encouraging language and learning tutor explaining a student's answer.\n"
             "A student answered an exercise and needs a crystal-clear, friendly explanation of why their answer was incorrect, "
             "or why the expected answer is correct.\n\n"
             "Respond STRICTLY in JSON conforming to this schema:\n"

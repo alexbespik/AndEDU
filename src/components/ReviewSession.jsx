@@ -42,7 +42,7 @@ export default function ReviewSession({ userId, onDone }) {
       emitRewards(r.rewards);
       setCombo((c) => (r.correct ? c + 1 : 0));
       setStats((s) => ({ right: s.right + (r.correct ? 1 : 0), answered: s.answered + 1, mastered: s.mastered + (r.mastered ? 1 : 0), xp: s.xp + (r.rewards?.xp || 0) }));
-      // one more try at the end of this session for a miss (gamified), without scoring it twice
+      // one more try at the end of this session for a miss, without scoring it twice
       if (!r.correct) setQueue((list) => [...list, { ...q, retry: true, key: r.correctAnswer, explanation: r.explanation }]);
     } catch (e) { setError(e.message); }
     setBusy(false);

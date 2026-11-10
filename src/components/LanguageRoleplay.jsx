@@ -278,6 +278,7 @@ export default function LanguageRoleplay({ defaultLang = 'es' }) {
             <h2 style={{ fontSize: '1.25rem', margin: 0 }}>Roleplay Partner</h2>
             <p className="hint" style={{ marginTop: 2 }}>
               Practice real-world dialogues with intelligent AI characters, grammar feedback, and live voice conversation.
+              Characters are generic or fictional; impersonating real living people is not allowed.
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>

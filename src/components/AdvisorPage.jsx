@@ -264,7 +264,7 @@ export default function AdvisorPage({ user, onOpenCourse }) {
               {secs === null || secs === undefined ? (
                 <span className="hint"><Loader2 size={12} className="spin" /> Checking active schedule…</span>
               ) : secs.failed ? (
-                <span className="hint">Couldn't load the schedule. Import your own schedule data.</span>
+                <span className="hint">No class schedule loaded. Section data is not included: import schedule data you obtained yourself.</span>
               ) : secs.next.length > 0 ? (
                 <ul className="stack-xs" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {secs.next.map((s) => (

@@ -104,6 +104,12 @@ Logged 2026-11-03.
   catalog (catoid 34) has only a few archived pages so far.
 - The Advisor labels the data with its year and shows a "may be out of date" notice while the catalog is older
   than the current academic year. Students must confirm courses in the live catalog before registering.
+- **Class sections are not included.** Term schedules (CRNs, meeting times, instructors, seats) are not shipped
+  and the project has no tool that downloads them. Whoever runs an instance must obtain that data themselves, by
+  legitimate means (for example an official export from the registrar), and load it with
+  `advisor.upsert_sections(rows)`: each row needs `crn`, `term` and `code`, and may add `term_name`, `section`,
+  `title`, `instructor`, `meets`, `meeting_times` (list), `schedule_type`, `status`, `seats`, `credits` and `details`
+  (dict). Without it, the Advisor's section lists, time conflicts and seat-risk estimates stay empty.
 - **Before deployment:** ask W&M (the Registrar or IT) for an official feed or export of the current catalog and
   course list. Modern Campus/Acalog catalogs have an API, with a key the institution issues, which would give
   current data legitimately.
