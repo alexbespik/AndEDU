@@ -62,5 +62,44 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(body["instance_id"], "launch-42")
 
 
+class PackagingTests(unittest.TestCase):
+    """scripts/desktop_stage.sh, the per-target locks and electron-builder.yml agree on the four targets."""
+
+    PLATFORMS = {"mac-arm64": "aarch64-apple-darwin", "mac-x64": "x86_64-apple-darwin",
+                 "linux-x64": "x86_64-manylinux_2_28", "linux-arm64": "aarch64-manylinux_2_28"}
+    WHEEL_MACHINE = {"mac-arm64": "_arm64", "mac-x64": "_x86_64", "linux-x64": "_x86_64", "linux-arm64": "_aarch64"}
+
+    def test_every_staged_target_has_a_hash_locked_lock_for_its_platform(self):
+        script = ROOT / "scripts" / "desktop_stage.sh"
+        subprocess.run(["bash", "-n", str(script)], check=True)
+        stage = script.read_text()
+        for target, platform in self.PLATFORMS.items():
+            # the interpreter (triple) and the wheel tags must be for the same machine as the lock
+            for field, machine in (("triple", platform.split("-")[0]), ("wheel", self.WHEEL_MACHINE[target])):
+                line = next(l for l in stage.splitlines() if l.strip().startswith(f"{target}:{field})"))
+                self.assertIn(machine, line, f"{target}:{field}")
+            lock = ROOT / "desktop" / f"requirements-{target}.lock"
+            text = lock.read_text()
+            self.assertIn(f"--python-platform {platform} ", text.splitlines()[1], lock.name)
+            pins = [line for line in text.splitlines() if "==" in line and not line.startswith(("#", " "))]
+            self.assertGreater(len(pins), 10, lock.name)
+            for pin in pins:  # "name==1.2 \" is always followed by its --hash lines
+                self.assertTrue(pin.endswith(" \\"), f"{lock.name}: {pin} has no hash")
+
+    def test_builder_bundles_the_python_for_each_os(self):
+        builder = (ROOT / "electron-builder.yml").read_text()
+        self.assertIn('from: "build/desktop/python-${os}-${arch}"', builder)
+        self.assertIn("\nlinux:\n", builder)
+        self.assertIn("executableName: sciedu-studio", builder)
+
+
+class SandboxRunnerTests(unittest.TestCase):
+    def test_resource_limits_still_let_python_start(self):
+        # RLIMIT_AS (1 GB) is enforced on Linux; plain Python and a small allocation must still run
+        result = server.run_python_sandboxed("x = bytearray(50_000_000)\nprint(len(x))")
+        self.assertTrue(result["success"], result["stderr"])
+        self.assertEqual(result["stdout"].strip(), "50000000")
+
+
 if __name__ == "__main__":
     unittest.main()
