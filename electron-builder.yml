@@ -1,4 +1,4 @@
-# Desktop app (macOS, arm64 and x64). Stage first: npm run desktop:stage (scripts/desktop_stage.sh).
+# Desktop app (macOS and Linux, arm64 and x64). Stage first: npm run desktop:stage (scripts/desktop_stage.sh).
 # Design: ARCHITECTURE.md section 5.4.
 appId: edu.andedu.studio
 productName: SciEdu Studio
@@ -9,6 +9,7 @@ directories:
 extraMetadata:
   version: 0.0.0
   main: desktop/main.cjs
+  desktopName: sciedu-studio.desktop   # Linux: Electron's app_id / WM_CLASS, so the window joins its launcher entry
 asar: true
 # the renderer is the Vite build the backend serves, so no node_modules go into app.asar
 files:
@@ -17,7 +18,7 @@ files:
   - package.json
   - "!node_modules/**/*"
 extraResources:
-  - from: "build/desktop/python-${arch}"
+  - from: "build/desktop/python-${os}-${arch}"   # ${os} is mac or linux
     to: python
   - from: build/desktop/backend
     to: backend
@@ -32,3 +33,14 @@ mac:
   minimumSystemVersion: "12.0"
   extendInfo:
     NSMicrophoneUsageDescription: "Speaking drills record your voice to check pronunciation."
+toolsets:
+  # static AppImage runtime (no libfuse2 needed on the user's machine); its macOS tools also run natively on Apple Silicon
+  appimage: "1.0.3"
+linux:
+  # AppImage and tar.gz build on a Mac without Docker; deb/rpm need fpm (and the deb an AppArmor profile)
+  target: [AppImage, tar.gz]
+  category: Education
+  executableName: sciedu-studio
+  syncDesktopName: true
+  artifactName: "SciEdu-Studio-${version}-linux-${arch}.${ext}"
+  synopsis: "Adaptive courses from your own materials"

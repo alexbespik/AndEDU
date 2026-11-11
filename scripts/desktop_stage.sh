@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Stages what the desktop app bundles (electron-builder.yml extraResources):
 #   build/desktop/backend/          tracked root *.py (not mcp_server.py), dist/, public/diagrams/, seed/topics/
-#   build/desktop/python-<arch>/    python-build-standalone + the locked wheels for that arch
-# Usage: scripts/desktop_stage.sh [arm64|x64 ...]   (default: both)
+#   build/desktop/python-<target>/  python-build-standalone + the locked wheels for that target
+# Usage: scripts/desktop_stage.sh [mac-arm64|mac-x64|linux-x64|linux-arm64 ...]   (default: all four;
+#        a bare arm64 or x64 means the mac build). Linux targets can be staged on a Mac.
 # Only git-tracked files are copied: the live content/ folder holds personal courses and is never bundled.
 set -euo pipefail
 
@@ -12,22 +13,36 @@ OUT="$ROOT/build/desktop"
 CACHE="$ROOT/build/cache"
 PY_TAG="20261026"
 PY_VERSION="3.14.10"
-# macOS ships bash 3.2 (no associative arrays): per-arch values come from this function
-arch_info() {  # arch_info <arch> triple|sha256|wheel|mach
+# macOS ships bash 3.2 (no associative arrays): per-target values come from this function.
+# check: mach:<lipo arch> for macOS, elf:<e_machine> for Linux (62 = x86-64, 183 = AArch64)
+arch_info() {  # arch_info <target> triple|sha256|wheel (pip platform tags)|check
   case "$1:$2" in
-    arm64:triple) echo aarch64-apple-darwin ;;
-    arm64:sha256) echo 30a18bcb9ab75e485b4bf4e5d783dde165571e7e42c56dff47a2d2c5345183a4 ;;
-    arm64:wheel)  echo macosx_11_0_arm64 ;;
-    arm64:mach)   echo arm64 ;;
-    x64:triple)   echo x86_64-apple-darwin ;;
-    x64:sha256)   echo 01cedae5d4a66ac570e13cb35fa570d0e79ba8e9affd4518a5d85b6c2b98ff10 ;;
-    x64:wheel)    echo macosx_11_0_x86_64 ;;
-    x64:mach)     echo x86_64 ;;
-    *) echo "Unknown arch: $1 (use arm64 or x64)" >&2; exit 1 ;;
+    mac-arm64:triple)   echo aarch64-apple-darwin ;;
+    mac-arm64:sha256)   echo 30a18bcb9ab75e485b4bf4e5d783dde165571e7e42c56dff47a2d2c5345183a4 ;;
+    mac-arm64:wheel)    echo macosx_11_0_arm64 ;;
+    mac-arm64:check)    echo mach:arm64 ;;
+    mac-x64:triple)     echo x86_64-apple-darwin ;;
+    mac-x64:sha256)     echo 01cedae5d4a66ac570e13cb35fa570d0e79ba8e9affd4518a5d85b6c2b98ff10 ;;
+    mac-x64:wheel)      echo macosx_11_0_x86_64 ;;
+    mac-x64:check)      echo mach:x86_64 ;;
+    linux-x64:triple)   echo x86_64-unknown-linux-gnu ;;
+    linux-x64:sha256)   echo 1b38024924eb7f4cf0cab45d7b871d1f1991354190fccd2625ac7529a43786e2 ;;
+    linux-x64:wheel)    echo manylinux_2_28_x86_64 manylinux_2_17_x86_64 manylinux2014_x86_64 ;;
+    linux-x64:check)    echo elf:62 ;;
+    linux-arm64:triple) echo aarch64-unknown-linux-gnu ;;
+    linux-arm64:sha256) echo dcc31ce7b9ddbbffac160da7fff0cc069054f43eca52382a7d0eebf94e985b88 ;;
+    linux-arm64:wheel)  echo manylinux_2_28_aarch64 manylinux_2_17_aarch64 manylinux2014_aarch64 ;;
+    linux-arm64:check)  echo elf:183 ;;
+    *) echo "Unknown target: $1 (use mac-arm64, mac-x64, linux-x64 or linux-arm64)" >&2; exit 1 ;;
   esac
 }
 HOST_PYTHON="${HOST_PYTHON:-$ROOT/.venv/bin/python}"
-ARCHES="${*:-arm64 x64}"
+TARGETS=""
+for t in ${*:-mac-arm64 mac-x64 linux-x64 linux-arm64}; do
+  case "$t" in arm64|x64) t="mac-$t" ;; esac
+  arch_info "$t" triple >/dev/null   # rejects an unknown target before anything is built
+  TARGETS="$TARGETS $t"
+done
 
 stage_backend() {
   echo "== frontend build"
@@ -44,27 +59,29 @@ stage_backend() {
 }
 
 stage_python() {
-  local arch="$1" triple
-  triple="$(arch_info "$arch" triple)"
+  local target="$1" triple
+  triple="$(arch_info "$target" triple)"
   local archive="cpython-${PY_VERSION}+${PY_TAG}-${triple}-install_only.tar.gz"
-  local dest="$OUT/python-$arch"
-  echo "== python $arch"
+  local dest="$OUT/python-$target"
+  echo "== python $target"
   mkdir -p "$CACHE"
   if [ ! -f "$CACHE/$archive" ]; then
     curl -sSfL -o "$CACHE/$archive.part" \
       "https://github.com/astral-sh/python-build-standalone/releases/download/${PY_TAG}/${archive}"
     mv "$CACHE/$archive.part" "$CACHE/$archive"
   fi
-  echo "$(arch_info "$arch" sha256)  $CACHE/$archive" | shasum -a 256 -c -
+  echo "$(arch_info "$target" sha256)  $CACHE/$archive" | shasum -a 256 -c -
   rm -rf "$dest" "$dest.unpack"
   mkdir -p "$dest.unpack"
   tar -xzf "$CACHE/$archive" -C "$dest.unpack"
   mv "$dest.unpack/python" "$dest" && rmdir "$dest.unpack"
 
-  local site="$dest/lib/python3.14/site-packages"
+  local site="$dest/lib/python3.14/site-packages" tag platforms=""
+  # pip does not widen a manylinux_2_28 --platform to older tags (manylinux2014 = 2_17), so each is listed
+  for tag in $(arch_info "$target" wheel); do platforms="$platforms --platform $tag"; done
   "$HOST_PYTHON" -m pip install --quiet --no-deps --require-hashes --only-binary=:all: \
-    --platform "$(arch_info "$arch" wheel)" --python-version 3.14 --implementation cp \
-    --target "$site" -r "$ROOT/desktop/requirements-$arch.lock"
+    $platforms --python-version 3.14 --implementation cp \
+    --target "$site" -r "$ROOT/desktop/requirements-$target.lock"
 
   # not needed at run time; smaller bundle, fewer binaries to sign
   rm -rf "$dest/lib/python3.14/"{idlelib,tkinter,turtledemo,ensurepip,test} "$dest/lib/python3.14/lib-dynload/"_tkinter* \
@@ -80,22 +97,54 @@ compile_all() {
 }
 
 check_arch() {
-  # every Mach-O file must contain the target arch (universal2 files carry both)
-  local arch="$1" want f archs bad=0
-  want="$(arch_info "$arch" mach)"
+  local target="$1" check want f archs bad=0
+  check="$(arch_info "$target" check)"
+  want="${check#*:}"
+  if [ "${check%%:*}" = elf ]; then
+    check_elf "$target" "$want"
+    return
+  fi
+  # every Mach-O file must contain the target arch (universal2 files carry both), and no ELF file may slip in
   while IFS= read -r -d '' f; do
+    if [ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then echo "   ELF file: $f"; bad=1; continue; fi
     archs="$(lipo -archs "$f" 2>/dev/null)" || continue   # not Mach-O
     case " $archs " in *" $want "*) ;; *) echo "   wrong arch ($archs): $f"; bad=1 ;; esac
-  done < <(find "$OUT/python-$arch" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) -print0)
+  done < <(find "$OUT/python-$target" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) -print0)
   [ "$bad" = 0 ] || exit 1
-  echo "   all Mach-O files in python-$arch contain $want"
+  echo "   all Mach-O files in python-$target contain $want"
+}
+
+check_elf() {
+  # every ELF file must be for the target machine, and no Mach-O file may slip in (a mac wheel by mistake)
+  "$HOST_PYTHON" -I - "$OUT/python-$1" "$2" <<'PY'
+import os, struct, sys
+root, want = sys.argv[1], int(sys.argv[2])
+macho = {b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe"}
+bad = count = 0
+for d, _, names in os.walk(root):
+    for n in names:
+        f = os.path.join(d, n)
+        if os.path.islink(f) or not os.path.isfile(f):
+            continue
+        with open(f, "rb") as fh:
+            head = fh.read(20)
+        if head[:4] in macho:
+            print(f"   Mach-O file: {f}"); bad = 1
+        elif head[:4] == b"\x7fELF" and len(head) == 20:
+            count += 1
+            if head[5] != 1 or struct.unpack_from("<H", head, 18)[0] != want:
+                print(f"   wrong machine: {f}"); bad = 1
+if bad:
+    sys.exit(1)
+print(f"   all {count} ELF files in {os.path.basename(root)} are e_machine {want}, no Mach-O")
+PY
 }
 
 stage_backend
 compile_all "$OUT/backend"
-for arch in $ARCHES; do
-  stage_python "$arch"
-  check_arch "$arch"
-  compile_all "$OUT/python-$arch/lib/python3.14"
+for target in $TARGETS; do
+  stage_python "$target"
+  check_arch "$target"
+  compile_all "$OUT/python-$target/lib/python3.14"
 done
 du -sh "$OUT"/* | sed 's/^/   /'
