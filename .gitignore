@@ -32,3 +32,7 @@ NEXT_STEPS.md
 SECURITY_FINDINGS*.md
 # personal agent links; the app's own agents (andedu-companion, page-guard) stay tracked
 .agents/agents/security
+
+# desktop app: staged bundle, downloads, packaged apps
+/build/
+/dist-electron/

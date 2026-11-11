@@ -43,10 +43,15 @@ import advisor_classifier
 import sprint
 import wm_advising
 
-ENV_FILE = Path(__file__).parent / ".env"
-if ENV_FILE.exists():
+# SCIEDU_ENV_FILE: unset = .env beside this file (or the nearest one up the tree); a path = only that file;
+# "none" = no .env at all (the desktop app passes its settings itself and must not pick up a stray ~/.env).
+_ENV_CHOICE = os.environ.get("SCIEDU_ENV_FILE", "")
+ENV_FILE = Path(_ENV_CHOICE) if _ENV_CHOICE not in ("", "none") else Path(__file__).parent / ".env"
+if _ENV_CHOICE == "none":
+    pass
+elif ENV_FILE.exists():
     load_dotenv(ENV_FILE)
-else:
+elif not _ENV_CHOICE:
     load_dotenv()
 
 api_key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
@@ -1929,6 +1934,7 @@ def run_python_sandboxed(code: str, test_code: str = "") -> Dict[str, Any]:
             proc = subprocess.run(
                 [sys.executable, "-I", "-c", combined_script],
                 capture_output=True,
+                stdin=subprocess.DEVNULL,  # never the backend's stdin (the desktop app's control pipe)
                 text=True,
                 timeout=5,
                 cwd=work_dir,
@@ -7172,6 +7178,7 @@ def get_status():
         "event_cursor": _event_seq,
         "auth_required": AUTH_REQUIRED,
         "port": int(os.environ.get("SCIEDU_PORT", "8090")),
+        "instance_id": os.environ.get("SCIEDU_INSTANCE_ID"),  # lets the desktop app tell its backend from another on the port
         "privacy_version": PRIVACY_VERSION,
         "features": [
             "courses", "sqlite_storage", "simspec_simulations", "background_jobs", "code_sandbox",

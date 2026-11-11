@@ -1,0 +1,34 @@
+# Desktop app (macOS, arm64 and x64). Stage first: npm run desktop:stage (scripts/desktop_stage.sh).
+# Design: ARCHITECTURE.md section 5.4.
+appId: edu.andedu.studio
+productName: SciEdu Studio
+artifactName: "SciEdu-Studio-${version}-${arch}.${ext}"
+copyright: "Copyright © 2026 Oleksii Besporochnyi. AGPL-3.0-only."
+directories:
+  output: dist-electron
+extraMetadata:
+  version: 0.0.0
+  main: desktop/main.cjs
+asar: true
+# the renderer is the Vite build the backend serves, so no node_modules go into app.asar
+files:
+  - desktop/main.cjs
+  - desktop/preload.cjs
+  - package.json
+  - "!node_modules/**/*"
+extraResources:
+  - from: "build/desktop/python-${arch}"
+    to: python
+  - from: build/desktop/backend
+    to: backend
+  - from: LICENSE
+    to: LICENSE
+mac:
+  target: [dmg, zip]
+  category: public.app-category.education
+  identity: "-"            # ad-hoc signature: no Apple Developer ID yet, so users choose "Open Anyway" once
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  minimumSystemVersion: "12.0"
+  extendInfo:
+    NSMicrophoneUsageDescription: "Speaking drills record your voice to check pronunciation."

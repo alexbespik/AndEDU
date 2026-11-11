@@ -6,6 +6,7 @@ import LoginPage from './components/LoginPage';
 import CoursesHome from './components/CoursesHome';
 import CourseView from './components/CourseView';
 import ReviewSession from './components/ReviewSession';
+import DesktopKeySetup from './components/DesktopKeySetup';
 import RewardLayer, { StreakChip } from './components/Rewards';
 import { BookOpen, FlaskConical, MessageSquare, Compass } from 'lucide-react';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
@@ -78,6 +79,7 @@ export default function App() {
   const [workspaceTab, setWorkspaceTab] = useState(null);  // {tab, at} for History/Languages, sent by MCP tools
   const [mathPush, setMathPush] = useState(null);  // functions or a widget sent by the assistant / MCP tools
   const [pendingPrompt, setPendingPrompt] = useState(null);
+  const [desktopKey, setDesktopKey] = useState(null);  // desktop app without a Gemini key: show the setup card
 
   useEffect(() => {
     const onAgyAsk = (e) => {
@@ -91,7 +93,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    api('/api/status').then((st) => setAgyCli(Boolean(st.agy_cli_enabled))).catch(() => {});
+    api('/api/status').then((st) => {
+      setAgyCli(Boolean(st.agy_cli_enabled));
+      if (window.sciedu?.isDesktop && !st.gemini_configured) setDesktopKey({ activeJobs: st.active_jobs || 0 });
+    }).catch(() => {});
   }, []);
   // fetch the lesson viewer's chunk once signed in, so the first lesson opens without a loading step
   useEffect(() => { if (user) import('./components/TopicViewer'); }, [user]);
@@ -523,6 +528,7 @@ export default function App() {
         </aside>
       )}
       <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />
+      {desktopKey && <DesktopKeySetup activeJobs={desktopKey.activeJobs} />}
       <div className="toast-region" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>
