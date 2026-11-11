@@ -1909,7 +1909,7 @@ def _limit_child_resources():
         try:
             resource.setrlimit(limit, value)
         except (ValueError, OSError):
-            pass  # macOS rejects RLIMIT_AS; the wall-clock timeout still applies
+            pass  # macOS rejects RLIMIT_AS (Linux enforces it); the wall-clock timeout still applies
 
 def run_python_sandboxed(code: str, test_code: str = "") -> Dict[str, Any]:
     """

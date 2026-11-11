@@ -103,12 +103,25 @@ function openLog() {
   return fs.openSync(file, 'a', 0o600);
 }
 
+// On Linux, safeStorage falls back to 'basic_text' (a fixed password built into Chromium) when no keyring
+// (GNOME Keyring, KWallet) answers; that is no better than plain text, so the key is not stored or read then.
+// Call only after app 'ready'.
+function secureStoreOk() {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  if (process.platform !== 'linux') return true;
+  return !['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend());
+}
+
+const NO_SECURE_STORE = process.platform === 'linux'
+  ? 'No system keyring (GNOME Keyring or KWallet) is available, so the key cannot be stored safely. Install or unlock one, then try again.'
+  : 'The macOS Keychain is not available, so the key cannot be stored safely.';
+
 function loadKey() {
   try {
-    if (!safeStorage.isEncryptionAvailable()) return '';
+    if (!secureStoreOk()) return '';
     return safeStorage.decryptString(fs.readFileSync(keyPath));
   } catch {
-    return '';  // missing, or made by another build the Keychain no longer trusts: ask again
+    return '';  // missing, or made by another build the Keychain/keyring no longer trusts: ask again
   }
 }
 
@@ -221,7 +234,7 @@ function registerIpc() {
     if (!fromBackend(event)) return { ok: false, error: 'Not allowed.' };
     const key = typeof value === 'string' ? value.trim() : '';
     if (!KEY_RE.test(key)) return { ok: false, error: 'That does not look like a Gemini API key.' };
-    if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: 'The macOS Keychain is not available, so the key cannot be stored safely.' };
+    if (!secureStoreOk()) return { ok: false, error: NO_SECURE_STORE };
     fs.mkdirSync(path.dirname(keyPath), { recursive: true, mode: 0o700 });
     const tmp = keyPath + '.tmp';
     fs.writeFileSync(tmp, safeStorage.encryptString(key), { mode: 0o600 });

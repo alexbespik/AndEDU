@@ -104,11 +104,12 @@ Sign in with a name, choose **New course**, add files and a goal.
 
 </details>
 
-## Desktop app (macOS, v0.0.0)
-An early desktop build for your own Mac: one app with its own Python inside, so nothing else needs installing.
-There is one build for Apple Silicon (`arm64`) and one for Intel Macs (`x64`). Windows and Linux are not supported yet.
+## Desktop app (macOS and Linux, v0.0.0)
+An early desktop build for your own computer: one app with its own Python inside, so nothing else needs installing.
+macOS 12 or later has one build for Apple Silicon (`arm64`) and one for Intel Macs (`x64`); Linux has `x64` and `arm64`
+builds (see [Linux](#linux) below). Windows is not supported.
 
-**First launch.** The app has no Apple Developer ID signature yet, so macOS blocks it the first time.
+**First launch (macOS).** The app has no Apple Developer ID signature yet, so macOS blocks it the first time.
 1. Unzip `SciEdu-Studio-0.0.0-<arch>.zip` (or open the `.dmg`) and move **SciEdu Studio** to Applications.
 2. Open it once. When macOS says it cannot verify the developer, go to System Settings > Privacy & Security
    and choose **Open Anyway**.
@@ -117,22 +118,52 @@ There is one build for Apple Silicon (`arm64`) and one for Intel Macs (`x64`). W
    written in plain text. The library lessons and the offline German and history units work without a key.
    Each new build asks for Keychain access again.
 
-**Where things are.** Your data: `~/Library/Application Support/SciEdu Studio/` (`content/` holds lessons and the
+**Where things are.** Your data: `~/Library/Application Support/SciEdu Studio/` on macOS, `~/.config/SciEdu Studio/` on Linux (`content/` holds lessons and the
 database, `logs/backend.log` the server log, `secrets/` the encrypted key). Deleting that folder resets the app.
 The app's server listens only on `127.0.0.1` (a port from 38090-38190, kept between launches). The agy assistant,
 ElevenLabs audio and the MCP server are off in the desktop app. The IDE's code runner runs your code with your own
 user permissions, as it does in the web version. The window's content security policy still allows `eval`, which the in-browser
 Python runner (Pyodide) needs.
 
+### Linux
+Needs glibc 2.28 or later (Ubuntu 20.04, Debian 10, Fedora 29, RHEL 8 or newer). Two downloads per architecture:
+an AppImage (`SciEdu-Studio-0.0.0-linux-x86_64.AppImage`, `...-linux-arm64.AppImage`) and a tar.gz
+(`SciEdu-Studio-0.0.0-linux-x64.tar.gz`, `...-linux-arm64.tar.gz`). The Linux builds are made on a Mac and have not yet been
+tried on a real Linux desktop; reports are welcome.
+- **AppImage:** `chmod +x SciEdu-Studio-0.0.0-linux-x86_64.AppImage`, then run it. It uses the static AppImage runtime,
+  so `libfuse2` is not needed; where FUSE is missing entirely (some containers), run it with `--appimage-extract-and-run`.
+- **tar.gz:** unpack it and run `./sciedu-studio`.
+- **API key:** stored with the system keyring (GNOME Keyring or KWallet, through Electron `safeStorage`). Without one
+  the app refuses to save the key instead of keeping it in a weakly encrypted file; the library lessons and offline
+  units still work. If the wrong keyring is picked, start the app with `--password-store=gnome-libsecret` (or `kwallet6`).
+- **Ubuntu 23.10 and later** block the unprivileged user namespaces Chromium's sandbox uses, so the app quits at start
+  with a `chrome-sandbox` message. Keep the sandbox and pick one fix: for the tar.gz, make the helper setuid root once
+  (`sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox` in the unpacked folder), or, for either
+  download, add an AppArmor profile that allows `userns` for the app's path, e.g. `/etc/apparmor.d/sciedu-studio`:
+  ```
+  abi <abi/4.0>,
+  include <tunables/global>
+  profile sciedu-studio /home/*/Applications/SciEdu-Studio*/sciedu-studio flags=(unconfined) {
+    userns,
+    include if exists <local/sciedu-studio>
+  }
+  ```
+  (adjust the path; an AppImage runs from a `/tmp/.mount_*` folder, so the tar.gz is easier), then
+  `sudo apparmor_parser -r /etc/apparmor.d/sciedu-studio`. `--no-sandbox` also starts it but turns the sandbox off; avoid
+  switching the system-wide `kernel.apparmor_restrict_unprivileged_userns` setting.
+
 **Build it** (on a Mac, from a clean checkout):
 ```bash
 npm install
-npm run desktop:stage      # frontend build, bundled Python 3.14 (checksum-pinned) + locked wheels for arm64 and x64
+npm run desktop:stage      # frontend build, bundled Python 3.14 (checksum-pinned) + locked wheels for every target
+                           # (mac-arm64 mac-x64 linux-x64 linux-arm64; pass some of them to stage fewer)
 npm run desktop:dist       # dist-electron/SciEdu-Studio-0.0.0-{arm64,x64}.{dmg,zip}
+npm run desktop:dist:linux # dist-electron/SciEdu-Studio-0.0.0-linux-{x86_64,arm64}.AppImage, -linux-{x64,arm64}.tar.gz
 npm run desktop:dev        # or: run the shell against the repo's .venv (data in ~/Library/Application Support/andedu-lab, not seeded)
 ```
-Locks: `desktop/requirements-<arch>.lock` (`uv pip compile ... --generate-hashes`); the Intel build pins
-`cryptography==48.0.1` (`desktop/constraints-x64.txt`) because newer versions ship no Intel macOS wheel. Design notes:
+Locks: `desktop/requirements-<target>.lock` (`uv pip compile ... --generate-hashes`; Linux wheels are manylinux_2_28 or
+older); the Intel Mac build pins `cryptography==48.0.1` (`desktop/constraints-mac-x64.txt`) because newer versions ship no
+Intel macOS wheel. Design notes:
 [`ARCHITECTURE.md`](ARCHITECTURE.md) section 5.4.
 
 ## Host it for a class or a university

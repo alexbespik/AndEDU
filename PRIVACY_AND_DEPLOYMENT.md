@@ -56,8 +56,8 @@ Logged 2026-11-03.
   `refs/pull/1/head` contains a `.env` file or a Gemini/ElevenLabs key pattern, and `.env` is in `.gitignore`.
   The keys from that time should still be rotated if they are still active.
 - Hosted: keys only in the server environment or a secret manager, never in the frontend or the repo.
-- Desktop app: the student's own key is encrypted with the macOS Keychain (`safeStorage`) in
-  `~/Library/Application Support/SciEdu Studio/secrets/`, sent to the bundled server on stdin (not in its startup
+- Desktop app: the student's own key is encrypted with the macOS Keychain or, on Linux, the system keyring (`safeStorage`;
+  never its weak `basic_text` fallback) in `~/Library/Application Support/SciEdu Studio/secrets/` (`~/.config/SciEdu Studio/secrets/` on Linux), sent to the bundled server on stdin (not in its startup
   environment, which other processes of the same user can read), and never returned to the page.
 
 ### 5. Data files in the repository and in logs

@@ -11,7 +11,8 @@
     "lint": "eslint src",
     "desktop:dev": "npm run build && electron desktop/main.cjs",
     "desktop:stage": "scripts/desktop_stage.sh",
-    "desktop:dist": "electron-builder --mac --arm64 --x64"
+    "desktop:dist": "electron-builder --mac --arm64 --x64",
+    "desktop:dist:linux": "electron-builder --linux --x64 --arm64"
   },
   "dependencies": {
     "katex": "^0.16.47",
