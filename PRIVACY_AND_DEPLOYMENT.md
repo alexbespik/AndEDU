@@ -51,13 +51,15 @@ Logged 2026-11-03.
 - Still open (not chosen 2026-11-07): read transcripts locally and redact name/ID/GPA before any Gemini call.
 
 ### 4. Secrets
-- `.env` (Gemini and ElevenLabs keys) was committed in the past (commit 9d30620). **Rotate both keys**, and remove
-  it from git history before the repository is pushed anywhere.
+- `.env` (Gemini and ElevenLabs keys) was committed in a pre-publication history (commit 9d30620). Checked
+  2026-11-10: that commit is not in the published history (GitHub returns "No commit found"), no commit on `main` or
+  `refs/pull/1/head` contains a `.env` file or a Gemini/ElevenLabs key pattern, and `.env` is in `.gitignore`.
+  The keys from that time should still be rotated if they are still active.
 - Hosted: keys only in the server environment or a secret manager, never in the frontend or the repo.
 
 ### 5. Data files in the repository and in logs
 - Done 2026-11-03: `content/agy_messages.json` (assistant chat) and `content/quiz_results.json` (answers) are
-  untracked and ignored. (They remain in earlier git history.)
+  untracked and ignored. (Checked 2026-11-10: neither file, nor any `.db` or `.log` file, is in the published history.)
 - `server.log` can contain prompts and errors with user content: rotate it, keep it short, and keep it out of backups.
 - SQLite (`content/edu_studio.db`) is unencrypted: on a server, use an encrypted disk, restricted file
   permissions and encrypted backups.
