@@ -22,6 +22,7 @@ Started at &hacks (best Gemini API usage); continued from the original &EDU.
 - [What it does](#what-it-does)
 - [Workspaces](#workspaces)
 - [Quick start](#quick-start)
+- [Desktop app (macOS, v0.0.0)](#desktop-app-macos-v000)
 - [Host it for a class or a university](#host-it-for-a-class-or-a-university)
 - [For coding agents](#for-coding-agents)
 - [Tests](#tests)
@@ -102,6 +103,37 @@ Sign in with a name, choose **New course**, add files and a goal.
 | `AGY_CLI=1` | Route the in-app assistant through the Antigravity CLI (see [`AGENTS.md`](AGENTS.md)) |
 
 </details>
+
+## Desktop app (macOS, v0.0.0)
+An early desktop build for your own Mac: one app with its own Python inside, so nothing else needs installing.
+There is one build for Apple Silicon (`arm64`) and one for Intel Macs (`x64`). Windows and Linux are not supported yet.
+
+**First launch.** The app has no Apple Developer ID signature yet, so macOS blocks it the first time.
+1. Unzip `SciEdu-Studio-0.0.0-<arch>.zip` (or open the `.dmg`) and move **SciEdu Studio** to Applications.
+2. Open it once. When macOS says it cannot verify the developer, go to System Settings > Privacy & Security
+   and choose **Open Anyway**.
+3. Paste your own Gemini API key in the card that appears ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
+   It is stored encrypted with the macOS Keychain (Electron `safeStorage`) and handed to the app's server at start, never
+   written in plain text. The library lessons and the offline German and history units work without a key.
+   Each new build asks for Keychain access again.
+
+**Where things are.** Your data: `~/Library/Application Support/SciEdu Studio/` (`content/` holds lessons and the
+database, `logs/backend.log` the server log, `secrets/` the encrypted key). Deleting that folder resets the app.
+The app's server listens only on `127.0.0.1` (a port from 38090-38190, kept between launches). The agy assistant,
+ElevenLabs audio and the MCP server are off in the desktop app. The IDE's code runner runs your code with your own
+user permissions, as it does in the web version. The window's content security policy still allows `eval`, which the in-browser
+Python runner (Pyodide) needs.
+
+**Build it** (on a Mac, from a clean checkout):
+```bash
+npm install
+npm run desktop:stage      # frontend build, bundled Python 3.14 (checksum-pinned) + locked wheels for arm64 and x64
+npm run desktop:dist       # dist-electron/SciEdu-Studio-0.0.0-{arm64,x64}.{dmg,zip}
+npm run desktop:dev        # or: run the shell against the repo's .venv (data in ~/Library/Application Support/andedu-lab, not seeded)
+```
+Locks: `desktop/requirements-<arch>.lock` (`uv pip compile ... --generate-hashes`); the Intel build pins
+`cryptography==48.0.1` (`desktop/constraints-x64.txt`) because newer versions ship no Intel macOS wheel. Design notes:
+[`ARCHITECTURE.md`](ARCHITECTURE.md) section 5.4.
 
 ## Host it for a class or a university
 

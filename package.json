@@ -8,7 +8,10 @@
     "dev": "vite --port 5173",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "desktop:dev": "npm run build && electron desktop/main.cjs",
+    "desktop:stage": "scripts/desktop_stage.sh",
+    "desktop:dist": "electron-builder --mac --arm64 --x64"
   },
   "dependencies": {
     "katex": "^0.16.47",
@@ -24,6 +27,8 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-react": "^6.1.1",
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
