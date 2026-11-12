@@ -231,7 +231,7 @@ def _prereq_check(course: Dict[str, Any], rule: Dict[str, Any], have, alongside)
             "prereqs": advisor.prereq_display(rule["text"]) if own else "", "prereq_note": rule["note"],
             "concurrent": st["concurrent"], "concurrent_ok": rule["concurrent_ok"],
             "score_options": st["score_options"], "required_alts": st["required_alts"],
-            "score_alternative": "minimum score of" in (rule["text"] or "").lower(),
+            "required_any": st["required_any"], "score_alternative": "minimum score of" in (rule["text"] or "").lower(),
             "grade_minimum": advisor.grade_minimum(rule["text"])}
 
 
@@ -410,7 +410,7 @@ def context_block(user_id: str, term: str) -> str:
         if judged.get("prereq_status") == "check":
             parts = [f"missing {o['group']} unless a qualifying score: {', '.join(map(advisor.score_option_text, o['options']))}"
                      for o in judged.get("score_options") or []]
-            parts += [f"also requires {advisor.score_option_text(a)}" for a in judged.get("required_alts") or []]
+            parts += [f"also requires {t}" for t in advisor.required_alts_text(judged)]
             lines.append(f"  {i['code']}: {'; '.join(parts)} (not verified: the record holds no test scores)")
         if sec and sec.get("consent"):
             lines.append(f"  {i['code']}: {sec.get('consent_kind') or 'Approval'} required to register")

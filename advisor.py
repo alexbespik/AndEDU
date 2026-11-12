@@ -309,6 +309,7 @@ class ScoreOption(NamedTuple):
 class ScoreRules(NamedTuple):
     groups: Tuple[Tuple[Tuple[str, ...], Tuple[ScoreOption, ...]], ...]  # (CNF group, the options that also satisfy it)
     required_alts: Tuple[ScoreOption, ...]  # alternatives required on their own, outside any OR with a course
+    required_any: Tuple[Tuple[ScoreOption, ...], ...] = ()  # the same, kept per OR: any one option of a group is enough
 
 
 _TEST_NAME_RE = re.compile(r"^(?:AP|IB|CLEP|SAT|ACT)\b")
@@ -333,6 +334,18 @@ def _dedupe_options(options: Iterable[ScoreOption]) -> Tuple[ScoreOption, ...]:
         key = (o.test, o.kind)
         out[key] = o._replace(min=_lower_min(out[key].min, o.min)) if key in out else o
     return tuple(out.values())
+
+
+def _required_groups(groups: List[Tuple[ScoreOption, ...]]) -> Tuple[Tuple[ScoreOption, ...], ...]:
+    """OR groups of required alternatives without repeats; a group that contains another adds nothing ("X" already
+    required makes "X or Y" moot)."""
+    keys = [frozenset((o.test, o.kind) for o in g) for g in groups]
+    out, seen = [], set()
+    for g, k in zip(groups, keys):
+        if g and k not in seen and not any(h < k for h in keys):
+            seen.add(k)
+            out.append(g)
+    return tuple(out)
 
 
 _ABSENT = object()
@@ -396,8 +409,9 @@ def parse_prereq_scores(text: str, self_code: str = "") -> ScoreRules:
     clauses, alt_only = _clauses(node, state)
     options = [ScoreOption(a["test"], a["min"], _score_kind(a["test"])) for a in alts]
     required = _dedupe_options(options[k] for clause in alt_only for k in clause)
+    any_of = _required_groups([_dedupe_options(options[k] for k in clause) for clause in alt_only])
     if state.get("collapsed"):
-        return ScoreRules((), required)
+        return ScoreRules((), required, any_of)
     by_key: Dict[Tuple[str, ...], List[Tuple[ScoreOption, ...]]] = {}
     for codes, ks in clauses:  # the cleanup parse_prereq_cnf does: no self-reference, duplicates merged
         key = tuple(sorted({c for c in codes if c != self_code}))
@@ -405,11 +419,11 @@ def parse_prereq_scores(text: str, self_code: str = "") -> ScoreRules:
             by_key.setdefault(key, []).append(_dedupe_options(options[k] for k in ks))
     kept = [k for k in by_key if not any(set(h) < set(k) for h in by_key)]
     if [list(k) for k in kept] != parse_prereq_cnf(text, self_code=self_code):
-        return ScoreRules((), required)
+        return ScoreRules((), required, any_of)
     # a dropped superset clause must hold too: an option only counts when every clause over these courses lists it
     groups = tuple((key, _common_options([o for k, lists in by_key.items() if set(key) <= set(k) for o in lists]))
                    for key in kept)
-    return ScoreRules(groups, required)
+    return ScoreRules(groups, required, any_of)
 
 
 def parse_catalog_text(text: str) -> List[Dict[str, Any]]:
@@ -824,27 +838,37 @@ def _evaluate(cnf: List[List[str]], have: Set[str], alongside: Iterable[str] = (
 
 
 def _score_check(rule: Dict[str, Any], course_code: str, missing_groups: List[List[str]]):
-    """(score_options for the missing groups, required_alts) from the rule's text, as plain dicts. Empty when the
-    text names no score or its groups don't match the rule's stored tree (then the rule is judged as before)."""
+    """(score_options for the missing groups, required_alts, required_any) from the rule's text, as plain dicts.
+    required_any keeps the required alternatives per OR (any one of a group is enough). Empty when the text names
+    no score or its groups don't match the rule's stored tree (then the rule is judged as before)."""
     text = rule.get("text") or ""
     if "minimum score of" not in text.lower():  # cheap: recommend() judges every catalog course
-        return [], []
+        return [], [], []
     scores = parse_prereq_scores(text, course_code)
     if [list(k) for k, _ in scores.groups] != [list(g) for g in rule["cnf"]]:
-        return [], []
+        return [], [], []
     by_key = dict(scores.groups)
     options = []
     for g in missing_groups:
         opts = by_key.get(tuple(g)) or ()
         if opts:
             options.append({"group": " or ".join(g) if len(g) > 1 else g[0], "options": [o._asdict() for o in opts]})
-    return options, [o._asdict() for o in scores.required_alts]
+    return (options, [o._asdict() for o in scores.required_alts],
+            [[o._asdict() for o in g] for g in scores.required_any])
 
 
 def score_option_text(option: Dict[str, Any]) -> str:
     """'AP Calculus BC (4+)' for a test; an equivalency or admission flag by its name only."""
     m = option.get("min")
     return f"{option.get('test')} ({m}+)" if option.get("kind") == "test" and m is not None else str(option.get("test"))
+
+
+def required_alts_text(st: Dict[str, Any]) -> List[str]:
+    """The required alternatives as phrases, one per OR: 'X', or 'one of X or Y' when any one of them is enough.
+    Falls back to the flat required_alts (one phrase each) when no groups are given."""
+    groups = st.get("required_any") or [[a] for a in st.get("required_alts") or []]
+    return [score_option_text(g[0]) if len(g) == 1 else "one of " + " or ".join(map(score_option_text, g))
+            for g in groups if g]
 
 
 def rule_status(course: Dict[str, Any], rule: Dict[str, Any], have: Set[str], alongside: Iterable[str] = ()) -> Dict[str, Any]:
@@ -855,8 +879,8 @@ def rule_status(course: Dict[str, Any], rule: Dict[str, Any], have: Set[str], al
     cnf = rule["cnf"]
     ev = _evaluate(cnf, have, alongside, rule["concurrent_ok"])
     missing_groups = [g for g in cnf if not any(c in have for c in g) and not any(c in ev["concurrent"] for c in g)]
-    score_options, required_alts = _score_check(rule, course["code"], missing_groups)
-    ev = {**ev, "score_options": score_options, "required_alts": required_alts}
+    score_options, required_alts, required_any = _score_check(rule, course["code"], missing_groups)
+    ev = {**ev, "score_options": score_options, "required_alts": required_alts, "required_any": required_any}
     if cnf or required_alts:
         if not ev["missing"] and not required_alts:
             return {**ev, "met": True, "status": "met", "notes": ""}
@@ -894,7 +918,8 @@ def readiness(user_id: str, code: str, crn: str = "", term: str = "", alongside:
            "met": st["met"], "status": st["status"], "notes": st["notes"], "taken": course["code"] in done,
            "basis": rule["basis"], "crn": str(crn or "").strip(), "term": (section or {}).get("term") or str(term or ""),
            "section_note": rule["note"], "concurrent_ok": rule["concurrent_ok"], "concurrent": st["concurrent"],
-           "score_options": st["score_options"], "required_alts": st["required_alts"]}
+           "score_options": st["score_options"], "required_alts": st["required_alts"],
+           "required_any": st["required_any"]}
     if rule["basis"] == "section":
         out["course_prereqs"] = course["prereqs"]
         out["course_prereq_tree"] = rule["course_cnf"]

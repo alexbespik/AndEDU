@@ -67,7 +67,8 @@ def _readiness_query(a):
 
 
 READINESS_STATUS = ("status is met | missing | check | none | unknown; check = only a test score, equivalency or admission "
-                    "(score_options per missing group, required_alts) would satisfy it: not verified, the record holds no scores. "
+                    "(score_options per missing group, required_alts; required_any groups them per OR, any one of a group "
+                    "is enough) would satisfy it: not verified, the record holds no scores. "
                     "concurrent lists codes counted because they are in that term's primary cart.")
 
 

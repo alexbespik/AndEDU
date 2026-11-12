@@ -171,6 +171,20 @@ class ScoreStatus(unittest.TestCase):
         self.assertEqual((st["status"], st["met"], st["missing"]), ("check", False, []))
         self.assertEqual(st["required_alts"], [{"test": "Admitted to SOE-Secondary", "min": 1, "kind": "admission"}])
         self.assertEqual(self.status(text, {"EDUC 301"}, code="EDUC 311")["status"], "missing")
+        self.assertEqual(advisor.required_alts_text(st), ["Admitted to SOE-Secondary"])
+
+    def test_or_between_required_alternatives_stays_together(self):
+        text = ("EDUC 301 and (minimum score of 1 in 'Admitted to SOE-Secondary' or "
+                "minimum score of 1 in 'Admitted to SOE-Elementary').")
+        st = self.status(text, {"EDUC 301"}, code="EDUC 311")
+        self.assertEqual((st["status"], st["missing"]), ("check", []))
+        self.assertEqual([[o["test"] for o in g] for g in st["required_any"]],
+                         [["Admitted to SOE-Secondary", "Admitted to SOE-Elementary"]])
+        self.assertEqual(advisor.required_alts_text(st),
+                         ["one of Admitted to SOE-Secondary or Admitted to SOE-Elementary"])
+        both = self.status("EDUC 301, minimum score of 1 in 'Admitted to SOE-Secondary' and "
+                           "minimum score of 1 in 'Admitted to SOE-Elementary'.", {"EDUC 301"}, code="EDUC 311")
+        self.assertEqual(advisor.required_alts_text(both), ["Admitted to SOE-Secondary", "Admitted to SOE-Elementary"])
 
     def test_stored_tree_that_differs_falls_back_to_missing(self):
         rule = {**self.rule("MATH 111 or minimum score of 4 in 'AP Calculus BC'."), "cnf": [["MATH 112"]]}
