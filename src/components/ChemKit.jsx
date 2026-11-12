@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
+import LoadingPanel from './LoadingPanel';
 
 const ChemSim = lazy(() => import('../simulations/ChemSim'));
 
@@ -51,7 +52,7 @@ export default function ChemKit() {
         ))}
       </div>
       <p className="hint" aria-live="polite">{item.caption} Class simulations in chemistry courses use these same widgets.</p>
-      <Suspense fallback={<p className="hint">Loading the simulation…</p>}>
+      <Suspense fallback={<LoadingPanel compact label="Loading the simulation…" />}>
         <ChemSim key={item.id} spec={item.spec} />
       </Suspense>
     </div>

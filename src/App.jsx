@@ -11,6 +11,8 @@ import RewardLayer, { StreakChip } from './components/Rewards';
 import { BookOpen, FlaskConical, Compass } from 'lucide-react';
 import { TuxIcon } from './components/PenguinShadow';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
+import LoadingPanel from './components/LoadingPanel';
+import { LoadingPrefs, quotesEnabled } from './lib/quotes';
 
 // The lesson viewer, the IDE and the workspaces load on demand
 const TopicViewer = lazy(() => import('./components/TopicViewer'));
@@ -21,7 +23,9 @@ const SubjectWorkspace = lazy(() => import('./components/SubjectWorkspace'));
 const AdvisorPage = lazy(() => import('./components/AdvisorPage'));
 
 // Its own boundary at every use site, so a first chunk load never suspends (and unmounts) MathLab or a workspace
-const LessonView = (props) => <Suspense fallback={<p className="hint">Loading the lesson…</p>}><TopicViewer {...props} /></Suspense>;
+const QUOTES_ON = { quotes: true };
+const QUOTES_OFF = { quotes: false };
+const LessonView = (props) => <Suspense fallback={<LoadingPanel compact label="Loading the lesson…" />}><TopicViewer {...props} /></Suspense>;
 
 // Bundled sample lessons, loaded only when the server has none to give (offline, error or an empty library)
 const DEFAULT_TOPIC_ID = 'rolling-without-slipping';
@@ -449,6 +453,7 @@ export default function App() {
             onClose={() => setSidebarOpen(false)} onSelectTopic={(id) => openTopic(id)} />
         )}
 
+        <LoadingPrefs.Provider value={quotesEnabled(progress) ? QUOTES_ON : QUOTES_OFF}>
         <main className="main" id="main">
           {mode === 'home' && (
             <CoursesHome user={user} onOpenCourse={openCourse} initialPreset={homePreset}
@@ -456,7 +461,7 @@ export default function App() {
               onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }} />
           )}
           {(mode === 'history' || mode === 'language') && (
-            <Suspense fallback={<div className="page"><p className="hint">Loading…</p></div>}>
+            <Suspense fallback={<LoadingPanel page />}>
               <SubjectWorkspace key={mode} kind={mode} requestedTab={workspaceTab} classTopic={subjectClass} topics={subjectTopics} onOpenTopic={(id) => openTopic(id)}
                 renderClass={(t) => (
                   <LessonView key={t.id} embedded topic={t} activeTab={activeTab} setActiveTab={setActiveTab}
@@ -465,7 +470,7 @@ export default function App() {
             </Suspense>
           )}
           {mode === 'advisor' && (
-            <Suspense fallback={<div className="page"><p className="hint">Loading…</p></div>}>
+            <Suspense fallback={<LoadingPanel page />}>
               <AdvisorPage user={user} onOpenCourse={openCourse} />
             </Suspense>
           )}
@@ -493,29 +498,29 @@ export default function App() {
                       <p>Interactive chemistry widgets: reaction rates, equilibrium, titration, gas laws and more. Press Lesson, or pick a topic from the list, to go back to the lesson.</p>
                     </div>
                   </header>
-                  <Suspense fallback={<p className="hint">Loading the Chemistry kit…</p>}>
+                  <Suspense fallback={<LoadingPanel compact label="Loading the Chemistry kit…" />}>
                     <ChemKit />
                   </Suspense>
                 </section>
               ) : activeTopic ? (
                 <LessonView embedded topic={activeTopic} activeTab={activeTab} setActiveTab={setActiveTab}
                   liveSimConfig={liveSimConfig} userId={user.id} onOpenCourse={openCourse} {...classNav(activeTopic)} />
-              ) : <p className="hint">Loading lessons…</p>}
+              ) : <LoadingPanel label="Loading lessons…" />}
             </div>
           )}
           {mode === 'class' && (codeClass ? (
-            <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
+            <Suspense fallback={<LoadingPanel page label="Loading the IDE…" />}>
               <EduStudioIDE initialMode="code" classTopic={codeClass} {...classNav(codeClass)} userId={user.id} onOpenTopic={(id) => openTopic(id)} onSwitchToPhysics={() => setMode('physics')} />
             </Suspense>
-          ) : <div className="page"><p className="hint">Loading the class…</p></div>)}
+          ) : <LoadingPanel page label="Loading the class…" />)}
           {ideMode && (
-            <Suspense fallback={<div className="page"><p className="hint">Loading the IDE…</p></div>}>
+            <Suspense fallback={<LoadingPanel page label="Loading the IDE…" />}>
               <EduStudioIDE initialMode="code" onSwitchToPhysics={() => setMode('physics')} request={ideRequest}
                 onNewPracticeSet={() => { setHomePreset({ intent: 'code', at: Date.now() }); setMode('home'); }} />
             </Suspense>
           )}
           {mode === 'math' && (
-            <Suspense fallback={<div className="page"><p className="hint">Loading Math…</p></div>}>
+            <Suspense fallback={<LoadingPanel page label="Loading Math…" />}>
               <MathLab user={user} classTopic={mathClass} mathTopics={mathTopics} onOpenTopic={(id) => openTopic(id)} push={mathPush}
                 renderClass={(t) => (
                   <LessonView key={t.id} embedded topic={t} activeTab={activeTab} setActiveTab={setActiveTab}
@@ -524,6 +529,7 @@ export default function App() {
             </Suspense>
           )}
         </main>
+        </LoadingPrefs.Provider>
 
         <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={viewedTopic?.id} agyCli={agyCli}
           courseId={mode === 'course' ? courseId : viewedTopic?.source?.courseId}

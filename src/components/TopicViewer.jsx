@@ -11,6 +11,7 @@ import LessonTutor from './LessonTutor';
 import MoreMenu from './MoreMenu';
 import TextSelectionAskAgy from './TextSelectionAskAgy';
 import ExplainPlayer from './ExplainPlayer';
+import LoadingPanel from './LoadingPanel';
 
 // simulations load when the Simulation tab opens, not with every lesson
 const RollingWithoutSlippingSim = lazy(() => import('../simulations/RollingWithoutSlippingSim'));
@@ -25,7 +26,7 @@ const BUILTIN = {
 function SimulationTab({ topic, liveSimConfig }) {
   const sim = topic.simulation ? <SpecSim spec={topic.simulation} />
     : BUILTIN[topic.simulationType] ? BUILTIN[topic.simulationType](liveSimConfig) : null;
-  return sim && <Suspense fallback={<p className="hint">Loading the simulation…</p>}>{sim}</Suspense>;
+  return sim && <Suspense fallback={<LoadingPanel compact label="Loading the simulation…" />}>{sim}</Suspense>;
 }
 
 /** The diagram's node labels ("A[Incident] --> B[Evanescent]" -> "Incident, Evanescent"), for the walkthrough writer. */

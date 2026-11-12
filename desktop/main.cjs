@@ -7,11 +7,16 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 const { classifyKeyResponse } = require('./keycheck.cjs');
+const { buildStartPage, parseStartupChunk, renderLog } = require('./startpage.cjs');
 
 const PORT_RANGE = [38090, 38190];
 const READY_TIMEOUT_MS = 60_000;
 const LOG_LIMIT_BYTES = 5 * 1024 * 1024;
+const START_PAGE_URL = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildStartPage());
+const STARTUP_LINES = 6;
+const STARTUP_READ_BYTES = 64 * 1024;
 const KEY_RE = /^[A-Za-z0-9_-]{30,100}$/;
 const DEV = !app.isPackaged;
 const ROOT = path.resolve(__dirname, '..');
@@ -155,6 +160,7 @@ async function startBackend() {
   const instanceId = crypto.randomUUID();
   const log = openLog();
   fs.writeSync(log, `\n--- ${new Date().toISOString()} starting on 127.0.0.1:${port}\n`);
+  const logStart = fs.fstatSync(log).size;  // the start page shows only this run's [startup] lines
   const child = spawn(PYTHON, ['-I', '-B', '-u', path.join(BACKEND_DIR, 'desktop_main.py')], {
     cwd: dataDir,
     env: backendEnv(port, instanceId),
@@ -169,14 +175,60 @@ async function startBackend() {
   backend = current;
   child.on('error', (err) => { current.error = err; });  // e.g. the bundled Python is missing: no 'exit' follows
   child.on('exit', (code, signal) => onBackendExit(current, code, signal));
-  await waitUntilReady(current);
+  await waitUntilReady(current, logStart);
   current.ready = true;
   return current;
 }
 
-async function waitUntilReady(b) {
+function onStartPage() {
+  return Boolean(win) && !win.isDestroyed() && win.webContents.getURL().startsWith('data:');
+}
+
+async function showStartPage() {
+  if (!win || win.isDestroyed() || onStartPage()) return;
+  await win.loadURL(START_PAGE_URL).catch(() => {});  // rejects only when another load replaces it
+}
+
+// Follows backend.log from `offset` and puts the last few "[startup] " lines on the start page.
+function startupProgress(b, offset) {
+  const file = path.join(logDir, 'backend.log');
+  let carry = '';
+  let decoder = new StringDecoder('utf8');  // a 64 KB cut can split a UTF-8 character
+  let lines = [];
+  let shown = null;  // push once even when empty: a relaunch on the start page clears the previous run's lines
+  return () => {
+    let fd = null;
+    try {
+      fd = fs.openSync(file, 'r');
+      const size = fs.fstatSync(fd).size;
+      if (size < offset) { offset = 0; carry = ''; decoder = new StringDecoder('utf8'); }
+      const want = Math.min(size - offset, STARTUP_READ_BYTES);
+      if (want > 0) {
+        const buf = Buffer.alloc(want);
+        const got = fs.readSync(fd, buf, 0, want, offset);
+        offset += got;
+        const parsed = parseStartupChunk(decoder.write(buf.subarray(0, got)), carry);
+        carry = parsed.carry;
+        if (parsed.lines.length) lines = [...lines, ...parsed.lines].slice(-STARTUP_LINES);
+      }
+    } catch {
+      // the progress list is cosmetic: an unreadable log just leaves it as it was
+    } finally {
+      if (fd !== null) fs.closeSync(fd);
+    }
+    const next = JSON.stringify(lines);
+    if (next !== shown && backend === b && onStartPage()) {
+      shown = next;
+      win.webContents.executeJavaScript(`(${renderLog.toString()})(${next})`).catch(() => {});
+    }
+  };
+}
+
+async function waitUntilReady(b, logStart) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
+  const progress = startupProgress(b, logStart);
   while (Date.now() < deadline) {
+    progress();
     if (b.error) throw new Error(`The backend could not be started (${b.error.message}).`);
     if (b.child.exitCode !== null || b.child.signalCode !== null) throw new Error('The backend stopped while starting.');
     try {
@@ -281,6 +333,7 @@ function serially(task) {
 
 function relaunchBackend() {
   return serially(async () => {
+    await showStartPage();  // before the stop, so the page never talks to a backend that is going away
     await stopBackend();
     await startAndShow();
   });
@@ -339,13 +392,12 @@ function createWindow() {
   });
   lockDown(win.webContents);
   win.once('ready-to-show', () => win.show());
-  win.on('closed', () => { win = null; });
-  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(
-    '<!doctype html><title>&amp;.edu</title><body style="font:16px -apple-system,sans-serif;display:grid;place-items:center;height:90vh;color:#666">Starting &amp;.edu…</body>'));
+  win.on('closed', () => { win = null; });  // the first startAndShow loads the start page
 }
 
 async function startAndShow() {
   if (quitting) return;
+  await showStartPage();  // relaunches and restarts come from the app page: show the progress again
   try {
     const b = await startBackend();
     if (win && backend === b) await win.loadURL(`${b.origin}/`);

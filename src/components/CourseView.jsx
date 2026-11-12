@@ -3,6 +3,7 @@ import { Loader2, ArrowRight, RefreshCw, Trash2, ListPlus, Target, CalendarRange
 import Md, { MdInline } from './Md';
 import { api, useAgyEvents } from '../lib/api';
 import { STATUS, StudyHub } from './CoursesHome';
+import LoadingPanel from './LoadingPanel';
 
 const LETTERS = 'ABCDEFGH';
 const CLASS_STATUS = {
@@ -63,9 +64,8 @@ function AdjustClass({ courseId, klass, onDone }) {
 function JobProgress({ job }) {
   if (!job || job.status === 'done' || job.status === 'error') return null;
   return (
-    <div className="panel stack-sm" aria-live="polite">
-      <p><Loader2 size={16} className="spin" aria-hidden="true" /> {job.step || 'Working'}</p>
-      <div className="meter gold" aria-hidden="true"><span style={{ width: `${Math.round((job.progress || 0.05) * 100)}%` }} /></div>
+    <div className="panel">
+      <LoadingPanel compact label={job.step || 'Working'} progress={job.progress || 0.05} log={job.log} />
     </div>
   );
 }
@@ -344,8 +344,12 @@ export default function CourseView({ courseId, onOpenTopic, onBack }) {
 
   useEffect(() => { load(); }, [load]);
   useAgyEvents((evt) => {
-    if ((evt.type === 'COURSE_UPDATED' && evt.payload.courseId === courseId) ||
-        (evt.type === 'JOB_UPDATE' && course?.job_id && evt.payload.id === course.job_id)) load();
+    if (evt.type === 'COURSE_UPDATED' && evt.payload.courseId === courseId) { load(); return; }
+    if (evt.type !== 'JOB_UPDATE' || !course?.job_id || evt.payload.id !== course.job_id) return;
+    const prev = course.job || {};
+    // a new headline step or status can mean classes changed: reload; a log-only note just updates the job in place
+    if (evt.payload.status !== prev.status || evt.payload.step !== prev.step) load();
+    else setCourse((c) => (c && c.job ? { ...c, job: { ...c.job, progress: evt.payload.progress, log: evt.payload.log } } : c));
   });
 
   const act = async (path, method = 'POST') => {
@@ -361,7 +365,7 @@ export default function CourseView({ courseId, onOpenTopic, onBack }) {
   };
 
   if (error && !course) return <div className="page"><p className="notice notice-bad">{error}</p></div>;
-  if (!course) return <div className="page"><p className="hint">Loading course…</p></div>;
+  if (!course) return <LoadingPanel page label="Loading course…" />;
 
   const [label, cls] = STATUS[course.status] || [course.status, 'status-pending'];
   const classes = course.classes || [];

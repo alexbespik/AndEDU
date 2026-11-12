@@ -1456,3 +1456,24 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .desktop-key-card .desktop-key-error { color: var(--bad-ink); }
 .desktop-key-card[data-reason="rejected"] { border-color: var(--bad-ink); }
 .desktop-key-card .desktop-key-remove-confirm { background: var(--bad-ink); color: var(--paper); border-color: var(--bad-ink); }
+
+/* ---- Loading panel (LoadingPanel.jsx): bar, live job log, quote ---- */
+.loading-panel { display: grid; gap: var(--space-3, 12px); max-width: 560px; margin: 48px auto; padding: 0 16px;
+  animation: loading-in 200ms var(--ease) 250ms both; }
+.loading-panel.compact { margin: 12px 0; padding: 0; max-width: 360px; }
+.loading-label { margin: 0; color: var(--muted); font-family: var(--font-ui); font-size: 0.85rem; }
+.loading-bar { position: relative; height: 6px; background: var(--sunk); border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+.loading-bar > span { display: block; height: 100%; background: var(--accent); transition: width 300ms var(--ease); }
+.loading-bar.indeterminate > span { position: absolute; width: 35%; animation: loading-slide 1.4s var(--ease) infinite; }
+.loading-log { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+.loading-log li::before { content: "✓ "; color: var(--ok); }
+.loading-log li:last-child { color: var(--ink-soft); }
+.loading-quote { margin: 8px 0 0; padding-left: 12px; border-left: 2px solid var(--gold-rule); display: grid; gap: 6px; justify-items: start; }
+.loading-quote blockquote { margin: 0; color: var(--ink-soft); font-size: 1rem; line-height: 1.5; animation: loading-in 400ms var(--ease) both; }
+.loading-quote figcaption { color: var(--muted); font-size: 0.8rem; }
+@keyframes loading-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loading-slide { from { left: -35%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .loading-panel, .loading-quote blockquote { animation: none; }
+  .loading-bar.indeterminate > span { animation: none; left: 0; width: 100%; opacity: 0.5; }
+}

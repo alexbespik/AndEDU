@@ -3,6 +3,7 @@ import { Flame, RotateCcw, ArrowRight, Loader2, Check, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { emitRewards } from '../lib/engage';
 import Md, { MdInline } from './Md';
+import LoadingPanel from './LoadingPanel';
 
 const LETTERS = 'ABCDEFGH';
 
@@ -59,7 +60,7 @@ export default function ReviewSession({ userId, onDone }) {
   };
 
   if (error) return <div className="page"><p className="notice notice-bad">{error}</p></div>;
-  if (!queue) return <div className="page"><p className="hint"><Loader2 size={14} className="spin" /> Gathering your review…</p></div>;
+  if (!queue) return <LoadingPanel page label="Gathering your review…" />;
 
   if (!queue.length || finished) {
     const f = finished;

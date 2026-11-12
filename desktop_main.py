@@ -41,9 +41,11 @@ def exit_when_parent_closes(stream):
 if __name__ == "__main__":
     sys.path.insert(0, str(HERE))
     read_launch_settings(sys.stdin)
+    print("[startup] Settings read", flush=True)  # fixed text: the app's start page shows these lines
     threading.Thread(target=exit_when_parent_closes, args=(sys.stdin.buffer,), daemon=True).start()
     code = 1
     try:
+        print("[startup] Loading the lesson engine", flush=True)
         runpy.run_path(str(HERE / "server.py"), run_name="__main__")
         code = 0
     except SystemExit as exc:  # uvicorn exits this way when it cannot bind; server.py with a message

@@ -180,7 +180,7 @@ def prereq_line(r: Dict[str, Any]) -> str:
     parts = [f"{g} unless a qualifying score: {', '.join(map(advisor.score_option_text, options[g]))}" if g in options else str(g)
              for g in r.get("missing") or []]
     line = f"missing {', '.join(parts)}" if parts else ""
-    required = [advisor.score_option_text(a) for a in r.get("required_alts") or []]
+    required = advisor.required_alts_text(r)
     if required:
         line += ("; also requires " if line else "courses on record; also requires ") + ", ".join(required) + " (not on any record)"
     return line or "missing"

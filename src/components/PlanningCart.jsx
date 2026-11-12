@@ -85,8 +85,11 @@ function PrereqHint({ item }) {
   if (sameTerm.length && (p.prereq_status === 'missing' || check)) {
     lines.push(<span key="conc">{sameTerm.join(', ')} may be taken in the same term.</span>);
   }
-  if (p.required_alts?.length) {
-    lines.push(<span key="also">Also requires: {p.required_alts.map(optionName).join(', ')} (not checked).</span>);
+  // one phrase per OR: any one option of a group is enough
+  const required = p.required_any?.length ? p.required_any : (p.required_alts || []).map((a) => [a]);
+  if (required.length) {
+    const text = required.map((g) => (g.length === 1 ? optionName(g[0]) : `one of ${g.map(optionName).join(' or ')}`));
+    lines.push(<span key="also">Also requires: {text.join(', ')} (not checked).</span>);
   }
   if (p.score_alternative && !check) lines.push(<span key="score">Or an equivalent score/placement (not checked here).</span>);
   if (chosen?.consent) lines.push(<span key="consent">{chosen.consent_kind || 'Approval'} required to register.</span>);

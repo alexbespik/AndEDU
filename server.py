@@ -3637,15 +3637,41 @@ MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
 MAX_JOBS = 100
 _background_tasks: set = set()
 
+JOB_LOG_MAX = 12  # steps kept per job for the loading screens' live log
+
+
+def _job_log(job: Dict[str, Any], step: str):
+    log = job.setdefault("log", [])
+    log.append({"at": time.time(), "step": step})
+    del log[:-JOB_LOG_MAX]
+
+
+def _job_emit(job: Dict[str, Any]):
+    payload = {k: job[k] for k in ("id", "kind", "status", "step", "progress", "error", "result") if k in job}
+    payload["log"] = list(job.get("log") or [])  # a copy: events already queued must not change afterwards
+    emit_event("JOB_UPDATE", payload, owner=job.get("owner"))
+
+
 def _job_update(job: Dict[str, Any], **changes):
+    if changes.get("step") and changes["step"] != job.get("step"):
+        _job_log(job, changes["step"])
     job.update(changes, updated=time.time())
-    emit_event("JOB_UPDATE", {k: job[k] for k in ("id", "kind", "status", "step", "progress", "error", "result") if k in job},
-               owner=job.get("owner"))
+    _job_emit(job)
+
+
+def _job_note(job: Dict[str, Any], text: str):
+    """A sub-step for the live log that leaves the headline `step` as it is. Fixed labels and counts only: never
+    materials, answers or model output."""
+    _job_log(job, text)
+    job["updated"] = time.time()
+    _job_emit(job)
+
 
 def start_job(kind: str, label: str, work, then=None) -> Dict[str, Any]:
     """Schedules `work(job)` (an async function) and returns the job record immediately; `then()` runs once it is done."""
     job = {"id": f"job-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}", "kind": kind, "label": label,
            "status": "queued", "step": "Queued", "progress": 0.0, "created": time.time(),
+           "log": [{"at": time.time(), "step": "Queued"}],
            "owner": (CURRENT_USER.get() or {}).get("id")}  # its progress events go to whoever started it
     JOBS[job["id"]] = job
     for old in sorted(list(JOBS), key=lambda k: JOBS[k]["created"])[:-MAX_JOBS]:
@@ -5138,7 +5164,8 @@ def public_course(course: Dict[str, Any]) -> Dict[str, Any]:
     out["plannedCount"] = sum(k["status"] == "planned" for k in out["classes"])  # semester: outlined, written later
     out["sprint"] = sprint.course_summary(course, classes)
     job = JOBS.get(course.get("job_id") or "")
-    out["job"] = job and {k: job.get(k) for k in ("id", "status", "step", "progress", "error")}
+    out["job"] = job and {**{k: job.get(k) for k in ("id", "status", "step", "progress", "error")},
+                          "log": list(job.get("log") or [])}
     return out
 
 def course_event(course_id: str):
@@ -5522,7 +5549,10 @@ async def plan_course(course_id: str, job, n_questions: int, class_count: Option
     course_event(course_id)
     return {"courseId": course_id, "questions": len(questions), "classes": len(outline)}
 
-async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: List[Dict[str, Any]],
+                      on_step=None) -> Dict[str, Any]:
+    """Writes one class's lesson. on_step(text) reports sub-steps for the job's live log (fixed labels, counts only)."""
+    note = on_step or (lambda _text: None)
     concepts = {c["id"]: c for c in course.get("concepts") or []}
     scores = effective_mastery(course, classes)
     covered = klass.get("concepts") or []
@@ -5560,6 +5590,7 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
     data = await gemini_json(prompt, role="lesson")
     if not isinstance(data, dict):
         raise RuntimeError("Lesson generation returned no object")
+    note("Lesson written")
     topic = {
         **{k: data.get(k) for k in ("title", "category", "difficulty", "summary", "markdownContent", "cheatSheet", "mermaid", "quiz")},
         "id": slugify(f"{course['id']}-{klass['seq']:02d}-{klass['title']}")[:80].strip("-"),
@@ -5601,6 +5632,11 @@ async def build_class(course: Dict[str, Any], klass: Dict[str, Any], classes: Li
         checked = await asyncio.gather(quiz_check, return_exceptions=True)
         checked = checked[0]
     topic["quiz"] = checked if isinstance(checked, list) else normalized["quiz"]
+    if isinstance(checked, list):
+        corrected = sum(((q.get("check") or {}).get("verdict") == "corrected") for q in checked if isinstance(q, dict))
+        note(f"Quiz checked: {corrected} answer{'s' if corrected != 1 else ''} corrected" if corrected else "Quiz answers checked")
+    if topic.get("simulation"):
+        note("Simulation added")
     saved, _ = normalize_topic(topic)
     saved["notesFile"] = write_notes_file(saved)
     saved, _ = save_topic(saved, event_type="TOPIC_CREATED", auto_select=False, course_id=course["id"])
@@ -5749,7 +5785,7 @@ def _queue_course_generation(course_id: str) -> Dict[str, Any]:
             db.update_class(klass["id"], status="generating", error=None)
             course_event(course_id)
             try:
-                topic = await build_class(course, klass, classes)
+                topic = await build_class(course, klass, classes, on_step=lambda text: _job_note(job, text))
                 if not db.get_course(course_id):  # deleted while this class was being written
                     _unlink_topic(None, topic["id"])
                     purge_course_artifacts(course_id)  # else an orphan file shows up as a library lesson
@@ -5841,6 +5877,8 @@ async def purge_cleared_loop():
 
 @contextlib.asynccontextmanager
 async def lifespan(_app):
+    print("[startup] Database ready", flush=True)  # the desktop start page shows [startup] lines as they come
+    print("[startup] Resuming course generation", flush=True)
     await resume_course_generation()
     yield
     if PURGE_TASK:
