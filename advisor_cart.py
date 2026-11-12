@@ -47,6 +47,8 @@ MIN_FULL_TIME, RECOMMENDED_MIN, RECOMMENDED_MAX, MAX_NORMAL = 12.0, 14.0, 16.0, 
 DEFAULT_CREDITS = 3.0
 MAX_ITEMS = 30
 MAX_NOTES = 500
+# PATH's consent values; anything else is shown as a plain "Approval" (the raw text is never passed on)
+CONSENT_KINDS = ("Instructor Approval", "Department Chair Approval", "Dean/Director Approval")
 
 
 class CartError(ValueError):
@@ -211,19 +213,24 @@ def _compact_section(s: Dict[str, Any], prereq: Optional[Dict[str, Any]] = None)
     out = {k: s.get(k) for k in ("crn", "section", "term", "term_name", "instructor", "meets", "meeting_times",
                                  "schedule_type", "seats", "credits")}
     details = s.get("details") if isinstance(s.get("details"), dict) else {}
-    out["consent"] = bool(str(details.get("consent") or "").strip())
+    consent = str(details.get("consent") or "").strip()
+    out["consent"] = bool(consent)
+    out["consent_kind"] = (consent if consent in CONSENT_KINDS else "Approval") if consent else ""
     return {**out, **(prereq or {})}
 
 
 def _prereq_check(course: Dict[str, Any], rule: Dict[str, Any], have, alongside) -> Dict[str, Any]:
-    """A rule judged against the record: prereq_status uses readiness's vocabulary (met | missing | unknown | none);
-    concurrent lists codes counted as met because they are in this term's primary cart; prereqs is the section's
-    own text only when its rule differs from the course's."""
+    """A rule judged against the record: prereq_status uses readiness's vocabulary (met | missing | check | unknown |
+    none); concurrent lists codes counted as met because they are in this term's primary cart; prereqs is the
+    section's own text only when its rule differs from the course's. score_options (per missing group) and
+    required_alts are the test scores, equivalencies and admissions PATH accepts (not verified: no scores are
+    stored); score_alternative says the text names any; grade_minimum is the catalog's grade line."""
     st = advisor.rule_status(course, rule, have, alongside)
     own = rule["basis"] == "section" and advisor.cnf_key(rule["cnf"]) != advisor.cnf_key(rule["course_cnf"])
     return {"prereq_basis": rule["basis"], "prereq_status": st["status"], "prereq_missing": st["missing"],
             "prereqs": advisor.prereq_display(rule["text"]) if own else "", "prereq_note": rule["note"],
             "concurrent": st["concurrent"], "concurrent_ok": rule["concurrent_ok"],
+            "score_options": st["score_options"], "required_alts": st["required_alts"],
             "score_alternative": "minimum score of" in (rule["text"] or "").lower(),
             "grade_minimum": advisor.grade_minimum(rule["text"])}
 
@@ -236,13 +243,19 @@ def _studio_course(user_id: str, cid: str) -> str:
     return cid if course and course.get("user_id") == user_id else ""
 
 
+def primary_codes(user_id: str, term: str) -> set:
+    """Course codes in the student's primary cart for a term (taken alongside: "may be taken concurrently" counts)."""
+    return {r[0] for r in db.conn().execute("SELECT course_code FROM student_carts WHERE user_id = ? AND term = ? "
+                                            "AND cart_type = 'primary'", (user_id, term))}
+
+
 def get(user_id: str, term: str = "") -> Dict[str, Any]:
     """The cart for a term: items (with the term's listed sections to choose from), flags and the summary."""
     term = _term(term)
     rows = db.conn().execute("SELECT * FROM student_carts WHERE user_id = ? AND term = ? ORDER BY created_at, course_code",
                              (user_id, term)).fetchall()
     done = {r["code"] for r in advisor.completed(user_id) if (r.get("grade") or "").upper() in advisor.PASSING}
-    primary = {r["course_code"] for r in rows if r["cart_type"] == "primary"}
+    primary = primary_codes(user_id, term)
     items = []
     for r in rows:
         code = r["course_code"]
@@ -272,6 +285,8 @@ def get(user_id: str, term: str = "") -> Dict[str, Any]:
             flags.append("already_done")
         elif judged and judged["prereq_status"] == "missing":
             flags.append("prereq_missing")
+        elif judged and judged["prereq_status"] == "check":  # only a score, equivalency or admission would do
+            flags.append("prereq_check")
         item = {"code": code, "title": course.get("title") or code, "cart_type": r["cart_type"],
                 "section_crn": r["section_crn"],
                 "section": _compact_section(chosen, checks.get(str(chosen.get("crn")))) if chosen else None,
@@ -388,9 +403,17 @@ def context_block(user_id: str, term: str) -> str:
             own = [f"sec {x.get('section')} CRN {x.get('crn')} lists {x['prereqs']}" for x in i["sections"] if x.get("prereqs")]
             lines.append(f"  {i['code']} sections list different prerequisites (course rule: {course_text}): "
                          + "; ".join(own[:5]) + ("; the others follow the course rule" if len(own) < len(i["sections"]) else ""))
-        concurrent = (sec or i.get("course_prereq") or {}).get("concurrent") or []
+        judged = sec or i.get("course_prereq") or {}
+        concurrent = judged.get("concurrent") or []
         if concurrent:
             lines.append(f"  {i['code']}: taking {', '.join(concurrent)} alongside counts (PATH: may be taken concurrently)")
+        if judged.get("prereq_status") == "check":
+            parts = [f"missing {o['group']} unless a qualifying score: {', '.join(map(advisor.score_option_text, o['options']))}"
+                     for o in judged.get("score_options") or []]
+            parts += [f"also requires {advisor.score_option_text(a)}" for a in judged.get("required_alts") or []]
+            lines.append(f"  {i['code']}: {'; '.join(parts)} (not verified: the record holds no test scores)")
+        if sec and sec.get("consent"):
+            lines.append(f"  {i['code']}: {sec.get('consent_kind') or 'Approval'} required to register")
     for c in s["conflicts"]:
         lines.append(f"- CONFLICT: {c['description']}")
     order = advisor_risk.rank(cart["items"])

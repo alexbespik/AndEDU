@@ -204,21 +204,26 @@ MathLab exposes Desmos-equivalent graphing and analysis tools with three modular
     "missing": ["MATH 111 or MATH 131"],
     "missing_codes": ["MATH 111", "MATH 131"],
     "met": false,
-    "status": "met | missing | none | unknown",
+    "status": "met | missing | check | none | unknown",
     "taken": false,
     "basis": "course | section",
     "crn": "",
     "term": "202720",
     "section_note": "",
-    "concurrent_ok": []
+    "concurrent_ok": [],
+    "concurrent": [],
+    "score_options": [{"group": "MATH 111 or MATH 131", "options": [{"test": "AP Calculus BC", "min": 4, "kind": "test"}]}],
+    "required_alts": [],
+    "term_ignored": false
   }
   ```
   - `status: "none"`: Course has no prerequisites (explicit none or introductory level < 300).
   - `status: "unknown"`: 300+ course with empty prerequisite field in catalog data; `met` evaluates to `false` preventing false-positive recommendations. Only on `basis: "course"`.
+  - `status: "check"` (`met: false`): what is missing could only be satisfied by a test score, PATH equivalency/exemption/placement flag or admission, or one of those is required on its own. No student scores are stored, so it is never verified. `score_options` lists, per missing group (`group` = the `missing` string), the options PATH accepts (`kind` test for AP/IB/CLEP/SAT/ACT, admission for "Admitted to ...", else equivalent; the lowest `min` per name); `required_alts` the ones required outside any OR (EDUC 311: "minimum score of 1 in 'Admitted to SOE-Secondary', EDUC 301 and 310"). Status is missing when some missing group has no option. From `advisor.parse_prereq_scores` (cached, immutable), which follows `parse_prereq_cnf`'s groups exactly: `prereq_tree` / `prereq_codes` are unchanged, and when the text's groups don't match the stored tree (or the 64-clause fallback fired) no options are given. `recommend()` keeps only `met: true`, so check courses are left out.
   - Per-section rule (`advisor.prereq_rule` / `section_rule`): PATH lists a section's own prerequisites as the first `details.restrictions` line starting `Prerequisite(s)`, and sections of one course can disagree (DATA 440: DATA 301 vs DATA 201). With `crn`, that line decides when it names a course (`basis: "section"`; `prereqs` / `prereq_codes` / `prereq_tree` are the section's, `course_prereqs` / `course_prereq_tree` the course's). A section without that line uses the course rule; one whose line names no course (e.g. "minimum score of 1 in 'Admitted to SOE-Secondary'") uses the course rule with the line in `section_note`.
-  - `concurrent_ok`: codes PATH marks "* May be taken concurrently". They stay in the CNF (before or alongside); the planning cart counts one as met when it is in the same term's primary cart (`concurrent` on its sections). Score/placement alternatives ("or minimum score of 4 in AP Calculus") are not modelled: the CNF keeps the course alternatives only.
-  - `term` defaults to the cart's default (next) term and is echoed. Errors: 400 for a malformed term or a CRN of another course, 404 for a CRN not listed in that term.
-  - Planning cart (`advisor_cart.get`): each section carries `prereq_basis`, `prereq_status` (same vocabulary), `prereq_missing`, `prereqs` (the section's text only when its CNF differs from the course's), `prereq_note`, `concurrent`, `concurrent_ok`, `score_alternative`, `grade_minimum`, `consent` (bool); the item carries `course_prereq` (the same fields for the course rule) and `sections_differ`. `prereq_missing` in `flags` is judged on the chosen section (else the course rule). Raw `details` never leave the server.
+  - `concurrent_ok`: codes PATH marks "* May be taken concurrently". They stay in the CNF (before or alongside); the endpoint and the planning cart count one as met when it is in that term's primary cart (`advisor_cart.primary_codes`), listing it in `concurrent`.
+  - `term` defaults to the cart's default (next) term and is echoed. With `crn`: 400 for a malformed term or a CRN of another course, 404 for a CRN not listed in that term. Without `crn` a malformed term is ignored: 200 with `term: ""`, `term_ignored: true` and no cart counted.
+  - Planning cart (`advisor_cart.get`): each section carries `prereq_basis`, `prereq_status` (same vocabulary), `prereq_missing`, `prereqs` (the section's text only when its CNF differs from the course's), `prereq_note`, `concurrent`, `concurrent_ok`, `score_options`, `required_alts`, `score_alternative` (the text names a score), `grade_minimum`, `consent` (bool), `consent_kind` (Instructor Approval, Department Chair Approval, Dean/Director Approval, any other value as "Approval"; never the raw text); the item carries `course_prereq` (the same fields for the course rule) and `sections_differ`. `prereq_missing` (status missing) or `prereq_check` (status check) in `flags` is judged on the chosen section (else the course rule). Raw `details` never leave the server.
 - **Degree Audit Contract (`/api/advisor/{user_id}/degree-audit`)**:
   Computes William & Mary College Curriculum (COLL 100, 150, 200, 300, 400) and Proficiencies (Mathematics, Arts):
   ```json

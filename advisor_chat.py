@@ -169,6 +169,23 @@ def _keywords(text: str) -> List[str]:
     return [w for w in dict.fromkeys(words) if w not in stop][:5]
 
 
+def prereq_line(r: Dict[str, Any]) -> str:
+    """advisor.readiness() in words. check is never "met": no test scores or admissions are on any record."""
+    status = r.get("status")
+    if status in ("met", "none"):
+        return "met"
+    if status == "unknown":
+        return "not listed in the catalog data"
+    options = {o["group"]: o["options"] for o in r.get("score_options") or []}
+    parts = [f"{g} unless a qualifying score: {', '.join(map(advisor.score_option_text, options[g]))}" if g in options else str(g)
+             for g in r.get("missing") or []]
+    line = f"missing {', '.join(parts)}" if parts else ""
+    required = [advisor.score_option_text(a) for a in r.get("required_alts") or []]
+    if required:
+        line += ("; also requires " if line else "courses on record; also requires ") + ", ".join(required) + " (not on any record)"
+    return line or "missing"
+
+
 def build_context(user_id: str, message: str, history: Optional[List[Dict[str, str]]] = None,
                   today: Optional[date] = None) -> str:
     convo = " ".join([*(t.get("content", "") for t in (history or [])[-MAX_TURNS:]), message or ""])
@@ -236,7 +253,7 @@ def build_context(user_id: str, message: str, history: Optional[List[Dict[str, s
                 continue
             r = advisor.readiness(user_id, code)
             out.append(_course_line(c, full=True))
-            out.append(f"  student's prerequisites: {'met' if r.get('met') else 'missing ' + ', '.join(map(str, r.get('missing') or []))}")
+            out.append(f"  student's prerequisites: {prereq_line(r)}")
             out += _section_rules(c, next_term)
             out.append(_sections(code, next_term))
 
