@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Send, Loader2, Play } from 'lucide-react';
 import Md from './Md';
+import PenguinShadow from './PenguinShadow';
 import { api, uploadFiles, useAgyEvents } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { disambiguateFile } from '../lib/files';
@@ -217,6 +218,7 @@ export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId
           </div>
           <button type="button" className="btn btn-quiet btn-sm btn-icon" onClick={onClose} aria-label="Close AGY"><X size={16} /></button>
         </div>
+        <div className="agy-penguin" aria-hidden="true"><PenguinShadow size={180} /></div>
         <div className="agy-log" ref={logRef} aria-live="polite">
           {messages.length === 0 && (
             <p className="hint">Ask about the lesson you're on, or have AGY build a simulation, a new lesson or harder questions. Changes show up in the workspace as they land.</p>

@@ -2,7 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { ShoppingCart, Loader2, X, ArrowRightCircle, ArrowLeftRight, AlertTriangle, MessageCircle, Plus, ListOrdered } from 'lucide-react';
 import { api } from '../lib/api';
 
-const FLAG_TEXT = { no_section: 'No section picked', prereq_missing: 'Prerequisites missing', already_done: 'Already done' };
+const FLAG_TEXT = {
+  no_section: 'No section picked', prereq_missing: 'Prerequisites missing', prereq_check: 'Check score or placement', already_done: 'Already done',
+};
+const FLAG_CLASS = { no_section: 'status-pending', prereq_check: 'status-working' };
 const LOAD_TEXT = {
   underload: 'Under 12 credits: not full-time',
   full_time: 'Full-time, below the recommended 14–16',
@@ -21,6 +24,75 @@ const pct = (n) => `${Math.min(100, (n / GAUGE_MAX) * 100)}%`;
 
 function sectionLabel(s) {
   return [`Sec ${s.section}`, s.meets, s.instructor, `CRN ${s.crn}`].filter(Boolean).join(' · ');
+}
+
+/** A section option: marked when the student's record misses that section's prerequisites. */
+function sectionOption(s, done) {
+  const mark = { missing: ' · prerequisites missing', check: ' · check score' }[s.prereq_status];
+  return sectionLabel(s) + (!done && mark ? mark : '');
+}
+
+/** "AP Calculus BC (4+)" for a test, else the name PATH gives (an admission, an equivalency flag). */
+const optionName = (o) => (o.kind === 'test' && o.min != null ? `${o.test} (${o.min}+)` : o.test);
+
+/** The options for one group: tests and admissions by name, PATH equivalency/exemption/placement flags summarised. */
+function scoreText(options) {
+  const named = options.filter((o) => o.kind !== 'equivalent').map(optionName);
+  const other = options.some((o) => o.kind === 'equivalent');
+  return [...named, ...(other ? ['an equivalent/placement'] : [])].join(' or ');
+}
+
+/** What a "check" status means: each missing group with the scores PATH accepts instead (no score is on record). */
+function checkText(p) {
+  return (p.score_options || []).map((o) => `Missing ${o.group}, or a qualifying score: ${scoreText(o.options)}`).join('; ');
+}
+
+/**
+ * What the chosen section requires (each section can list its own rule in PATH) or, before one is picked, the
+ * course rule; plus the parts this check can't see (score alternatives, approval, grade minimums).
+ */
+function PrereqHint({ item }) {
+  const chosen = item.section;
+  const p = chosen || item.course_prereq;
+  if (!p) return null;
+  const lines = [];
+  const check = p.prereq_status === 'check';
+  if (chosen && p.prereqs) {
+    const met = p.prereq_status === 'met';
+    lines.push(
+      <span key="req">This section requires: {p.prereqs} (course: {item.course_prereq?.prereqs || 'none listed'}){' '}
+        <span className={`status ${met ? 'status-ready' : check ? 'status-working' : 'status-error'}`}>
+          {met ? 'Met' : check ? (checkText(p) || 'Check score or admission') : `Missing ${p.prereq_missing.join('; ')}`}
+        </span>
+      </span>,
+    );
+  } else if (chosen && p.prereq_note) {
+    lines.push(<span key="note">PATH lists for this section: {p.prereq_note} No course is named, so the course rule applies.</span>);
+  } else if (chosen && item.sections_differ) {
+    lines.push(<span key="own">This section lists no prerequisite of its own; the course rule applies.</span>);
+  } else if (!chosen && item.sections_differ) {
+    lines.push(<span key="differ">Sections of this course list different prerequisites: pick one to check yours.</span>);
+  }
+  if (check && p.score_options?.length && !(chosen && p.prereqs)) {  // else the badge above says it
+    lines.push(<span key="check"><span className="status status-working">{checkText(p)}</span> (scores aren't on your record)</span>);
+  }
+  if (p.concurrent?.length) {
+    lines.push(<span key="along">Taking {p.concurrent.join(', ')} alongside (PATH allows it in the same term).</span>);
+  }
+  // only the codes still missing: one the student already passed needs no same-term note
+  const missingCodes = (p.prereq_missing || []).flatMap((g) => g.split(' or '));
+  const sameTerm = (p.concurrent_ok || []).filter((c) => !(p.concurrent || []).includes(c) && missingCodes.includes(c));
+  if (sameTerm.length && (p.prereq_status === 'missing' || check)) {
+    lines.push(<span key="conc">{sameTerm.join(', ')} may be taken in the same term.</span>);
+  }
+  if (p.required_alts?.length) {
+    lines.push(<span key="also">Also requires: {p.required_alts.map(optionName).join(', ')} (not checked).</span>);
+  }
+  if (p.score_alternative && !check) lines.push(<span key="score">Or an equivalent score/placement (not checked here).</span>);
+  if (chosen?.consent) lines.push(<span key="consent">{chosen.consent_kind || 'Approval'} required to register.</span>);
+  if (p.grade_minimum && p.prereq_status !== 'none') lines.push(<span key="grade">{p.grade_minimum}</span>);
+  if (!lines.length) return null;
+  return <div className="hint stack-xs">{lines}</div>;
 }
 
 const asOf = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : 'an unknown time');
@@ -138,7 +210,7 @@ export default function PlanningCart({ user, cart, onCart, onLoadTerm, onAdd, on
                 <div className="cart-flags">
                   {conflict && <span className="status status-error"><AlertTriangle size={11} aria-hidden="true" /> Time conflict</span>}
                   {i.flags.map((f) => (
-                    <span key={f} className={`status ${f === 'no_section' ? 'status-pending' : 'status-error'}`}>{FLAG_TEXT[f] || f}</span>
+                    <span key={f} className={`status ${FLAG_CLASS[f] || 'status-error'}`}>{FLAG_TEXT[f] || f}</span>
                   ))}
                 </div>
               )}
@@ -150,11 +222,12 @@ export default function PlanningCart({ user, cart, onCart, onLoadTerm, onAdd, on
                   {i.section_crn && !listed.some((x) => String(x.crn) === i.section_crn) && (
                     <option value={i.section_crn}>CRN {i.section_crn} (no longer listed)</option>
                   )}
-                  {listed.map((x) => <option key={x.crn} value={String(x.crn)}>{sectionLabel(x)}</option>)}
+                  {listed.map((x) => <option key={x.crn} value={String(x.crn)}>{sectionOption(x, i.flags.includes('already_done'))}</option>)}
                 </select>
               ) : (
                 <span className="hint">No sections listed for {cart.term_name}.</span>
               )}
+              {!i.flags.includes('already_done') && <PrereqHint item={i} />}
               <div className="btn-row">
                 <label className="visually-hidden" htmlFor={`pri-${i.code}`}>Priority of {i.code}</label>
                 <select id={`pri-${i.code}`} className="input cart-priority" value={i.priority || 'want'} disabled={Boolean(busy)}

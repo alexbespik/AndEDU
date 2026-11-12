@@ -11,12 +11,13 @@ imports what their browser can see:
 parse_catalog_text() reads the usual "DEPT 123. Title. (3 Credits)" layout; anything it can't read can go
 through the model (server.py) and come back as JSON rows.
 """
+import functools
 import hashlib
 import html
 import json
 import re
 import time
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 import db
 
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS catalog_sections (
     seats         TEXT NOT NULL DEFAULT '',
     credits       TEXT NOT NULL DEFAULT '',
     updated_at    REAL NOT NULL,
+    details       TEXT NOT NULL DEFAULT '{}', -- JSON: rooms, dates, seats, restrictions (the section's prerequisites), consent
     PRIMARY KEY (school, term, crn)
 );
 CREATE INDEX IF NOT EXISTS idx_sections_code ON catalog_sections(school, code);
@@ -121,7 +123,7 @@ def norm_code(dept: str, num: str) -> str:
 
 def expand_shorthand(text: str) -> str:
     """Expands course shorthand like 'MATH 111 or 131' to 'MATH 111 or MATH 131'."""
-    pattern = re.compile(r"\b([A-Z]{2,5})\s+(" + _NUM + r")([\s,/]+(?:or|and|/)?\s+)(" + _NUM + r")\b")
+    pattern = re.compile(r"\b([A-Z]{2,5})\s+(" + _NUM + r")([\s,/]+(?:or|and|/)?\s+)(" + _NUM + r")\b(?!-?level)")
     s = str(text or "")
     for _ in range(40):  # one more code per pass; long lists like "HISP 340, 350, ... or 391" need many
         prev = s
@@ -151,9 +153,14 @@ _TOKEN_RE = re.compile(r"\(|\)|,|;|\b(?i:and|or)\b|\bALT\b|\b[A-Z]{2,5}\s?-?\s?"
 _PROSE_RE = re.compile(r"\s(?:This|These|A|An|The|Students|Topics|Emphasis|Introduction|Why|Examines?|Explores?|Designed|Intended|Research)\s[a-z]")
 
 
-def prereq_statement(text: str) -> str:
-    """The required-courses part of a prerequisite field: no HTML, no quoted test names, no grade, corequisite
-    or consent lines, and no "may be taken concurrently" markers."""
+_SCORE_RE = re.compile(r"minimum score of (\S+) in ('[^']*'|\"[^\"]*\")", re.I)
+_QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+_ALT_MARK_RE = re.compile(r"\x00(\d+)\x00")
+
+
+def _statement_and_alts(text: str):
+    """prereq_statement() plus the alternatives it replaced with " ALT ", in the order they appear:
+    [{"test": quoted name, "min": score (None for a bare quoted name)}]."""
     raw = html.unescape(re.sub(r"<[^>]+>", " ", str(text or "")))
     lines = [ln for ln in raw.splitlines() if ln.strip() and not _NOT_PREREQ_LINE.match(ln)]
     t = " ".join(lines)
@@ -162,14 +169,30 @@ def prereq_statement(text: str) -> str:
         t = t[:m.start()]
     t = re.sub(r"^\s*(?:Prerequisites?(?:\(s\))?|Pre-?req(?:uisite)?s?)\s*[:\-]?\s*", "", t, flags=re.I)
     t = re.sub(r"\(?\s*\bA minimum grade of[^.;)]*[.;)]?", " ", t, flags=re.I)
-    # a placement score or test is an alternative that isn't a course: keep its place in the expression
-    t = re.sub(r"minimum score of \S+ in (?:'[^']*'|\"[^\"]*\")", " ALT ", t, flags=re.I)
-    t = re.sub(r"'[^']*'|\"[^\"]*\"", " ALT ", t)
+    # a placement score or test is an alternative that isn't a course: keep its place in the expression.
+    # Two passes as always (scores, then any other quoted name); each leaves a quote-free marker that becomes " ALT "
+    found: List[Dict[str, Any]] = []
+
+    def mark(test: str, score: Optional[str]) -> str:
+        m_score = re.fullmatch(r"\d+", score or "")
+        found.append({"test": test[1:-1].strip(), "min": int(score) if m_score else (score or None)})
+        return f" \x00{len(found) - 1}\x00 "
+
+    t = _SCORE_RE.sub(lambda m: mark(m.group(2), m.group(1)), t)
+    t = _QUOTED_RE.sub(lambda m: mark(m.group(0), None), t)
+    alts = [found[int(k)] for k in _ALT_MARK_RE.findall(t)]  # the order in the text, not the order of the passes
+    t = _ALT_MARK_RE.sub("ALT", t)
     t = t.replace("*", " ")
     # examples are alternatives: "(generally FREN 305, 314, 315, and higher)"
     t = re.sub(r"\b(?:generally|e\.g\.|such as|including|for example)\b[^)]*",
                lambda m: re.sub(r"\band\b|,", " or ", re.sub(r"\b(?:and|or) higher\b", "", m.group(0))), t, flags=re.I)
-    return expand_shorthand(t)
+    return expand_shorthand(t), alts
+
+
+def prereq_statement(text: str) -> str:
+    """The required-courses part of a prerequisite field: no HTML, no quoted test names, no grade, corequisite
+    or consent lines, and no "may be taken concurrently" markers."""
+    return _statement_and_alts(text)[0]
 
 
 def prereq_codes_of(text: str, self_code: str = "") -> List[str]:
@@ -178,7 +201,7 @@ def prereq_codes_of(text: str, self_code: str = "") -> List[str]:
 
 
 def _parse_expr(tokens: List[str], i: int = 0):
-    """Recursive descent over prerequisite tokens. Returns (node, next index). A node is ("code", c), ("alt",),
+    """Recursive descent over prerequisite tokens. Returns (node, next index). A node is ("code", c), ("alt", k),
     ("and", [nodes]) or ("or", [nodes]). In a list like "A, B or C" the commas take the list's own conjunction;
     "and" binds looser than "or" when both appear at one level, and a bare comma list means all of them."""
     items, ops = [], []
@@ -204,7 +227,9 @@ def _parse_expr(tokens: List[str], i: int = 0):
             continue
         if items and len(ops) < len(items):
             ops.append(",")
-        items.append(("alt",) if low == "alt" else ("code", norm_code(*re.match(r"([A-Za-z]{2,5})\s?-?\s?(\S+)", tok).groups())))
+        # an alternative is numbered by its place among the ALT tokens (parse_prereq_scores maps it back)
+        items.append(("alt", sum(1 for t in tokens[:i] if t.lower() == "alt")) if low == "alt"
+                     else ("code", norm_code(*re.match(r"([A-Za-z]{2,5})\s?-?\s?(\S+)", tok).groups())))
         i += 1
     ops = ops[:max(len(items) - 1, 0)]
     if not items:
@@ -250,6 +275,11 @@ def _cnf(node) -> Optional[List[List[str]]]:
     return out
 
 
+def _prereq_tokens(statement: str) -> List[str]:
+    tokens = _TOKEN_RE.findall(statement)
+    return [t for t in tokens if not re.fullmatch(r"[A-Za-z]{2,5}\s?-?\s?\S+", t) or t.split()[0].upper().rstrip("-") not in NOT_COURSES]
+
+
 def parse_prereq_cnf(text: str = "", codes: Optional[List[str]] = None, self_code: str = "") -> List[List[str]]:
     """Parses prerequisite text into Conjunctive Normal Form (AND of OR-choice groups), respecting parentheses.
     Example: 'CSCI 141 and (MATH 111 or MATH 131)' -> [['CSCI 141'], ['MATH 111', 'MATH 131']].
@@ -257,9 +287,7 @@ def parse_prereq_cnf(text: str = "", codes: Optional[List[str]] = None, self_cod
     statement = prereq_statement(text)
     if not statement.strip():
         return [[c] for c in (codes or []) if c != self_code]
-    tokens = _TOKEN_RE.findall(statement)
-    tokens = [t for t in tokens if not re.fullmatch(r"[A-Za-z]{2,5}\s?-?\s?\S+", t) or t.split()[0].upper().rstrip("-") not in NOT_COURSES]
-    node, _ = _parse_expr(tokens)
+    node, _ = _parse_expr(_prereq_tokens(statement))
     cnf = _cnf(node) or []
     out: List[List[str]] = []
     seen: Set[tuple] = set()
@@ -270,6 +298,118 @@ def parse_prereq_cnf(text: str = "", codes: Optional[List[str]] = None, self_cod
             out.append(group)
     # a group that is a superset of another required group adds nothing
     return [g for g in out if not any(set(h) < set(g) for h in out)]
+
+
+class ScoreOption(NamedTuple):
+    test: str             # the name PATH quotes: 'AP Calculus BC', 'Intro to Biology Equivalent', 'Admitted to SOE-Secondary'
+    min: Any              # the minimum score (an int), None for a quoted name without one
+    kind: str             # test (AP/IB/CLEP/SAT/ACT) | admission | equivalent (PATH equivalency, exemption or placement flags)
+
+
+class ScoreRules(NamedTuple):
+    groups: Tuple[Tuple[Tuple[str, ...], Tuple[ScoreOption, ...]], ...]  # (CNF group, the options that also satisfy it)
+    required_alts: Tuple[ScoreOption, ...]  # alternatives required on their own, outside any OR with a course
+
+
+_TEST_NAME_RE = re.compile(r"^(?:AP|IB|CLEP|SAT|ACT)\b")
+_ADMISSION_RE = re.compile(r"^Admitted to\b", re.I)
+
+
+def _score_kind(name: str) -> str:
+    return "test" if _TEST_NAME_RE.match(name) else "admission" if _ADMISSION_RE.match(name) else "equivalent"
+
+
+def _lower_min(a: Any, b: Any) -> Any:
+    """The lower of two minimum scores; None (no score named) is the lowest; anything else that isn't a number keeps a."""
+    if a is None or b is None:
+        return None
+    return min(a, b) if isinstance(a, int) and isinstance(b, int) else a
+
+
+def _dedupe_options(options: Iterable[ScoreOption]) -> Tuple[ScoreOption, ...]:
+    """One option per (test, kind), in first-seen order, with the lowest minimum (any of them is enough)."""
+    out: Dict[tuple, ScoreOption] = {}
+    for o in options:
+        key = (o.test, o.kind)
+        out[key] = o._replace(min=_lower_min(out[key].min, o.min)) if key in out else o
+    return tuple(out.values())
+
+
+_ABSENT = object()
+
+
+def _common_options(lists: List[Tuple[ScoreOption, ...]]) -> Tuple[ScoreOption, ...]:
+    """Options that satisfy every one of several clauses on the same courses (each must hold): the highest minimum."""
+    if not lists:
+        return ()
+    out = []
+    for o in lists[0]:
+        mins = [next((x.min for x in lst if (x.test, x.kind) == (o.test, o.kind)), _ABSENT) for lst in lists[1:]]
+        if any(x is _ABSENT for x in mins):  # a sentinel: a minimum of 0 must not read as "absent"
+            continue
+        m = o.min
+        for x in mins:
+            m = x if m is None else m if x is None else max(m, x) if isinstance(m, int) and isinstance(x, int) else m
+        out.append(o._replace(min=m))
+    return tuple(out)
+
+
+def _clauses(node, state: Dict[str, bool]):
+    """_cnf() with each clause's non-course alternatives kept. Returns (clauses, alt_only): clauses are (codes, alt
+    numbers) pairs whose code lists are exactly the groups _cnf builds; alt_only lists clauses made of alternatives
+    alone (tuples of alt numbers, any one enough). Sets state["collapsed"] when _cnf's 64-clause fallback fires."""
+    kind = node[0]
+    if kind == "code":
+        return [([node[1]], ())], []
+    if kind == "alt":
+        return [], [(node[1],)]
+    subs = [_clauses(n, state) for n in node[1]]
+    if kind == "and":
+        return [c for s, _ in subs for c in s], [a for _, alt in subs for a in alt]
+    course_subs = [s for s, _ in subs if s]  # as in _cnf; their alternative-only clauses are dropped as _cnf drops them
+    # an alternative on its own in this OR (an AND of several alternatives is left out: no one of them is enough)
+    opts = tuple(k for s, alt in subs if not s and len(alt) == 1 for k in alt[0])
+    if not course_subs:
+        return [], ([opts] if opts else [])
+    out = [([], opts)]
+    for s in course_subs:
+        out = [(a + b, a_alts + b_alts) for a, a_alts in out for b, b_alts in s]
+        if len(out) > 64:
+            state["collapsed"] = True
+            return [(sorted({c for sub in course_subs for g, _ in sub for c in g}), ())], []
+    return out, []
+
+
+@functools.lru_cache(maxsize=4096)
+def parse_prereq_scores(text: str, self_code: str = "") -> ScoreRules:
+    """The test scores, equivalencies and admissions in a prerequisite field that parse_prereq_cnf leaves out: for
+    each of its groups (same order, same codes) the options that would also satisfy it, plus the ones required on
+    their own (EDUC 311: "minimum score of 1 in 'Admitted to SOE-Secondary', EDUC 301 and 310"). No groups when
+    the rule collapsed to "any one of these courses" or the alternatives can't be placed. Cached, so the result is
+    immutable (tuples and NamedTuples)."""
+    statement, alts = _statement_and_alts(text)
+    tokens = _prereq_tokens(statement)
+    if not alts or sum(1 for t in tokens if t.lower() == "alt") != len(alts):  # e.g. a literal "ALT" in the text
+        return ScoreRules((), ())
+    node, _ = _parse_expr(tokens)
+    state: Dict[str, bool] = {}
+    clauses, alt_only = _clauses(node, state)
+    options = [ScoreOption(a["test"], a["min"], _score_kind(a["test"])) for a in alts]
+    required = _dedupe_options(options[k] for clause in alt_only for k in clause)
+    if state.get("collapsed"):
+        return ScoreRules((), required)
+    by_key: Dict[Tuple[str, ...], List[Tuple[ScoreOption, ...]]] = {}
+    for codes, ks in clauses:  # the cleanup parse_prereq_cnf does: no self-reference, duplicates merged
+        key = tuple(sorted({c for c in codes if c != self_code}))
+        if key:
+            by_key.setdefault(key, []).append(_dedupe_options(options[k] for k in ks))
+    kept = [k for k in by_key if not any(set(h) < set(k) for h in by_key)]
+    if [list(k) for k in kept] != parse_prereq_cnf(text, self_code=self_code):
+        return ScoreRules((), required)
+    # a dropped superset clause must hold too: an option only counts when every clause over these courses lists it
+    groups = tuple((key, _common_options([o for k, lists in by_key.items() if set(key) <= set(k) for o in lists]))
+                   for key in kept)
+    return ScoreRules(groups, required)
 
 
 def parse_catalog_text(text: str) -> List[Dict[str, Any]]:
@@ -418,19 +558,38 @@ def list_sections(code: str = "", dept: str = "", term: str = "", q: str = "", s
     except (ValueError, TypeError):
         lim = 50
     args.append(min(max(lim, 1), 200))
-    out = []
-    for r in db.conn().execute(sql, args):
-        d = dict(r)
-        try:
-            d["details"] = json.loads(d.get("details") or "{}")
-        except Exception:
-            d["details"] = {}
-        try:
-            d["meeting_times"] = json.loads(d.get("meeting_times") or "[]")
-        except Exception:
-            d["meeting_times"] = []
-        out.append(d)
-    return out
+    return [_section_row(r) for r in db.conn().execute(sql, args)]
+
+
+def _section_row(r) -> Dict[str, Any]:
+    d = dict(r)
+    try:
+        d["details"] = json.loads(d.get("details") or "{}")
+    except Exception:
+        d["details"] = {}
+    try:
+        d["meeting_times"] = json.loads(d.get("meeting_times") or "[]")
+    except Exception:
+        d["meeting_times"] = []
+    return d
+
+
+def get_section(code: str, crn: str, term: str = "", school: str = "wm") -> Optional[Dict[str, Any]]:
+    """The listed (not cancelled) section with this CRN, in this term when given (else the latest term it ran in)
+    and of this course when a code is given; None when there is no such section."""
+    crn = str(crn or "").strip()
+    if not crn:
+        return None
+    sql, args = "SELECT * FROM catalog_sections WHERE school = ? AND crn = ? AND status != 'I'", [school, crn]
+    if term:
+        sql += " AND term = ?"
+        args.append(str(term).strip())
+    if code:
+        m = CODE_RE.search(str(code).upper())
+        sql += " AND code = ?"
+        args.append(norm_code(*m.groups()) if m else str(code).strip().upper())
+    r = db.conn().execute(sql + " ORDER BY term DESC LIMIT 1", args).fetchone()
+    return _section_row(r) if r else None
 
 
 def _row(r) -> Dict[str, Any]:
@@ -560,50 +719,186 @@ def transcript_rows(text: str) -> List[Dict[str, Any]]:
 PASSING = {"A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "P", "S", "CR", "TR", ""}
 
 
-def readiness(user_id: str, code: str) -> Dict[str, Any]:
+_SECTION_PREREQ_RE = re.compile(r"^\s*Prerequisites?\b", re.I)
+_CONCURRENT_NOTE_RE = re.compile(r"\*\s*May be taken concurrently", re.I)
+# a code, a bare shorthand number ("BUAD 311, 317 * , 323") or the "*" that marks the code before it
+_STAR_TOKEN_RE = re.compile(r"\b([A-Z]{2,5})\s?-?\s?(" + _NUM + r")\b|\b(" + _NUM + r")\b|\*")
+_GRADE_MIN_RE = re.compile(r"A minimum grade of [A-DF][+-]? is required in [^\n]+", re.I)
+
+
+def section_prereq_text(section: Optional[Dict[str, Any]]) -> str:
+    """The section's own prerequisite line from its PATH restrictions ('' when it lists none)."""
+    details = (section or {}).get("details") or {}
+    for line in details.get("restrictions") or [] if isinstance(details, dict) else []:
+        if isinstance(line, str) and _SECTION_PREREQ_RE.match(line):
+            return line
+    return ""
+
+
+def concurrent_codes(text: str, self_code: str = "") -> List[str]:
+    """Codes PATH marks "* May be taken concurrently" (a "*" right after the code; shorthand numbers keep the
+    department before them). Only read when the text carries that footnote."""
+    raw = str(text or "")
+    if not _CONCURRENT_NOTE_RE.search(raw):
+        return []
+    out, dept, last = [], "", ""
+    for ln in raw.splitlines():
+        if not ln.strip() or _NOT_PREREQ_LINE.match(ln):
+            continue
+        for m in _STAR_TOKEN_RE.finditer(re.sub(r"'[^']*'|\"[^\"]*\"", " ", ln)):
+            if m.group(0) == "*":
+                if last and last != self_code and last not in out:
+                    out.append(last)
+                last = ""
+            elif m.group(1) and m.group(1) not in NOT_COURSES:
+                dept, last = m.group(1), norm_code(m.group(1), m.group(2))
+            elif m.group(3) and dept:
+                last = norm_code(dept, m.group(3))
+    return out
+
+
+def prereq_display(text: str) -> str:
+    """The prerequisite line for people: no "Prerequisites:" label, no "*" marks, no grade or footnote lines, and
+    shorthand spelled out ("BUAD 231L * and 231" -> "BUAD 231L and BUAD 231")."""
+    lines = [ln for ln in str(text or "").splitlines() if ln.strip() and not _NOT_PREREQ_LINE.match(ln)]
+    t = re.sub(r"^\s*(?:Prerequisites?(?:\(s\))?|Pre-?req(?:uisite)?s?)\s*[:\-]?\s*", "", " ".join(lines), flags=re.I)
+    t = re.sub(r"\s+", " ", re.sub(r"\s*\*\s*", " ", t))
+    # spell out shorthand outside quoted test names only ("'SAT 600 or 650'" stays as written)
+    parts = re.split(r"('[^']*'|\"[^\"]*\")", t)
+    t = "".join(p if i % 2 else expand_shorthand(p) for i, p in enumerate(parts))
+    return re.sub(r"\s+([,.;)])", r"\1", t).strip()
+
+
+def grade_minimum(text: str) -> str:
+    """The catalog's "A minimum grade of X is required in ..." lines (only those naming a grade), as written."""
+    return " ".join(m.group(0).strip() for m in _GRADE_MIN_RE.finditer(str(text or "")))
+
+
+def cnf_key(cnf: List[List[str]]):
+    return frozenset(frozenset(g) for g in cnf or [])
+
+
+def section_rule(course: Dict[str, Any], section: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The prerequisite rule that applies: the section's own PATH line when it parses to courses, else the course
+    rule (note = the section's line when it named no course, e.g. an admission score)."""
+    code = course["code"]
+    course_text = course.get("prereqs") or ""
+    course_cnf = course.get("prereq_tree") or parse_prereq_cnf(course_text, course.get("prereq_codes") or [], self_code=code)
+    sec_text = section_prereq_text(section)
+    sec_cnf = parse_prereq_cnf(sec_text, self_code=code) if sec_text else []
+    if sec_cnf:
+        basis, text, cnf, note = "section", sec_text, sec_cnf, ""
+    else:
+        basis, text, cnf = "course", course_text, course_cnf
+        note = sec_text.splitlines()[0].strip() if sec_text else ""
+    codes = {c for g in cnf for c in g}
+    return {"basis": basis, "text": text, "cnf": cnf, "note": note,
+            "concurrent_ok": [c for c in concurrent_codes(text, code) if c in codes],
+            "course_text": course_text, "course_cnf": course_cnf}
+
+
+def prereq_rule(code: str, crn: str = "", term: str = "") -> Optional[Dict[str, Any]]:
+    """section_rule() for a course code and an optional section (CRN, term); None when the course isn't imported."""
+    course = get_course(code)
+    if not course:
+        return None
+    return section_rule(course, get_section(course["code"], crn, term) if crn else None)
+
+
+def _evaluate(cnf: List[List[str]], have: Set[str], alongside: Iterable[str] = (),
+              concurrent_ok: Iterable[str] = ()) -> Dict[str, Any]:
+    """Which CNF groups `have` doesn't satisfy. A code marked "may be taken concurrently" that is in `alongside`
+    (the same term's primary cart) satisfies its group and is reported in `concurrent`."""
+    ok_now = set(alongside) & set(concurrent_ok)
+    missing, missing_codes, concurrent = [], [], []
+    for group in cnf:
+        if any(c in have for c in group):
+            continue
+        now = [c for c in group if c in ok_now]
+        if now:
+            concurrent.extend(now)
+            continue
+        missing.append(" or ".join(group) if len(group) > 1 else group[0])
+        missing_codes.extend(c for c in group if c not in have)
+    return {"missing": missing, "missing_codes": sorted(set(missing_codes)), "concurrent": sorted(set(concurrent))}
+
+
+def _score_check(rule: Dict[str, Any], course_code: str, missing_groups: List[List[str]]):
+    """(score_options for the missing groups, required_alts) from the rule's text, as plain dicts. Empty when the
+    text names no score or its groups don't match the rule's stored tree (then the rule is judged as before)."""
+    text = rule.get("text") or ""
+    if "minimum score of" not in text.lower():  # cheap: recommend() judges every catalog course
+        return [], []
+    scores = parse_prereq_scores(text, course_code)
+    if [list(k) for k, _ in scores.groups] != [list(g) for g in rule["cnf"]]:
+        return [], []
+    by_key = dict(scores.groups)
+    options = []
+    for g in missing_groups:
+        opts = by_key.get(tuple(g)) or ()
+        if opts:
+            options.append({"group": " or ".join(g) if len(g) > 1 else g[0], "options": [o._asdict() for o in opts]})
+    return options, [o._asdict() for o in scores.required_alts]
+
+
+def score_option_text(option: Dict[str, Any]) -> str:
+    """'AP Calculus BC (4+)' for a test; an equivalency or admission flag by its name only."""
+    m = option.get("min")
+    return f"{option.get('test')} ({m}+)" if option.get("kind") == "test" and m is not None else str(option.get("test"))
+
+
+def rule_status(course: Dict[str, Any], rule: Dict[str, Any], have: Set[str], alongside: Iterable[str] = ()) -> Dict[str, Any]:
+    """met | missing | check | none | unknown for a rule; unknown (no rule listed for a 300+ course) only on the
+    course basis. check: what's missing could only be satisfied by a test score, equivalency or admission
+    (score_options per missing group), or one is required on its own (required_alts). No scores are stored, so
+    check is never met. When the text's groups don't match the stored tree the score data is ignored (missing)."""
+    cnf = rule["cnf"]
+    ev = _evaluate(cnf, have, alongside, rule["concurrent_ok"])
+    missing_groups = [g for g in cnf if not any(c in have for c in g) and not any(c in ev["concurrent"] for c in g)]
+    score_options, required_alts = _score_check(rule, course["code"], missing_groups)
+    ev = {**ev, "score_options": score_options, "required_alts": required_alts}
+    if cnf or required_alts:
+        if not ev["missing"] and not required_alts:
+            return {**ev, "met": True, "status": "met", "notes": ""}
+        check = len(score_options) == len(ev["missing"])  # every missing group has an option (or none is missing)
+        return {**ev, "met": False, "status": "check" if check else "missing", "notes": ""}
+    level = 100
+    parts = course["code"].split()
+    num_m = re.search(r"(\d+)", parts[1]) if len(parts) > 1 else None
+    if num_m:
+        level = int(num_m.group(1))
+    is_explicit_none = (course.get("prereqs") or "").strip().lower() in {"none", "none.", "n/a", "no prerequisites"}
+    if level >= 300 and not is_explicit_none:
+        return {**ev, "met": False, "status": "unknown", "notes": "Prerequisites not listed in current catalog data"}
+    return {**ev, "met": True, "status": "none", "notes": ""}
+
+
+def readiness(user_id: str, code: str, crn: str = "", term: str = "", alongside: Iterable[str] = ()) -> Dict[str, Any]:
+    """Whether the student's record meets the course's prerequisites, or a section's own rule when a CRN is given
+    (basis says which applied). Without a term the CRN's latest term is used. `alongside` (the same term's primary
+    cart) satisfies "may be taken concurrently" codes; those are listed in `concurrent`. status: met | missing |
+    check | none | unknown (rule_status)."""
     course = get_course(code)
     if not course:
         return {"code": code, "found": False}
     done = {r["code"]: r for r in completed(user_id)}
     have = {c for c, r in done.items() if (r.get("grade") or "").upper() in PASSING}
-
-    cnf = course.get("prereq_tree") or parse_prereq_cnf(course.get("prereqs") or "", course.get("prereq_codes") or [])
-    missing = []
-    missing_codes = []
-    for group in cnf:
-        if not any(c in have for c in group):
-            missing.append(" or ".join(group) if len(group) > 1 else group[0])
-            missing_codes.extend([c for c in group if c not in have])
-
-    met = len(missing) == 0
-    level = 100
-    parts = course["code"].split()
-    if len(parts) > 1:
-        num_m = re.search(r"(\d+)", parts[1])
-        if num_m:
-            level = int(num_m.group(1))
-
-    prereqs_raw = (course.get("prereqs") or "").strip().lower()
-    is_explicit_none = prereqs_raw in {"none", "none.", "n/a", "no prerequisites"}
-
-    if not cnf:
-        if level >= 300 and not is_explicit_none:
-            status = "unknown"
-            met = False
-            notes = "Prerequisites not listed in current catalog data"
-        else:
-            status = "none"
-            met = True
-            notes = ""
-    else:
-        met = len(missing) == 0
-        status = "met" if met else "missing"
-        notes = ""
-
-    return {"code": course["code"], "found": True, "title": course["title"], "prereqs": course["prereqs"],
-            "prereq_codes": course["prereq_codes"], "prereq_tree": cnf,
-            "missing": missing, "missing_codes": sorted(set(missing_codes)),
-            "met": met, "status": status, "notes": notes, "taken": course["code"] in done}
+    section = get_section(course["code"], crn, term) if crn else None
+    rule = section_rule(course, section)
+    st = rule_status(course, rule, have, alongside)
+    out = {"code": course["code"], "found": True, "title": course["title"],
+           "prereqs": rule["text"] if rule["basis"] == "section" else course["prereqs"],
+           "prereq_codes": (list(dict.fromkeys(c for g in rule["cnf"] for c in g)) if rule["basis"] == "section"
+                            else course["prereq_codes"]),
+           "prereq_tree": rule["cnf"], "missing": st["missing"], "missing_codes": st["missing_codes"],
+           "met": st["met"], "status": st["status"], "notes": st["notes"], "taken": course["code"] in done,
+           "basis": rule["basis"], "crn": str(crn or "").strip(), "term": (section or {}).get("term") or str(term or ""),
+           "section_note": rule["note"], "concurrent_ok": rule["concurrent_ok"], "concurrent": st["concurrent"],
+           "score_options": st["score_options"], "required_alts": st["required_alts"]}
+    if rule["basis"] == "section":
+        out["course_prereqs"] = course["prereqs"]
+        out["course_prereq_tree"] = rule["course_cnf"]
+    return out
 
 
 def compute_course_content_hash(course: Dict[str, Any]) -> str:
@@ -797,7 +1092,7 @@ def recommend(user_id: str, interests: str = "", limit: int = 12) -> List[Dict[s
         if c["code"] in done:
             continue
         rd = readiness(user_id, c["code"])
-        if not rd["met"]:
+        if not rd["met"]:  # strict: "check" (only an unverified score or admission would do) is left out too
             continue
         blob = f"{c['code']} {c['title']} {c['description']}".lower()
 

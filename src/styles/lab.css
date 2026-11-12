@@ -198,11 +198,22 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
   transition: background-color 120ms var(--ease), color 120ms var(--ease);
 }
 .mode:hover { color: var(--brand-ink); background: var(--brand-hover); }
-.mode[aria-pressed="true"] { color: var(--brand-ink); }
-.mode[aria-pressed="true"]::after {
+.mode[aria-pressed="true"], .mode[data-active] { color: var(--brand-ink); }
+.mode[aria-pressed="true"]::after, .mode[data-active]::after {
   content: ""; position: absolute; left: var(--space-3); right: var(--space-3); bottom: 3px;
   height: 2px; background: var(--gold); border-radius: 1px;
 }
+/* a tab for a group of subjects (Navbar.jsx): its menu reuses .menu */
+.mode-group { position: relative; display: inline-flex; }
+.mode-sub { font-weight: 400; opacity: 0.8; }
+.mode-chev { transition: transform 120ms var(--ease); }
+.mode[aria-expanded="true"] .mode-chev { transform: rotate(180deg); }
+/* .menu.mode-pop: .menu comes later in this file, so these need the extra class to win */
+.menu.mode-pop { min-width: 200px; max-width: calc(100vw - 2 * var(--space-4)); }
+.menu.mode-pop-right { left: auto; right: 0; }
+.mode-pop button[aria-current="true"] { font-weight: 600; box-shadow: inset 3px 0 0 var(--gold); }
+@media (max-width: 860px) { .mode-sub { display: none; } }
+@media (prefers-reduced-motion: reduce) { .mode-chev { transition: none; } }
 .masthead-right { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .masthead .btn-quiet { color: var(--brand-ink); border-color: var(--brand-line); }
 .masthead .btn-quiet:hover { background: var(--brand-hover); color: var(--brand-ink); }
@@ -528,7 +539,10 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .empty-sim { text-align: center; padding: var(--space-7) var(--space-5); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
 
 /* ---------- AGY panel ---------- */
-.agy-panel { background: var(--surface); border-left: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; }
+.agy-panel { background: var(--surface); border-left: 1px solid var(--rule); display: flex; flex-direction: column; min-height: 0; position: relative; }
+/* Tux watermark behind the chat, same emblem as the IDE canvas */
+.agy-penguin { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.12; pointer-events: none; user-select: none; z-index: 0; }
+.agy-panel > :not(.agy-penguin) { position: relative; z-index: 1; }
 .agy-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--rule); }
 .agy-head h2 { font-size: 1.1rem; }
 .agy-log { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
@@ -1440,3 +1454,5 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .desktop-key-actions { display: flex; gap: var(--space-2); }
 .desktop-key-card .desktop-key-note { font-size: 0.85rem; color: var(--muted); }
 .desktop-key-card .desktop-key-error { color: var(--bad-ink); }
+.desktop-key-card[data-reason="rejected"] { border-color: var(--bad-ink); }
+.desktop-key-card .desktop-key-remove-confirm { background: var(--bad-ink); color: var(--paper); border-color: var(--bad-ink); }

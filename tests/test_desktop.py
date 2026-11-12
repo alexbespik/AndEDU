@@ -3,6 +3,7 @@ from test_lab import LOCAL, TestClient, server  # noqa: F401  (sets up the temp 
 
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,93 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(body["instance_id"], "launch-42")
 
 
+class KeyStateTests(unittest.TestCase):
+    """A key Google rejects stops the model fallback and shows in /api/status. Bodies match desktop/keycheck.test.cjs."""
+
+    INVALID = {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.",
+                         "status": "INVALID_ARGUMENT", "details": [{"reason": "API_KEY_INVALID"}]}}
+    LEAKED = {"error": {"code": 403, "message": "Your API key was reported as leaked. Please use another API key.",
+                        "status": "PERMISSION_DENIED"}}
+    QUOTA = {"error": {"code": 429, "message": "Resource has been exhausted (e.g. check quota).", "status": "RESOURCE_EXHAUSTED"}}
+    PLAIN_400 = {"error": {"code": 400, "message": "Invalid JSON payload received.", "status": "INVALID_ARGUMENT"}}
+
+    def setUp(self):
+        server.GEMINI_KEY_INVALID = False
+        server.GROUNDING_PAUSED_UNTIL = 0.0  # a quota error pauses search grounding; start each test with it on
+        self.addCleanup(setattr, server, "GEMINI_KEY_INVALID", False)
+        self.addCleanup(setattr, server, "GROUNDING_PAUSED_UNTIL", 0.0)
+
+    def call(self, generate):
+        from types import SimpleNamespace
+        calls = []
+
+        def counted(model, contents, **kw):
+            calls.append(model)
+            return generate(model, contents, **kw)
+
+        mock_client = SimpleNamespace(models=SimpleNamespace(generate_content=counted))
+        real_fn = getattr(server, "_real_call_gemini", server.call_gemini)
+        with mock.patch.object(server, "client", mock_client), \
+             mock.patch.object(server, "spend_model_call", return_value=None), \
+             mock.patch.object(server, "MODEL_COOLDOWN", {}):
+            try:
+                return real_fn("Test prompt", role="planner"), calls
+            except Exception as e:  # noqa: BLE001
+                return e, calls
+
+    def status(self):
+        return TestClient(server.app, base_url=LOCAL).get("/api/status").json()
+
+    def test_rejected_key_stops_at_the_first_call_and_shows_in_status(self):
+        from google.genai.errors import ClientError
+        grounded = []
+
+        def bad(model, contents, **kw):
+            grounded.append(any(getattr(t, "google_search", None) is not None for t in (getattr(kw.get("config"), "tools", None) or [])))
+            raise ClientError(400, self.INVALID)
+
+        err, calls = self.call(bad)
+        self.assertEqual(grounded, [True])  # the call carried search, so the grounding retry was in reach
+        self.assertIsInstance(err, RuntimeError)
+        self.assertIn("rejected the Gemini API key", str(err))
+        self.assertEqual(len(calls), 1)  # no grounding retry, no fallback models
+        self.assertEqual(server.GROUNDING_PAUSED_UNTIL, 0.0)  # a bad key doesn't pause grounding
+        self.assertTrue(self.status()["gemini_key_invalid"])
+
+    def test_leaked_key_counts_as_rejected(self):
+        from google.genai.errors import ClientError
+
+        def leaked(model, contents, **kw):
+            raise ClientError(403, self.LEAKED)
+
+        err, calls = self.call(leaked)
+        self.assertIsInstance(err, RuntimeError)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(server.GEMINI_KEY_INVALID)
+
+    def test_quota_and_other_400s_are_not_a_bad_key(self):
+        from google.genai.errors import ClientError
+        for body, code in ((self.QUOTA, 429), (self.PLAIN_400, 400)):
+            def failing(model, contents, **kw):
+                raise ClientError(code, body)
+            self.call(failing)
+            self.assertFalse(server.GEMINI_KEY_INVALID, code)
+            self.assertFalse(self.status()["gemini_key_invalid"])
+
+    def test_a_working_call_clears_the_flag(self):
+        from types import SimpleNamespace
+        server.GEMINI_KEY_INVALID = True
+        resp, _ = self.call(lambda model, contents, **kw: SimpleNamespace(text="ok"))
+        self.assertEqual(resp.text, "ok")
+        self.assertFalse(server.GEMINI_KEY_INVALID)
+
+    def test_hidden_in_accounts_mode(self):
+        server.GEMINI_KEY_INVALID = True
+        with mock.patch.object(server, "AUTH_REQUIRED", True):
+            body = TestClient(server.app, base_url=LOCAL).get("/api/status").json()
+        self.assertFalse(body["gemini_key_invalid"])
+
+
 class PackagingTests(unittest.TestCase):
     """scripts/desktop_stage.sh, the per-target locks and electron-builder.yml agree on the four targets."""
 
@@ -91,6 +179,10 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('from: "build/desktop/python-${os}-${arch}"', builder)
         self.assertIn("\nlinux:\n", builder)
         self.assertIn("executableName: sciedu-studio", builder)
+        # every file desktop/main.cjs requires must be packaged, or the installed app dies at launch
+        main = (ROOT / "desktop" / "main.cjs").read_text()
+        for local in re.findall(r"require\('\./([\w.-]+)'\)", main):
+            self.assertIn(f"- desktop/{local}", builder, local)
 
 
 class SandboxRunnerTests(unittest.TestCase):
