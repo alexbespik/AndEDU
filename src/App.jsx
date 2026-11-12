@@ -6,7 +6,7 @@ import LoginPage from './components/LoginPage';
 import CoursesHome from './components/CoursesHome';
 import CourseView from './components/CourseView';
 import ReviewSession from './components/ReviewSession';
-import DesktopKeySetup from './components/DesktopKeySetup';
+import DesktopKeySetup, { KEY_NOTE } from './components/DesktopKeySetup';
 import RewardLayer, { StreakChip } from './components/Rewards';
 import { BookOpen, FlaskConical, Compass } from 'lucide-react';
 import { TuxIcon } from './components/PenguinShadow';
@@ -80,7 +80,8 @@ export default function App() {
   const [workspaceTab, setWorkspaceTab] = useState(null);  // {tab, at} for History/Languages, sent by MCP tools
   const [mathPush, setMathPush] = useState(null);  // functions or a widget sent by the assistant / MCP tools
   const [pendingPrompt, setPendingPrompt] = useState(null);
-  const [desktopKey, setDesktopKey] = useState(null);  // desktop app without a Gemini key: show the setup card
+  const [desktopKey, setDesktopKey] = useState(null);  // desktop app: {reason: missing|rejected|manage, activeJobs} shows the key card
+  const keyCardDismissed = useRef(false);  // "Later" on a rejected key: don't reopen it on every window focus
 
   useEffect(() => {
     const onAgyAsk = (e) => {
@@ -96,7 +97,9 @@ export default function App() {
   useEffect(() => {
     api('/api/status').then((st) => {
       setAgyCli(Boolean(st.agy_cli_enabled));
-      if (window.sciedu?.isDesktop && !st.gemini_configured) setDesktopKey({ activeJobs: st.active_jobs || 0 });
+      if (window.sciedu?.isDesktop && (!st.gemini_configured || st.gemini_key_invalid)) {
+        setDesktopKey({ activeJobs: st.active_jobs || 0, reason: st.gemini_configured ? 'rejected' : 'missing' });
+      }
     }).catch(() => {});
   }, []);
   // fetch the lesson viewer's chunk once signed in, so the first lesson opens without a loading step
@@ -209,6 +212,10 @@ export default function App() {
   useAgyEvents((evt) => {
     const p = evt.payload || {};
     switch (evt.type) {
+      case 'GEMINI_KEY_INVALID':
+        keyCardDismissed.current = false;
+        openKeyCard('rejected');
+        break;
       case 'SWITCH_TOPIC': {
         if (p.topicId) {
           const targetTopic = topics.find((x) => x.id === p.topicId);
@@ -335,6 +342,35 @@ export default function App() {
     }
   });
 
+  const openKeyCard = useCallback((reason) => {
+    if (!window.sciedu?.isDesktop) return;
+    api('/api/status')
+      .then((st) => setDesktopKey({ activeJobs: st.active_jobs || 0, reason }))
+      .catch(() => setDesktopKey({ activeJobs: 0, reason }));
+  }, []);
+  // desktop: the account menu opens the card to replace or remove the key; a key Google rejected while the
+  // window was in the background shows up when it comes back
+  useEffect(() => {
+    if (!window.sciedu?.isDesktop) return undefined;
+    const onManage = () => openKeyCard('manage');
+    const onVisible = () => {
+      if (document.hidden || keyCardDismissed.current) return;
+      api('/api/status').then((st) => {
+        if (st.gemini_key_invalid) setDesktopKey((k) => k || { activeJobs: st.active_jobs || 0, reason: 'rejected' });
+      }).catch(() => {});
+    };
+    window.addEventListener('sciedu:key-setup', onManage);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('sciedu:key-setup', onManage);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [openKeyCard]);
+  useEffect(() => {
+    let note = null;
+    try { note = sessionStorage.getItem(KEY_NOTE); sessionStorage.removeItem(KEY_NOTE); } catch { /* no storage */ }
+    if (note) toast(note);
+  }, [toast]);
   const loadProgress = useCallback(() => {
     if (!user?.id) return;
     api(`/api/engage/${user.id}`).then(setProgress).catch(() => {});
@@ -529,7 +565,10 @@ export default function App() {
         </aside>
       )}
       <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />
-      {desktopKey && <DesktopKeySetup activeJobs={desktopKey.activeJobs} />}
+      {desktopKey && (
+        <DesktopKeySetup key={desktopKey.reason} reason={desktopKey.reason} activeJobs={desktopKey.activeJobs}
+          onClose={() => { keyCardDismissed.current = true; setDesktopKey(null); }} />
+      )}
       <div className="toast-region" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}
       </div>

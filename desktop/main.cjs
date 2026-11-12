@@ -1,12 +1,13 @@
 // Desktop shell for &.edu: starts the bundled Python backend on 127.0.0.1 and shows the app in a window.
 // The backend contract (env allowlist, stdin settings line, instance id) is described in desktop_main.py
 // and ARCHITECTURE.md section 5.4.
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, net: electronNet, safeStorage, session, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { classifyKeyResponse } = require('./keycheck.cjs');
 
 const PORT_RANGE = [38090, 38190];
 const READY_TIMEOUT_MS = 60_000;
@@ -228,6 +229,25 @@ function fromBackend(event) {
   }
 }
 
+// Asks Google whether a key works before it is stored (the model list costs no generation quota).
+// The key goes only in the header; nothing here is logged, and the page gets fixed strings back.
+async function checkKey(key) {
+  try {
+    const res = await electronNet.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
+      headers: { 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(8000),
+    });
+    return classifyKeyResponse(res.status, await res.text().catch(() => ''));
+  } catch {
+    return 'unknown';  // offline, timed out, blocked: save it unverified
+  }
+}
+
+const KEY_ERRORS = {
+  rejected: 'Google rejected this key. Check that you copied all of it, or make a new one.',
+  disabled: "This key's Google Cloud project doesn't have the Gemini API turned on. Enable it, or make a key at aistudio.google.com/apikey.",
+};
+
 function registerIpc() {
   ipcMain.handle('sciedu:hasKey', (event) => fromBackend(event) && Boolean(loadKey()));
   ipcMain.handle('sciedu:saveKey', async (event, value) => {
@@ -235,12 +255,14 @@ function registerIpc() {
     const key = typeof value === 'string' ? value.trim() : '';
     if (!KEY_RE.test(key)) return { ok: false, error: 'That does not look like a Gemini API key.' };
     if (!secureStoreOk()) return { ok: false, error: NO_SECURE_STORE };
+    const verdict = await checkKey(key);
+    if (KEY_ERRORS[verdict]) return { ok: false, error: KEY_ERRORS[verdict] };
     fs.mkdirSync(path.dirname(keyPath), { recursive: true, mode: 0o700 });
     const tmp = keyPath + '.tmp';
     fs.writeFileSync(tmp, safeStorage.encryptString(key), { mode: 0o600 });
     fs.renameSync(tmp, keyPath);
     setTimeout(relaunchBackend, 100);  // reply first: the page reloads when the new backend is up
-    return { ok: true };
+    return verdict === 'valid' ? { ok: true } : { ok: true, unverified: true };
   });
   ipcMain.handle('sciedu:clearKey', (event) => {
     if (!fromBackend(event)) return { ok: false };

@@ -36,3 +36,6 @@ SECURITY_FINDINGS*.md
 # desktop app: staged bundle, downloads, packaged apps
 /build/
 /dist-electron/
+
+# Claude Code agent worktrees (temporary copies of the repo)
+/.claude/worktrees/

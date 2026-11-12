@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, LogOut, ShieldCheck, Wifi, WifiOff } from 'lucide-react';
+import { ChevronDown, KeyRound, LogOut, ShieldCheck, Wifi, WifiOff } from 'lucide-react';
 import ThemeSwitch from './ThemeSwitch';
 import { PrivacyDialog } from './PrivacyCenter';
 import { api } from '../lib/api';
@@ -57,6 +57,12 @@ export default function AccountMenu({ user, online, onSignOut }) {
               {online ? <Wifi size={13} aria-hidden="true" /> : <WifiOff size={13} aria-hidden="true" />} {online ? 'Connected' : 'Offline'}
             </span>
           </div>
+          {window.sciedu?.isDesktop && (
+            <button type="button" role="menuitem" className="account-item"
+              onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent('sciedu:key-setup')); }}>
+              <KeyRound size={15} aria-hidden="true" /> Gemini API key…
+            </button>
+          )}
           <button type="button" role="menuitem" className="account-item" onClick={() => { setOpen(false); setPrivacyOpen(true); }}>
             <ShieldCheck size={15} aria-hidden="true" /> Privacy and your data…
           </button>

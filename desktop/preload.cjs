@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('sciedu', {
   isDesktop: true,
+  platform: process.platform,  // for wording only (which keychain holds the key)
   hasKey: () => ipcRenderer.invoke('sciedu:hasKey'),
   saveKey: (key) => ipcRenderer.invoke('sciedu:saveKey', String(key)),
   clearKey: () => ipcRenderer.invoke('sciedu:clearKey'),

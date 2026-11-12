@@ -114,9 +114,10 @@ builds (see [Linux](#linux) below). Windows is not supported.
 2. Open it once. When macOS says it cannot verify the developer, go to System Settings > Privacy & Security
    and choose **Open Anyway**.
 3. Paste your own Gemini API key in the card that appears ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
-   It is stored encrypted with the macOS Keychain (Electron `safeStorage`) and handed to the app's server at start, never
-   written in plain text. The library lessons and the offline German and history units work without a key.
-   Each new build asks for Keychain access again.
+   The app checks it with Google before saving it. It is stored encrypted with the macOS Keychain (Electron `safeStorage`)
+   and handed to the app's server at start, never written in plain text. The library lessons and the offline German and
+   history units work without a key. Each new build asks for Keychain access again. To replace or remove the key later,
+   open the account menu > **Gemini API key…**; if Google stops accepting the key, the card comes back by itself.
 
 **Where things are.** Your data: `~/Library/Application Support/SciEdu Studio/` on macOS, `~/.config/SciEdu Studio/` on Linux (`content/` holds lessons and the
 database, `logs/backend.log` the server log, `secrets/` the encrypted key). Deleting that folder resets the app.
