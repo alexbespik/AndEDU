@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS catalog_sections (
     seats         TEXT NOT NULL DEFAULT '',
     credits       TEXT NOT NULL DEFAULT '',
     updated_at    REAL NOT NULL,
+    details       TEXT NOT NULL DEFAULT '{}', -- JSON: rooms, dates, seats, restrictions (the section's prerequisites), consent
     PRIMARY KEY (school, term, crn)
 );
 CREATE INDEX IF NOT EXISTS idx_sections_code ON catalog_sections(school, code);
@@ -418,19 +419,38 @@ def list_sections(code: str = "", dept: str = "", term: str = "", q: str = "", s
     except (ValueError, TypeError):
         lim = 50
     args.append(min(max(lim, 1), 200))
-    out = []
-    for r in db.conn().execute(sql, args):
-        d = dict(r)
-        try:
-            d["details"] = json.loads(d.get("details") or "{}")
-        except Exception:
-            d["details"] = {}
-        try:
-            d["meeting_times"] = json.loads(d.get("meeting_times") or "[]")
-        except Exception:
-            d["meeting_times"] = []
-        out.append(d)
-    return out
+    return [_section_row(r) for r in db.conn().execute(sql, args)]
+
+
+def _section_row(r) -> Dict[str, Any]:
+    d = dict(r)
+    try:
+        d["details"] = json.loads(d.get("details") or "{}")
+    except Exception:
+        d["details"] = {}
+    try:
+        d["meeting_times"] = json.loads(d.get("meeting_times") or "[]")
+    except Exception:
+        d["meeting_times"] = []
+    return d
+
+
+def get_section(code: str, crn: str, term: str = "", school: str = "wm") -> Optional[Dict[str, Any]]:
+    """The listed (not cancelled) section with this CRN, in this term when given (else the latest term it ran in)
+    and of this course when a code is given; None when there is no such section."""
+    crn = str(crn or "").strip()
+    if not crn:
+        return None
+    sql, args = "SELECT * FROM catalog_sections WHERE school = ? AND crn = ? AND status != 'I'", [school, crn]
+    if term:
+        sql += " AND term = ?"
+        args.append(str(term).strip())
+    if code:
+        m = CODE_RE.search(str(code).upper())
+        sql += " AND code = ?"
+        args.append(norm_code(*m.groups()) if m else str(code).strip().upper())
+    r = db.conn().execute(sql + " ORDER BY term DESC LIMIT 1", args).fetchone()
+    return _section_row(r) if r else None
 
 
 def _row(r) -> Dict[str, Any]:
@@ -560,50 +580,146 @@ def transcript_rows(text: str) -> List[Dict[str, Any]]:
 PASSING = {"A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "P", "S", "CR", "TR", ""}
 
 
-def readiness(user_id: str, code: str) -> Dict[str, Any]:
+_SECTION_PREREQ_RE = re.compile(r"^\s*Prerequisites?\b", re.I)
+_CONCURRENT_NOTE_RE = re.compile(r"\*\s*May be taken concurrently", re.I)
+# a code, a bare shorthand number ("BUAD 311, 317 * , 323") or the "*" that marks the code before it
+_STAR_TOKEN_RE = re.compile(r"\b([A-Z]{2,5})\s?-?\s?(" + _NUM + r")\b|\b(" + _NUM + r")\b|\*")
+_GRADE_MIN_RE = re.compile(r"A minimum grade of [A-DF][+-]? is required in [^\n]+", re.I)
+
+
+def section_prereq_text(section: Optional[Dict[str, Any]]) -> str:
+    """The section's own prerequisite line from its PATH restrictions ('' when it lists none)."""
+    details = (section or {}).get("details") or {}
+    for line in details.get("restrictions") or [] if isinstance(details, dict) else []:
+        if isinstance(line, str) and _SECTION_PREREQ_RE.match(line):
+            return line
+    return ""
+
+
+def concurrent_codes(text: str, self_code: str = "") -> List[str]:
+    """Codes PATH marks "* May be taken concurrently" (a "*" right after the code; shorthand numbers keep the
+    department before them). Only read when the text carries that footnote."""
+    raw = str(text or "")
+    if not _CONCURRENT_NOTE_RE.search(raw):
+        return []
+    out, dept, last = [], "", ""
+    for ln in raw.splitlines():
+        if not ln.strip() or _NOT_PREREQ_LINE.match(ln):
+            continue
+        for m in _STAR_TOKEN_RE.finditer(re.sub(r"'[^']*'|\"[^\"]*\"", " ", ln)):
+            if m.group(0) == "*":
+                if last and last != self_code and last not in out:
+                    out.append(last)
+                last = ""
+            elif m.group(1) and m.group(1) not in NOT_COURSES:
+                dept, last = m.group(1), norm_code(m.group(1), m.group(2))
+            elif m.group(3) and dept:
+                last = norm_code(dept, m.group(3))
+    return out
+
+
+def prereq_display(text: str) -> str:
+    """The prerequisite line for people: no "Prerequisites:" label, no "*" marks, no grade or footnote lines."""
+    lines = [ln for ln in str(text or "").splitlines() if ln.strip() and not _NOT_PREREQ_LINE.match(ln)]
+    t = re.sub(r"^\s*(?:Prerequisites?(?:\(s\))?|Pre-?req(?:uisite)?s?)\s*[:\-]?\s*", "", " ".join(lines), flags=re.I)
+    return re.sub(r"\s+([,.;)])", r"\1", re.sub(r"\s*\*\s*", " ", t)).strip()
+
+
+def grade_minimum(text: str) -> str:
+    """The catalog's "A minimum grade of X is required in ..." lines (only those naming a grade), as written."""
+    return " ".join(m.group(0).strip() for m in _GRADE_MIN_RE.finditer(str(text or "")))
+
+
+def cnf_key(cnf: List[List[str]]):
+    return frozenset(frozenset(g) for g in cnf or [])
+
+
+def section_rule(course: Dict[str, Any], section: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The prerequisite rule that applies: the section's own PATH line when it parses to courses, else the course
+    rule (note = the section's line when it named no course, e.g. an admission score)."""
+    code = course["code"]
+    course_text = course.get("prereqs") or ""
+    course_cnf = course.get("prereq_tree") or parse_prereq_cnf(course_text, course.get("prereq_codes") or [], self_code=code)
+    sec_text = section_prereq_text(section)
+    sec_cnf = parse_prereq_cnf(sec_text, self_code=code) if sec_text else []
+    if sec_cnf:
+        basis, text, cnf, note = "section", sec_text, sec_cnf, ""
+    else:
+        basis, text, cnf = "course", course_text, course_cnf
+        note = sec_text.splitlines()[0].strip() if sec_text else ""
+    codes = {c for g in cnf for c in g}
+    return {"basis": basis, "text": text, "cnf": cnf, "note": note,
+            "concurrent_ok": [c for c in concurrent_codes(text, code) if c in codes],
+            "course_text": course_text, "course_cnf": course_cnf}
+
+
+def prereq_rule(code: str, crn: str = "", term: str = "") -> Optional[Dict[str, Any]]:
+    """section_rule() for a course code and an optional section (CRN, term); None when the course isn't imported."""
+    course = get_course(code)
+    if not course:
+        return None
+    return section_rule(course, get_section(course["code"], crn, term) if crn else None)
+
+
+def _evaluate(cnf: List[List[str]], have: Set[str], alongside: Iterable[str] = (),
+              concurrent_ok: Iterable[str] = ()) -> Dict[str, Any]:
+    """Which CNF groups `have` doesn't satisfy. A code marked "may be taken concurrently" that is in `alongside`
+    (the same term's primary cart) satisfies its group and is reported in `concurrent`."""
+    ok_now = set(alongside) & set(concurrent_ok)
+    missing, missing_codes, concurrent = [], [], []
+    for group in cnf:
+        if any(c in have for c in group):
+            continue
+        now = [c for c in group if c in ok_now]
+        if now:
+            concurrent.extend(now)
+            continue
+        missing.append(" or ".join(group) if len(group) > 1 else group[0])
+        missing_codes.extend(c for c in group if c not in have)
+    return {"missing": missing, "missing_codes": sorted(set(missing_codes)), "concurrent": sorted(set(concurrent))}
+
+
+def rule_status(course: Dict[str, Any], rule: Dict[str, Any], have: Set[str], alongside: Iterable[str] = ()) -> Dict[str, Any]:
+    """met | missing | none | unknown for a rule; unknown (no rule listed for a 300+ course) only on the course basis."""
+    cnf = rule["cnf"]
+    ev = _evaluate(cnf, have, alongside, rule["concurrent_ok"])
+    if cnf:
+        met = not ev["missing"]
+        return {**ev, "met": met, "status": "met" if met else "missing", "notes": ""}
+    level = 100
+    parts = course["code"].split()
+    num_m = re.search(r"(\d+)", parts[1]) if len(parts) > 1 else None
+    if num_m:
+        level = int(num_m.group(1))
+    is_explicit_none = (course.get("prereqs") or "").strip().lower() in {"none", "none.", "n/a", "no prerequisites"}
+    if level >= 300 and not is_explicit_none:
+        return {**ev, "met": False, "status": "unknown", "notes": "Prerequisites not listed in current catalog data"}
+    return {**ev, "met": True, "status": "none", "notes": ""}
+
+
+def readiness(user_id: str, code: str, crn: str = "", term: str = "") -> Dict[str, Any]:
+    """Whether the student's record meets the course's prerequisites, or a section's own rule when a CRN is given
+    (basis says which applied). Without a term the CRN's latest term is used."""
     course = get_course(code)
     if not course:
         return {"code": code, "found": False}
     done = {r["code"]: r for r in completed(user_id)}
     have = {c for c, r in done.items() if (r.get("grade") or "").upper() in PASSING}
-
-    cnf = course.get("prereq_tree") or parse_prereq_cnf(course.get("prereqs") or "", course.get("prereq_codes") or [])
-    missing = []
-    missing_codes = []
-    for group in cnf:
-        if not any(c in have for c in group):
-            missing.append(" or ".join(group) if len(group) > 1 else group[0])
-            missing_codes.extend([c for c in group if c not in have])
-
-    met = len(missing) == 0
-    level = 100
-    parts = course["code"].split()
-    if len(parts) > 1:
-        num_m = re.search(r"(\d+)", parts[1])
-        if num_m:
-            level = int(num_m.group(1))
-
-    prereqs_raw = (course.get("prereqs") or "").strip().lower()
-    is_explicit_none = prereqs_raw in {"none", "none.", "n/a", "no prerequisites"}
-
-    if not cnf:
-        if level >= 300 and not is_explicit_none:
-            status = "unknown"
-            met = False
-            notes = "Prerequisites not listed in current catalog data"
-        else:
-            status = "none"
-            met = True
-            notes = ""
-    else:
-        met = len(missing) == 0
-        status = "met" if met else "missing"
-        notes = ""
-
-    return {"code": course["code"], "found": True, "title": course["title"], "prereqs": course["prereqs"],
-            "prereq_codes": course["prereq_codes"], "prereq_tree": cnf,
-            "missing": missing, "missing_codes": sorted(set(missing_codes)),
-            "met": met, "status": status, "notes": notes, "taken": course["code"] in done}
+    section = get_section(course["code"], crn, term) if crn else None
+    rule = section_rule(course, section)
+    st = rule_status(course, rule, have)
+    out = {"code": course["code"], "found": True, "title": course["title"],
+           "prereqs": rule["text"] if rule["basis"] == "section" else course["prereqs"],
+           "prereq_codes": (list(dict.fromkeys(c for g in rule["cnf"] for c in g)) if rule["basis"] == "section"
+                            else course["prereq_codes"]),
+           "prereq_tree": rule["cnf"], "missing": st["missing"], "missing_codes": st["missing_codes"],
+           "met": st["met"], "status": st["status"], "notes": st["notes"], "taken": course["code"] in done,
+           "basis": rule["basis"], "crn": str(crn or "").strip(), "term": (section or {}).get("term") or str(term or ""),
+           "section_note": rule["note"], "concurrent_ok": rule["concurrent_ok"]}
+    if rule["basis"] == "section":
+        out["course_prereqs"] = course["prereqs"]
+        out["course_prereq_tree"] = rule["course_cnf"]
+    return out
 
 
 def compute_course_content_hash(course: Dict[str, Any]) -> str:

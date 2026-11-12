@@ -80,13 +80,7 @@ def _term(term: str) -> str:
 
 def _section(code: str, term: str, crn: str) -> Optional[Dict[str, Any]]:
     """The listed section with this CRN for this course and term, or None."""
-    crn = str(crn or "").strip()
-    if not crn:
-        return None
-    for s in advisor.list_sections(code=code, term=term, limit=200):
-        if str(s.get("crn")) == crn and s.get("code") == code:
-            return s
-    return None
+    return advisor.get_section(code, crn, term) if str(crn or "").strip() else None
 
 
 def _row(user_id: str, term: str, code: str):
@@ -212,9 +206,26 @@ def item_credits(item: Dict[str, Any]) -> Dict[str, Any]:
     return {"credits": DEFAULT_CREDITS, "approximate": True}
 
 
-def _compact_section(s: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: s.get(k) for k in ("crn", "section", "term", "term_name", "instructor", "meets", "meeting_times",
-                                  "schedule_type", "seats", "credits")}
+def _compact_section(s: Dict[str, Any], prereq: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The section fields the cart shows (never the raw PATH details), plus its prerequisite check when given."""
+    out = {k: s.get(k) for k in ("crn", "section", "term", "term_name", "instructor", "meets", "meeting_times",
+                                 "schedule_type", "seats", "credits")}
+    details = s.get("details") if isinstance(s.get("details"), dict) else {}
+    out["consent"] = bool(str(details.get("consent") or "").strip())
+    return {**out, **(prereq or {})}
+
+
+def _prereq_check(course: Dict[str, Any], rule: Dict[str, Any], have, alongside) -> Dict[str, Any]:
+    """A rule judged against the record: prereq_status uses readiness's vocabulary (met | missing | unknown | none);
+    concurrent lists codes counted as met because they are in this term's primary cart; prereqs is the section's
+    own text only when its rule differs from the course's."""
+    st = advisor.rule_status(course, rule, have, alongside)
+    own = rule["basis"] == "section" and advisor.cnf_key(rule["cnf"]) != advisor.cnf_key(rule["course_cnf"])
+    return {"prereq_basis": rule["basis"], "prereq_status": st["status"], "prereq_missing": st["missing"],
+            "prereqs": advisor.prereq_display(rule["text"]) if own else "", "prereq_note": rule["note"],
+            "concurrent": st["concurrent"], "concurrent_ok": rule["concurrent_ok"],
+            "score_alternative": "minimum score of" in (rule["text"] or "").lower(),
+            "grade_minimum": advisor.grade_minimum(rule["text"])}
 
 
 def _studio_course(user_id: str, cid: str) -> str:
@@ -231,6 +242,7 @@ def get(user_id: str, term: str = "") -> Dict[str, Any]:
     rows = db.conn().execute("SELECT * FROM student_carts WHERE user_id = ? AND term = ? ORDER BY created_at, course_code",
                              (user_id, term)).fetchall()
     done = {r["code"] for r in advisor.completed(user_id) if (r.get("grade") or "").upper() in advisor.PASSING}
+    primary = {r["course_code"] for r in rows if r["cart_type"] == "primary"}
     items = []
     for r in rows:
         code = r["course_code"]
@@ -242,18 +254,31 @@ def get(user_id: str, term: str = "") -> Dict[str, Any]:
             db.conn().execute("UPDATE student_carts SET studio_course_id = '' WHERE user_id = ? AND term = ? AND course_code = ?",
                               (user_id, term, code))
             db.conn().commit()
+        alongside = primary - {code}
+        checks, keys, course_check = {}, set(), None
+        if course:  # each section is judged on its own PATH rule (or the course rule when it lists none)
+            for s in sections:
+                rule = advisor.section_rule(course, s)
+                checks[str(s.get("crn"))] = _prereq_check(course, rule, done, alongside)
+                keys.add(advisor.cnf_key(rule["cnf"]))
+            course_rule = advisor.section_rule(course)
+            course_check = {**_prereq_check(course, course_rule, done, alongside),
+                            "prereqs": advisor.prereq_display(course_rule["text"])}
+        judged = checks.get(str(chosen.get("crn"))) if chosen else course_check
         flags = []
         if not chosen:
             flags.append("no_section")
         if code in done:
             flags.append("already_done")
-        elif course and advisor.readiness(user_id, code).get("status") == "missing":
+        elif judged and judged["prereq_status"] == "missing":
             flags.append("prereq_missing")
         item = {"code": code, "title": course.get("title") or code, "cart_type": r["cart_type"],
-                "section_crn": r["section_crn"], "section": _compact_section(chosen) if chosen else None,
-                "sections": [_compact_section(s) for s in sections], "catalog_credits": course.get("credits") or "",
-                "attributes": course.get("attributes") or [], "studio_course_id": studio, "notes": r["notes"],
-                "flags": flags, "created_at": r["created_at"]}
+                "section_crn": r["section_crn"],
+                "section": _compact_section(chosen, checks.get(str(chosen.get("crn")))) if chosen else None,
+                "sections": [_compact_section(s, checks.get(str(s.get("crn")))) for s in sections],
+                "catalog_credits": course.get("credits") or "", "course_prereq": course_check,
+                "sections_differ": len(keys) > 1, "attributes": course.get("attributes") or [], "studio_course_id": studio,
+                "notes": r["notes"], "flags": flags, "created_at": r["created_at"]}
         item.update(item_credits(item))
         items.append(item)
     _add_risk(user_id, term, items, [r["priority"] for r in rows])
@@ -358,6 +383,14 @@ def context_block(user_id: str, term: str) -> str:
         if i.get("notes"):
             line += f" | student note: {i['notes'][:200]}"
         lines.append(line)
+        if i.get("sections_differ"):
+            course_text = (i.get("course_prereq") or {}).get("prereqs") or "none listed"
+            own = [f"sec {x.get('section')} CRN {x.get('crn')} lists {x['prereqs']}" for x in i["sections"] if x.get("prereqs")]
+            lines.append(f"  {i['code']} sections list different prerequisites (course rule: {course_text}): "
+                         + "; ".join(own[:5]) + ("; the others follow the course rule" if len(own) < len(i["sections"]) else ""))
+        concurrent = (sec or i.get("course_prereq") or {}).get("concurrent") or []
+        if concurrent:
+            lines.append(f"  {i['code']}: taking {', '.join(concurrent)} alongside counts (PATH: may be taken concurrently)")
     for c in s["conflicts"]:
         lines.append(f"- CONFLICT: {c['description']}")
     order = advisor_risk.rank(cart["items"])

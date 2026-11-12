@@ -60,6 +60,12 @@ def _topics(_):
     return out
 
 
+def _readiness_query(a):
+    """?crn=&term= from the non-empty arguments only ('' when neither is given)."""
+    parts = [f"{k}={q(str(a[k]).strip())}" for k in ("crn", "term") if str(a.get(k) or "").strip()]
+    return "?" + "&".join(parts) if parts else ""
+
+
 TOOLS = [
     ("simulation_guide", "The full SimSpec format: kinds particles (physics), graph, math (9 widgets), "
      "geometry / fbd (interactive apparatus, statics, vectors, free-body diagrams), and chem when installed. Read this before writing a spec.",
@@ -171,9 +177,11 @@ TOOLS = [
      "present it as likely, never certain.",
      S(user_id=STR("profile id"), term=STR("term code, e.g. 202720", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/cart/research?term={q(a.get('term', ''))}")),
-    ("check_readiness", "Are the listed prerequisites of a course met by the student's record? Returns what is missing.",
-     S(user_id=STR("profile id"), code=STR("course code, e.g. CSCI 241")),
-     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}")),
+    ("check_readiness", "Are the listed prerequisites of a course met by the student's record? Returns what is missing. "
+     "Per-section rule when crn is given (sections can list different prerequisites); basis says which rule applied.",
+     S(user_id=STR("profile id"), code=STR("course code, e.g. CSCI 241"),
+       crn=STR("CRN of a section of that course", optional=True), term=STR("term code, e.g. 202720 (default: next term)", optional=True)),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}{_readiness_query(a)}")),
     ("create_readiness_course", "Build a readiness course for a target course: a diagnostic on its prerequisite knowledge, then bridge classes. Uses Gemini quota.",
      S(user_id=STR("profile id"), code=STR("course code")),
      lambda a: call("POST", f"/api/advisor/{q(a['user_id'])}/readiness-course", {"code": a["code"]})),
@@ -194,9 +202,11 @@ TOOLS = [
     ("get_student_degree_audit", "Get the full degree audit for a student: COLL requirements, proficiencies, credits, gaps.",
      S(user_id=STR("profile id")),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/degree-audit")),
-    ("get_student_readiness", "Check whether a student meets the prerequisites for a given course.",
-     S(user_id=STR("profile id"), code=STR("course code e.g. CSCI 303")),
-     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}")),
+    ("get_student_readiness", "Check whether a student meets the prerequisites for a given course. Per-section rule "
+     "when crn is given; basis says which rule applied.",
+     S(user_id=STR("profile id"), code=STR("course code e.g. CSCI 303"),
+       crn=STR("CRN of a section of that course", optional=True), term=STR("term code, e.g. 202720 (default: next term)", optional=True)),
+     lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}{_readiness_query(a)}")),
     ("list_completed_courses", "List all courses a student has recorded as completed, with grades.",
      S(user_id=STR("profile id")),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/completed")),

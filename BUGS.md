@@ -2,19 +2,19 @@
 
 Open problems found but not fixed yet, then features asked for. Remove an entry when it lands.
 
-## Advisor: prerequisites are per course, not per section
+## Advisor: prerequisite parsing gaps (follow-ups to per-section prerequisites)
 
-Found 2026-11-11. Different sections of the same course can have different prerequisites (e.g. a section
-restricted to majors, an honors section, or a topics course whose sections cover different subjects), but
-prerequisites are stored only once per course: `catalog_courses.prereqs` / `prereq_codes` / `prereq_tree`
-(`advisor.py:30-34`). `catalog_sections` (`advisor.py:41`) has no prerequisite or restriction column, and
-`_compact_section` (`advisor_cart.py:215`) doesn't return one. So readiness (`advisor.readiness`) and the cart's
-`prereq_missing` flag (`advisor_cart.py:250`) judge every section by the course-level rule: a student can be told
-they're ready for a section they can't register for, or blocked from one they could take.
-
-Suggested fix: import each section's own prerequisites and restrictions into `catalog_sections` (falling back to
-the course's when a section has none), show them per section in the cart, and check `prereq_missing` against
-the chosen section (`section_crn`) when one is picked.
+Found 2026-11-11 while judging prerequisites per section (fixed: each section's own PATH rule now decides,
+with the course rule as fallback).
+- **Score and placement alternatives are dropped** by `parse_prereq_cnf` (advisor.py): "MATH 111 or minimum
+  score of 4 in AP Calculus" becomes `[['MATH 111']]`, so a student with the score is told the prerequisite is
+  missing. The cart only shows "or an equivalent score/placement (not checked here)".
+- **The readiness endpoint ignores the cart for "may be taken concurrently" codes**: the cart counts them as met
+  when the course is in the same term's primary cart, `GET .../readiness/{code}` only lists them in
+  `concurrent_ok`. The two can disagree.
+- **Consent is a yes/no**: PATH says Instructor, Department Chair or Dean/Director Approval; the cart says
+  "instructor or department approval" without naming which.
+- **Shorthand after a "*"**: "BUAD 231L * and 231" doesn't expand the bare "231".
 
 ## Tests may reach ElevenLabs despite SCIEDU_ELEVENLABS=0
 

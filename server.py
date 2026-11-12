@@ -4668,9 +4668,23 @@ def advisor_classify_catalog(req: Optional[ClassifyCatalogRequest] = None):
     return {"job_id": job["id"], "status": "started", "dry_run": req.dry_run}
 
 @app.get("/api/advisor/{user_id}/readiness/{code}")
-def advisor_readiness(user_id: str, code: str):
+def advisor_readiness(user_id: str, code: str, crn: str = "", term: str = ""):
+    """The course's prerequisites against the record; with a CRN, that section's own rule (basis says which)."""
     require_user(user_id)
-    return advisor.readiness(user_id, code)
+    crn = (crn or "").strip()
+    if not crn:  # the course rule: no term involved
+        return advisor.readiness(user_id, code)
+    try:
+        term = advisor_cart._term(term)
+    except advisor_cart.CartError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    section = advisor.get_section("", crn, term)
+    if not section:
+        raise HTTPException(status_code=404, detail=f"No listed section with CRN {crn[:12]} in {term}.")
+    m = advisor.CODE_RE.search(code.upper())
+    if (advisor.norm_code(*m.groups()) if m else code.strip().upper()) != section["code"]:
+        raise HTTPException(status_code=400, detail=f"CRN {crn[:12]} is a {section['code']} section, not {code[:20]}.")
+    return {**advisor.readiness(user_id, code, crn, term), "term": term}
 
 @app.get("/api/advisor/{user_id}/degree-audit")
 def advisor_degree_audit(user_id: str):
