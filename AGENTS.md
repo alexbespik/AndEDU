@@ -154,7 +154,7 @@ python3 scripts/agent_add_topic.py --template             # starter topic
 | `DELETE /api/courses/{id}` | delete a course and its classes |
 | `POST /api/quiz/submit` | record an answer (updates the class score) |
 | `GET /api/agy/events?since=<cursor>` | UI events; first call with no `since` returns only the cursor |
-| `POST /api/agy/events` | push `SWITCH_TOPIC`, `SWITCH_TAB`, `SET_SIM_CONFIG`, `TOPIC_UPDATED` |
+| `POST /api/agy/events` | push `SWITCH_TOPIC`, `SWITCH_TAB`, `SET_SIM_CONFIG`, `TOPIC_UPDATED` (the server also emits `GEMINI_KEY_INVALID` when Google rejects the key; `/api/status.gemini_key_invalid` mirrors it, both off with `SCIEDU_AUTH=1`) |
 | `GET /api/jobs`, `GET /api/jobs/{id}` | background job status |
 | `PUT` · `DELETE /api/topics/{id}/practice/{item_id}`, `DELETE /api/topics/{id}/flashcards/{index}` | edit or remove one activity (PUT without `type` merges into the item; ids stay stable) |
 | `GET /api/practice/guide`, `GET /api/diagrams` | practice type fields; offline diagram names |

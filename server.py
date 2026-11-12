@@ -292,6 +292,33 @@ def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], all
     return cfg, search_injected
 
 
+# Google's answer when the key itself is wrong, revoked or lacks the Gemini API. desktop/keycheck.cjs reads the
+# same text before a key is saved; keep the two in step (ARCHITECTURE.md section 5.4).
+_BAD_KEY_RE = re.compile(r"api_key_invalid|api key not valid")
+_REVOKED_KEY_RE = re.compile(r"leaked|suspended|service_disabled|has not been used in project")
+GEMINI_KEY_INVALID = False  # set when Google rejects the key mid-run, cleared by the next successful call
+
+
+def _is_bad_key(e: Exception) -> bool:
+    text = str(e).lower()
+    return bool(_BAD_KEY_RE.search(text)) or (getattr(e, "code", None) == 403 and bool(_REVOKED_KEY_RE.search(text)))
+
+
+def _key_rejected(e: Exception):
+    """Every model would fail the same way, so stop here instead of spending a call per fallback model."""
+    global GEMINI_KEY_INVALID
+    if not GEMINI_KEY_INVALID and not AUTH_REQUIRED:
+        emit_event("GEMINI_KEY_INVALID", {})  # the desktop app asks for a new key
+    GEMINI_KEY_INVALID = True
+    raise RuntimeError("Google rejected the Gemini API key. Add a working key and try again.") from e
+
+
+def _key_ok(resp):
+    global GEMINI_KEY_INVALID
+    GEMINI_KEY_INVALID = False
+    return resp
+
+
 def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = True, **kwargs):
     """Invokes Gemini with automatic model fallback for 429 quota, 503 load, and 404 deprecations."""
     global client, GROUNDING_PAUSED_UNTIL
@@ -315,12 +342,14 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
     for model_id in ready:
         spend_model_call()  # every attempt counts, fallbacks included
         try:
-            return client.models.generate_content(
+            return _key_ok(client.models.generate_content(
                 model=model_id,
                 contents=contents,
                 **call_kwargs
-            )
+            ))
         except ClientError as e:
+            if _is_bad_key(e):
+                _key_rejected(e)  # before the grounding retry below, which also catches 400
             last_err = e
             err_str = str(e).lower()
             code = getattr(e, "code", None)
@@ -332,12 +361,14 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
                 call_kwargs["config"] = ungrounded_cfg
                 search_injected = False
                 try:
-                    return client.models.generate_content(
+                    return _key_ok(client.models.generate_content(
                         model=model_id,
                         contents=contents,
                         **call_kwargs
-                    )
+                    ))
                 except Exception as retry_err:
+                    if _is_bad_key(retry_err):
+                        _key_rejected(retry_err)
                     last_err = retry_err
                     err_str = str(retry_err).lower()
                     code = getattr(retry_err, "code", None)
@@ -356,6 +387,8 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
                 continue
             raise e
         except Exception as e:
+            if _is_bad_key(e):
+                _key_rejected(e)
             last_err = e
             err_str = str(e).lower()
             if search_injected and ("quota" in err_str or "tool" in err_str or "search" in err_str or "conflict" in err_str or "grounding" in err_str):
@@ -364,12 +397,14 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
                 call_kwargs["config"] = ungrounded_cfg
                 search_injected = False
                 try:
-                    return client.models.generate_content(
+                    return _key_ok(client.models.generate_content(
                         model=model_id,
                         contents=contents,
                         **call_kwargs
-                    )
+                    ))
                 except Exception as retry_err:
+                    if _is_bad_key(retry_err):
+                        _key_rejected(retry_err)
                     last_err = retry_err
                     err_str = str(retry_err).lower()
             if "quota" in err_str or "429" in err_str or "resource_exhausted" in err_str:
@@ -7170,6 +7205,7 @@ def get_status():
         "status": "online",
         "topic_count": len(list(TOPICS_DIR.glob("*.json"))),
         "gemini_configured": bool(os.environ.get("api_KEY") or os.environ.get("GEMINI_API_KEY")),
+        "gemini_key_invalid": GEMINI_KEY_INVALID and not AUTH_REQUIRED,  # the desktop app shows its key card again
         "agy_cli_enabled": agy_cli_allowed(),
         "agy_runs_left_today": max(0, AGY_DAILY_RUNS - (_agy_runs["used"] if _agy_runs["day"] == time.strftime("%Y-%m-%d") else 0)),
         "model_calls_left_today": max(0, DAILY_MODEL_CALLS - (_budget["used"] if _budget["day"] == time.strftime("%Y-%m-%d") else 0)),

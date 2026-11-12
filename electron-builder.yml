@@ -15,6 +15,7 @@ asar: true
 files:
   - desktop/main.cjs
   - desktop/preload.cjs
+  - desktop/keycheck.cjs   # the key check main.cjs requires (not its test)
   - package.json
   - "!node_modules/**/*"
 extraResources:

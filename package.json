@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src",
+    "test:desktop": "node --test \"desktop/*.test.cjs\"",
     "desktop:dev": "npm run build && electron desktop/main.cjs",
     "desktop:stage": "scripts/desktop_stage.sh",
     "desktop:dist": "electron-builder --mac --arm64 --x64",

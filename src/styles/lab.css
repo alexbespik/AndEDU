@@ -1443,3 +1443,5 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .desktop-key-actions { display: flex; gap: var(--space-2); }
 .desktop-key-card .desktop-key-note { font-size: 0.85rem; color: var(--muted); }
 .desktop-key-card .desktop-key-error { color: var(--bad-ink); }
+.desktop-key-card[data-reason="rejected"] { border-color: var(--bad-ink); }
+.desktop-key-card .desktop-key-remove-confirm { background: var(--bad-ink); color: var(--paper); border-color: var(--bad-ink); }
