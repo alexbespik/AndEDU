@@ -21,8 +21,14 @@ function readiness(course, done) {
   const level = levelMatch ? parseInt(levelMatch[0], 10) : 100;
   const rawPrereqs = (course.prereqs || '').trim().toLowerCase();
   const isExplicitNone = ['none', 'none.', 'n/a', 'no prerequisites'].includes(rawPrereqs);
+  // a program admission ("minimum score of 1 in 'Admitted to SOE-Secondary'") is required on top of the courses
+  // and isn't on record, so such a course is never "met" here: the server calls this status "check"
+  const admission = /'admitted to [^']*'/i.test(course.prereqs || '');
 
   if (!tree.length) {
+    if (admission || /minimum score of/i.test(course.prereqs || '')) {
+      return { met: false, missing: [], status: 'check', admission };
+    }
     if (level >= 300 && !isExplicitNone) {
       return { met: false, missing: [], status: 'unknown' };
     }
@@ -35,7 +41,10 @@ function readiness(course, done) {
       missing.push(group.length > 1 ? `(${group.join(' or ')})` : group[0]);
     }
   }
-  return { met: missing.length === 0, missing, status: missing.length === 0 ? 'met' : 'missing' };
+  // PATH may accept a test score or placement instead (no score is on record, so this is only a note)
+  const scoreAlt = missing.length > 0 && /minimum score of/i.test(course.prereqs || '');
+  if (!missing.length && admission) return { met: false, missing, status: 'check', admission };
+  return { met: missing.length === 0, missing, status: missing.length === 0 ? 'met' : 'missing', scoreAlt };
 }
 
 /** AI-inferred College Curriculum labels (AC-5b): shown apart from official attributes, never counted as Done. */
@@ -245,10 +254,12 @@ export default function AdvisorPage({ user, onOpenCourse }) {
         <button type="button" className="card-link advisor-head" onClick={() => toggleOpen(c.code)} aria-expanded={open === c.code}>
           <span className="num advisor-code">{c.code}</span><span>{c.title}{aiTags(c)}</span>
           {/* the full missing list can be hundreds of characters: the row shows a count, the tooltip and the detail the list */}
-          <span className={`status ${taken ? 'status-pending' : r.status === 'unknown' ? 'status-pending' : r.met ? 'status-ready' : 'status-error'}`}
+          <span className={`status ${taken ? 'status-pending' : r.status === 'unknown' ? 'status-pending' : r.status === 'check' ? 'status-working' : r.met ? 'status-ready' : 'status-error'}`}
             title={!taken && !r.met && r.missing?.length ? `Missing: ${r.missing.join(' · ')}` : undefined}>
-            {taken ? 'Done' : r.status === 'unknown' ? 'Prerequisites not listed' : r.met ? (r.status === 'none' ? 'No prerequisites' : 'Prerequisites met')
-              : r.missing.length === 1 && r.missing[0].length <= 40 ? `Missing: ${r.missing[0]}` : `Missing prerequisites (${r.missing.length})`}
+            {taken ? 'Done' : r.status === 'unknown' ? 'Prerequisites not listed'
+              : r.status === 'check' ? (r.admission ? 'Requires program admission (not checked)' : 'Requires a qualifying score (not checked)')
+              : r.met ? (r.status === 'none' ? 'No prerequisites' : 'Prerequisites met')
+              : `${r.missing.length === 1 && r.missing[0].length <= 40 ? `Missing: ${r.missing[0]}` : `Missing prerequisites (${r.missing.length})`}${r.scoreAlt ? ' (or a qualifying score)' : ''}`}
           </span>
           {extra}
         </button>

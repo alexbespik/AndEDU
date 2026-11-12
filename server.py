@@ -4669,11 +4669,18 @@ def advisor_classify_catalog(req: Optional[ClassifyCatalogRequest] = None):
 
 @app.get("/api/advisor/{user_id}/readiness/{code}")
 def advisor_readiness(user_id: str, code: str, crn: str = "", term: str = ""):
-    """The course's prerequisites against the record; with a CRN, that section's own rule (basis says which)."""
+    """The course's prerequisites against the record; with a CRN, that section's own rule (basis says which).
+    The term's primary cart counts for "may be taken concurrently" codes (concurrent), as in the cart. Without a
+    CRN a blank term means the next term and an invalid one is ignored (term "", term_ignored true)."""
     require_user(user_id)
     crn = (crn or "").strip()
-    if not crn:  # the course rule: no term involved
-        return advisor.readiness(user_id, code)
+    m = advisor.CODE_RE.search(code.upper())
+    own = advisor.norm_code(*m.groups()) if m else code.strip().upper()
+    if not crn:  # the course rule: the term only picks the cart taken alongside
+        raw = (term or "").strip()
+        term = raw if advisor_cart.TERM_RE.match(raw) else "" if raw else wm_advising.next_term()
+        alongside = advisor_cart.primary_codes(user_id, term) - {own} if term else set()
+        return {**advisor.readiness(user_id, code, alongside=alongside), "term": term, "term_ignored": bool(raw) and not term}
     try:
         term = advisor_cart._term(term)
     except advisor_cart.CartError as e:
@@ -4681,10 +4688,10 @@ def advisor_readiness(user_id: str, code: str, crn: str = "", term: str = ""):
     section = advisor.get_section("", crn, term)
     if not section:
         raise HTTPException(status_code=404, detail=f"No listed section with CRN {crn[:12]} in {term}.")
-    m = advisor.CODE_RE.search(code.upper())
-    if (advisor.norm_code(*m.groups()) if m else code.strip().upper()) != section["code"]:
+    if own != section["code"]:
         raise HTTPException(status_code=400, detail=f"CRN {crn[:12]} is a {section['code']} section, not {code[:20]}.")
-    return {**advisor.readiness(user_id, code, crn, term), "term": term}
+    alongside = advisor_cart.primary_codes(user_id, term) - {own}
+    return {**advisor.readiness(user_id, code, crn, term, alongside=alongside), "term": term, "term_ignored": False}
 
 @app.get("/api/advisor/{user_id}/degree-audit")
 def advisor_degree_audit(user_id: str):

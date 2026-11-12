@@ -66,6 +66,11 @@ def _readiness_query(a):
     return "?" + "&".join(parts) if parts else ""
 
 
+READINESS_STATUS = ("status is met | missing | check | none | unknown; check = only a test score, equivalency or admission "
+                    "(score_options per missing group, required_alts) would satisfy it: not verified, the record holds no scores. "
+                    "concurrent lists codes counted because they are in that term's primary cart.")
+
+
 TOOLS = [
     ("simulation_guide", "The full SimSpec format: kinds particles (physics), graph, math (9 widgets), "
      "geometry / fbd (interactive apparatus, statics, vectors, free-body diagrams), and chem when installed. Read this before writing a spec.",
@@ -151,7 +156,8 @@ TOOLS = [
      S(user_id=STR("profile id"), interests=STR("e.g. 'machine learning, statistics'", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/recommend?interests={q(a.get('interests', ''))}")),
     ("get_cart", "A student's planning cart for a term (default: the next term): primary and backup courses, chosen sections, "
-     "flags (no_section, prereq_missing, already_done), the primary credit load and section time conflicts.",
+     "flags (no_section, prereq_missing, prereq_check, already_done; prereq_check: only a test score, equivalency or "
+     "admission would satisfy what is missing, not verified), the primary credit load and section time conflicts.",
      S(user_id=STR("profile id"), term=STR("term code, e.g. 202720", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/cart?term={q(a.get('term', ''))}")),
     ("add_to_cart", "Add a catalog course to a student's planning cart (adding it again updates it). Give a section CRN only "
@@ -178,7 +184,8 @@ TOOLS = [
      S(user_id=STR("profile id"), term=STR("term code, e.g. 202720", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/cart/research?term={q(a.get('term', ''))}")),
     ("check_readiness", "Are the listed prerequisites of a course met by the student's record? Returns what is missing. "
-     "Per-section rule when crn is given (sections can list different prerequisites); basis says which rule applied.",
+     "Per-section rule when crn is given (sections can list different prerequisites); basis says which rule applied. "
+     + READINESS_STATUS,
      S(user_id=STR("profile id"), code=STR("course code, e.g. CSCI 241"),
        crn=STR("CRN of a section of that course", optional=True), term=STR("term code, e.g. 202720 (default: next term)", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}{_readiness_query(a)}")),
@@ -203,7 +210,7 @@ TOOLS = [
      S(user_id=STR("profile id")),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/degree-audit")),
     ("get_student_readiness", "Check whether a student meets the prerequisites for a given course. Per-section rule "
-     "when crn is given; basis says which rule applied.",
+     "when crn is given; basis says which rule applied. " + READINESS_STATUS,
      S(user_id=STR("profile id"), code=STR("course code e.g. CSCI 303"),
        crn=STR("CRN of a section of that course", optional=True), term=STR("term code, e.g. 202720 (default: next term)", optional=True)),
      lambda a: call("GET", f"/api/advisor/{q(a['user_id'])}/readiness/{q(a['code'])}{_readiness_query(a)}")),

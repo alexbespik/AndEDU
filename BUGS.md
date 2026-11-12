@@ -2,40 +2,16 @@
 
 Open problems found but not fixed yet, then features asked for. Remove an entry when it lands.
 
-## Advisor: prerequisite parsing gaps (follow-ups to per-section prerequisites)
+## Advisor: an OR between two non-course requirements reads as AND
 
-Found 2026-11-11 while judging prerequisites per section (fixed: each section's own PATH rule now decides,
-with the course rule as fallback).
-- **Score and placement alternatives are dropped** by `parse_prereq_cnf` (advisor.py): "MATH 111 or minimum
-  score of 4 in AP Calculus" becomes `[['MATH 111']]`, so a student with the score is told the prerequisite is
-  missing. The cart only shows "or an equivalent score/placement (not checked here)".
-- **The readiness endpoint ignores the cart for "may be taken concurrently" codes**: the cart counts them as met
-  when the course is in the same term's primary cart, `GET .../readiness/{code}` only lists them in
-  `concurrent_ok`. The two can disagree.
-- **Consent is a yes/no**: PATH says Instructor, Department Chair or Dean/Director Approval; the cart says
-  "instructor or department approval" without naming which.
-- **Shorthand after a "*"**: "BUAD 231L * and 231" doesn't expand the bare "231".
+Found 2026-11-11 in review (no case in the current catalog). A rule like "EDUC 301 and (minimum score of 1 in 'X'
+or minimum score of 1 in 'Y')" puts both X and Y in `required_alts`, and the cart and chat show "also requires
+X, Y", which reads as both. Fix: keep alternatives from one OR together ("one of X or Y") when this shows up.
+
 
 # To do
 
 Features asked for, not built yet.
-
-## Group the subject tabs to save space
-
-Asked for 2026-11-11. The navbar has seven top-level tabs (`MODES` in `src/components/Navbar.jsx`: My courses, Lab,
-IDE, Math, History, Languages, Advisor), and every new subject (Philosophy, Economics, Biology, Music...) would add
-another. Group similar disciplines instead:
-- **Math**: Math (and later Statistics)
-- **IT**: IDE (and later digital logic / computer architecture)
-- **Lab**: physics and chemistry (and later Biology)
-- **Liberal arts**: History, Languages, Philosophy (and later Law, Art history, Music, Economics)
-- My courses and Advisor stay top-level.
-
-Each group is one tab that opens a sub-switcher (segmented control or dropdown) for its subjects, remembering
-the last one used. Keep the internal mode ids (`physics`, `code`, `math`, `history`, `language`) and course
-`workspace` values unchanged so courses, MCP `open_workspace` and deep links keep working; only the navigation
-changes. Narrow screens get one row of 4-6 items instead of 7+. Decide whether Math and IT merit their own
-tabs while they hold one subject each, or join a "STEM" group with Lab.
 
 ## Multiple password-protected accounts, each with its own key and lectures
 
