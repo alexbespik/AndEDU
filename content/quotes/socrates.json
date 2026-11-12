@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "collection": "socrates",
+  "note": "Public-domain translations only; year is the translation's first publication. Every text is checked word for word against source_url by scripts/verify_quotes.py. Never add a quote from memory.",
+  "quotes": [
+    {
+      "id": "apology-21d",
+      "author": "Socrates",
+      "work": "Plato, Apology",
+      "ref": "21d",
+      "translator": "Benjamin Jowett",
+      "year": 1871,
+      "text": "I neither know nor think that I know.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://www.gutenberg.org/cache/epub/1656/pg1656.txt",
+      "pd": true
+    },
+    {
+      "id": "apology-30b",
+      "author": "Socrates",
+      "work": "Plato, Apology",
+      "ref": "30b",
+      "translator": "Benjamin Jowett",
+      "year": 1871,
+      "text": "I tell you that virtue is not given by money, but that from virtue comes money and every other good of man, public as well as private.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://www.gutenberg.org/cache/epub/1656/pg1656.txt",
+      "pd": true
+    },
+    {
+      "id": "apology-38a",
+      "author": "Socrates",
+      "work": "Plato, Apology",
+      "ref": "38a",
+      "translator": "Benjamin Jowett",
+      "year": 1871,
+      "text": "the unexamined life is not worth living",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://www.gutenberg.org/cache/epub/1656/pg1656.txt",
+      "pd": true
+    },
+    {
+      "id": "apology-41d",
+      "author": "Socrates",
+      "work": "Plato, Apology",
+      "ref": "41d",
+      "translator": "Benjamin Jowett",
+      "year": 1871,
+      "text": "No evil can happen to a good man, either in life or after death.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://www.gutenberg.org/cache/epub/1656/pg1656.txt",
+      "pd": true
+    },
+    {
+      "id": "apology-42a",
+      "author": "Socrates",
+      "work": "Plato, Apology",
+      "ref": "42a",
+      "translator": "Benjamin Jowett",
+      "year": 1871,
+      "text": "The hour of departure has arrived, and we go our ways—I to die, and you to live. Which is better God only knows.",
+      "partial": false,
+      "tags": [
+        "no-loading"
+      ],
+      "source_url": "https://www.gutenberg.org/cache/epub/1656/pg1656.txt",
+      "pd": true
+    }
+  ]
+}

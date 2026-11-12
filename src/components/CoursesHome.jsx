@@ -4,6 +4,7 @@ import { api, uploadFiles, useAgyEvents } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { disambiguateFile } from '../lib/files';
 import TodayPanel from './TodayPanel';
+import LoadingPanel from './LoadingPanel';
 
 export const STATUS = {
   planning: ['Writing diagnostic', 'status-working'],
@@ -499,7 +500,7 @@ export default function CoursesHome({ user, onOpenCourse, onCodePractice, initia
           onCancel={courses && courses.length ? () => setCreating(false) : undefined} />
       )}
       {error && <p className="notice notice-bad" role="alert">{error}</p>}
-      {courses === null && !error && <p className="hint">Loading your courses…</p>}
+      {courses === null && !error && <LoadingPanel label="Loading your courses…" />}
       {cleared.length > 0 && (
         <section className="sprint-cleared" aria-labelledby="sprint-cleared-h">
           <h2 id="sprint-cleared-h" className="label">Finished sprints</h2>

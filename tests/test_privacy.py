@@ -291,7 +291,7 @@ class OrphanLessons(unittest.TestCase):
         db.replace_classes(course["id"], [{"title": "Only class"}])
         tid = f"race-{uuid.uuid4().hex[:6]}"
 
-        async def fake_build(course_row, klass, classes):
+        async def fake_build(course_row, klass, classes, on_step=None):
             topic = {"id": tid, "title": "Race", "category": "Physics", "markdownContent": "# Race",
                      "source": {"kind": "course", "courseId": course_row["id"]}}
             server.save_json_file(server.topic_path(tid), topic)

@@ -133,7 +133,7 @@ class Semester(unittest.TestCase):
         course, _ = self.course("nppp")
         built = []
 
-        async def fake_build(course_row, klass, classes):
+        async def fake_build(course_row, klass, classes, on_step=None):
             built.append(klass["seq"])
             tid = f"sem-{uuid.uuid4().hex[:6]}"
             saved, _ = server.save_topic({"id": tid, "title": klass["title"], "category": "Physics", "markdownContent": "# x",
