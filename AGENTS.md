@@ -191,7 +191,7 @@ pays each (source, ref) once per day or once ever; browsers only report what hap
 ## Spending guards
 - `SCIEDU_DAILY_MODEL_CALLS` (default 400): Gemini requests per day across all features, fallbacks included.
 - `SCIEDU_RATE_SCALE`: per-user hourly limits on generation (see `RATE_LIMITS` in server.py).
-- ElevenLabs audio in Languages only when `SCIEDU_ELEVENLABS=1` and a server key are set (never a client key): `SCIEDU_TTS_DAILY_CHARS` (default 20000, in memory, resets on restart), `SCIEDU_TTS_CACHE_MB` (200), `ELEVENLABS_GERMAN_VOICE_ID`. Cached clips cost nothing. "Explain it to me" narration has its own daily budget `SCIEDU_EXPLAIN_TTS_CHARS` (15000) and a model rate limit (`explain`, 20/h); replays are free. Tests force `SCIEDU_ELEVENLABS=0` so they never spend credits.
+- ElevenLabs audio in Languages only when `SCIEDU_ELEVENLABS=1` and a server key are set (never a client key): `SCIEDU_TTS_DAILY_CHARS` (default 20000, in memory, resets on restart), `SCIEDU_TTS_CACHE_MB` (200), `ELEVENLABS_GERMAN_VOICE_ID`. Cached clips cost nothing. "Explain it to me" narration has its own daily budget `SCIEDU_EXPLAIN_TTS_CHARS` (15000) and a model rate limit (`explain`, 20/h); replays are free. Tests force `SCIEDU_ELEVENLABS=0` and block every outbound connection (`tests/offline_guard.py`; loopback stays open), so a missed mock fails instead of spending credits; the ElevenLabs 401/500/timeout lines in a test run are mocked failures.
 - `AGY_DAILY_RUNS` (default 15): agy CLI runs per day, one at a time; Gemini answers when capped or busy.
 - Accounts mode admins: `SCIEDU_ADMINS` = comma-separated user ids (shown in the account menu), not names.
 

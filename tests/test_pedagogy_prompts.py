@@ -17,6 +17,7 @@ os.environ["SCIEDU_ELEVENLABS"] = "0"  # never spend real ElevenLabs credits fro
 os.environ["GEMINI_API_KEY"] = ""
 sys.path.insert(0, str(ROOT))
 
+import offline_guard  # noqa: E402,F401  (no test may reach the internet)
 import server  # noqa: E402
 
 

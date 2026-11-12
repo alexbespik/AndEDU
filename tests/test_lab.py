@@ -24,6 +24,8 @@ for _k in ("ELEVENLABS_API_KEY", "ELEVEN_LABS_API_KEY", "XI_API_KEY"):
     os.environ[_k] = ""
 sys.path.insert(0, str(ROOT))
 
+import offline_guard  # noqa: E402,F401  (no test may reach the internet)
+
 import db  # noqa: E402
 db.CONTENT_ROOT = Path(TMP.name)
 db.DB_PATH = db.CONTENT_ROOT / "edu_studio.db"

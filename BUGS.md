@@ -16,16 +16,26 @@ with the course rule as fallback).
   "instructor or department approval" without naming which.
 - **Shorthand after a "*"**: "BUAD 231L * and 231" doesn't expand the bare "231".
 
-## Tests may reach ElevenLabs despite SCIEDU_ELEVENLABS=0
-
-Found 2026-11-11 by the tester agent. A full `.venv/bin/python -m unittest discover -s tests` run logs
-"[TTS] ElevenLabs answered HTTP 401/500" and "ConnectTimeout", although AGENTS.md says tests force
-`SCIEDU_ELEVENLABS=0` so they never spend credits. All tests pass; find which test reaches the network and make
-it use the stub (a real key in `.env` would spend credits on every test run).
-
 # To do
 
 Features asked for, not built yet.
+
+## Group the subject tabs to save space
+
+Asked for 2026-11-11. The navbar has seven top-level tabs (`MODES` in `src/components/Navbar.jsx`: My courses, Lab,
+IDE, Math, History, Languages, Advisor), and every new subject (Philosophy, Economics, Biology, Music...) would add
+another. Group similar disciplines instead:
+- **Math**: Math (and later Statistics)
+- **IT**: IDE (and later digital logic / computer architecture)
+- **Lab**: physics and chemistry (and later Biology)
+- **Liberal arts**: History, Languages, Philosophy (and later Law, Art history, Music, Economics)
+- My courses and Advisor stay top-level.
+
+Each group is one tab that opens a sub-switcher (segmented control or dropdown) for its subjects, remembering
+the last one used. Keep the internal mode ids (`physics`, `code`, `math`, `history`, `language`) and course
+`workspace` values unchanged so courses, MCP `open_workspace` and deep links keep working; only the navigation
+changes. Narrow screens get one row of 4-6 items instead of 7+. Decide whether Math and IT merit their own
+tabs while they hold one subject each, or join a "STEM" group with Lab.
 
 ## Multiple password-protected accounts, each with its own key and lectures
 
