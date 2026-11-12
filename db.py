@@ -236,10 +236,15 @@ def _new_id(prefix: str) -> str:
 
 
 # ---- users ----
+# Columns a user dict may carry out of these helpers (they reach the browser); never password_hash.
+# Sign-in code reads the hash with get_user_by_name / get_user_auth.
+USER_COLUMNS = "id, name, created_at, last_seen"
+
+
 def get_or_create_user(name: str) -> Dict[str, Any]:
     now = time.time()
     c = conn()
-    row = c.execute("SELECT * FROM users WHERE name = ?", (name,)).fetchone()
+    row = c.execute(f"SELECT {USER_COLUMNS} FROM users WHERE name = ?", (name,)).fetchone()
     if row:
         c.execute("UPDATE users SET last_seen = ? WHERE id = ?", (now, row["id"]))
         c.commit()
@@ -251,12 +256,17 @@ def get_or_create_user(name: str) -> Dict[str, Any]:
 
 
 def get_user(user_id: str) -> Optional[Dict[str, Any]]:
+    return _row(conn().execute(f"SELECT {USER_COLUMNS} FROM users WHERE id = ?", (user_id,)).fetchone())
+
+
+def get_user_auth(user_id: str) -> Optional[Dict[str, Any]]:
+    """The user row with its password hash, for password checks only; never return it to a client."""
     return _row(conn().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
 
 
 def list_users() -> List[Dict[str, Any]]:
     rows = conn().execute("""
-        SELECT u.*, COUNT(c.id) AS course_count FROM users u
+        SELECT u.id, u.name, u.created_at, u.last_seen, COUNT(c.id) AS course_count FROM users u
         LEFT JOIN courses c ON c.user_id = u.id GROUP BY u.id ORDER BY u.last_seen DESC
     """).fetchall()
     return [dict(r) for r in rows]
@@ -706,7 +716,7 @@ def delete_lessons(topic_ids: List[str]) -> int:
 def export_user(user_id: str) -> Dict[str, Any]:
     """Everything stored about one user, for "Export my data". No password hash, tokens or sessions."""
     c = conn()
-    user = get_user(user_id)
+    user = get_user_auth(user_id)  # the whole row, consent fields included; secret columns are dropped below
     if user:
         user = {k: v for k, v in user.items() if not any(s in k.lower() for s in _SECRET_USER_COLUMNS)}
     courses = [_row(r) for r in c.execute("SELECT * FROM courses WHERE user_id = ? ORDER BY created_at", (user_id,))]
