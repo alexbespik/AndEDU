@@ -144,6 +144,20 @@ def _sections(code: str, term: str = "") -> str:
     return line
 
 
+def _section_rules(course: Dict[str, Any], term: str, limit: int = 5) -> List[str]:
+    """Lines for the term's sections whose own PATH prerequisites differ from the course rule."""
+    course_text = advisor.prereq_display(course.get("prereqs") or "").rstrip(".") or "no prerequisites"
+    out = []
+    for s in section_summary(course["code"], term)["next_term_sections"]:
+        rule = advisor.section_rule(course, s)
+        if rule["basis"] == "section" and advisor.cnf_key(rule["cnf"]) != advisor.cnf_key(rule["course_cnf"]):
+            out.append(f"  section {s.get('section')} (CRN {s.get('crn')}) lists {advisor.prereq_display(rule['text']).rstrip('.')}; "
+                       f"the course lists {course_text}")
+            if len(out) >= limit:
+                break
+    return out
+
+
 def mentioned_codes(text: str) -> List[str]:
     return list(dict.fromkeys(advisor.find_codes((text or "").upper())))[:12]  # "csci 303" counts too
 
@@ -223,6 +237,7 @@ def build_context(user_id: str, message: str, history: Optional[List[Dict[str, s
             r = advisor.readiness(user_id, code)
             out.append(_course_line(c, full=True))
             out.append(f"  student's prerequisites: {'met' if r.get('met') else 'missing ' + ', '.join(map(str, r.get('missing') or []))}")
+            out += _section_rules(c, next_term)
             out.append(_sections(code, next_term))
 
     seen = set(codes)

@@ -23,6 +23,50 @@ function sectionLabel(s) {
   return [`Sec ${s.section}`, s.meets, s.instructor, `CRN ${s.crn}`].filter(Boolean).join(' · ');
 }
 
+/** A section option: marked when the student's record misses that section's prerequisites. */
+function sectionOption(s, done) {
+  return sectionLabel(s) + (!done && s.prereq_status === 'missing' ? ' · prerequisites missing' : '');
+}
+
+/**
+ * What the chosen section requires (each section can list its own rule in PATH) or, before one is picked, the
+ * course rule; plus the parts this check can't see (score alternatives, approval, grade minimums).
+ */
+function PrereqHint({ item }) {
+  const chosen = item.section;
+  const p = chosen || item.course_prereq;
+  if (!p) return null;
+  const lines = [];
+  if (chosen && p.prereqs) {
+    const met = p.prereq_status === 'met';
+    lines.push(
+      <span key="req">This section requires: {p.prereqs} (course: {item.course_prereq?.prereqs || 'none listed'}){' '}
+        <span className={`status ${met ? 'status-ready' : 'status-error'}`}>{met ? 'Met' : `Missing ${p.prereq_missing.join('; ')}`}</span>
+      </span>,
+    );
+  } else if (chosen && p.prereq_note) {
+    lines.push(<span key="note">PATH lists for this section: {p.prereq_note} No course is named, so the course rule applies.</span>);
+  } else if (chosen && item.sections_differ) {
+    lines.push(<span key="own">This section lists no prerequisite of its own; the course rule applies.</span>);
+  } else if (!chosen && item.sections_differ) {
+    lines.push(<span key="differ">Sections of this course list different prerequisites: pick one to check yours.</span>);
+  }
+  if (p.concurrent?.length) {
+    lines.push(<span key="along">Taking {p.concurrent.join(', ')} alongside (PATH allows it in the same term).</span>);
+  }
+  // only the codes still missing: one the student already passed needs no same-term note
+  const missingCodes = (p.prereq_missing || []).flatMap((g) => g.split(' or '));
+  const sameTerm = (p.concurrent_ok || []).filter((c) => !(p.concurrent || []).includes(c) && missingCodes.includes(c));
+  if (sameTerm.length && p.prereq_status === 'missing') {
+    lines.push(<span key="conc">{sameTerm.join(', ')} may be taken in the same term.</span>);
+  }
+  if (p.score_alternative) lines.push(<span key="score">Or an equivalent score/placement (not checked here).</span>);
+  if (chosen?.consent) lines.push(<span key="consent">Instructor or department approval required to register.</span>);
+  if (p.grade_minimum && p.prereq_status !== 'none') lines.push(<span key="grade">{p.grade_minimum}</span>);
+  if (!lines.length) return null;
+  return <div className="hint stack-xs">{lines}</div>;
+}
+
 const asOf = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : 'an unknown time');
 
 /** Seat-risk badge; the evidence is in the tooltip. risk may be null when no estimate could be made. */
@@ -150,11 +194,12 @@ export default function PlanningCart({ user, cart, onCart, onLoadTerm, onAdd, on
                   {i.section_crn && !listed.some((x) => String(x.crn) === i.section_crn) && (
                     <option value={i.section_crn}>CRN {i.section_crn} (no longer listed)</option>
                   )}
-                  {listed.map((x) => <option key={x.crn} value={String(x.crn)}>{sectionLabel(x)}</option>)}
+                  {listed.map((x) => <option key={x.crn} value={String(x.crn)}>{sectionOption(x, i.flags.includes('already_done'))}</option>)}
                 </select>
               ) : (
                 <span className="hint">No sections listed for {cart.term_name}.</span>
               )}
+              {!i.flags.includes('already_done') && <PrereqHint item={i} />}
               <div className="btn-row">
                 <label className="visually-hidden" htmlFor={`pri-${i.code}`}>Priority of {i.code}</label>
                 <select id={`pri-${i.code}`} className="input cart-priority" value={i.priority || 'want'} disabled={Boolean(busy)}

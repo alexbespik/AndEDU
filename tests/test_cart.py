@@ -422,5 +422,128 @@ class CartPriority(CartCase):
         self.assertEqual(self.c.put(url, json={"class_year": ""}).status_code, 404)
 
 
+def restricted(crn, section, *restrictions, code="QSEC 440", **details):
+    return {"term": TERM, "crn": crn, "code": code, "section": section, "title": code,
+            "details": {"restrictions": list(restrictions), **details}}
+
+
+class SectionPrereqs(CartCase):
+    """Each PATH section can list its own prerequisites (restrictions[0]); the course rule is the fallback."""
+
+    def setUp(self):
+        super().setUp()
+        advisor.upsert_courses([
+            {"code": "QSEC 201", "title": "Intro"}, {"code": "QSEC 301", "title": "Core"},
+            {"code": "QSEC 350", "title": "Methods"},
+            {"code": "QSEC 440", "title": "Topics", "prereqs": "Prerequisite: QSEC 301.\nA minimum grade of D- is required in QSEC 301."},
+            {"code": "QSEC 408", "title": "Ecology"},
+            {"code": "QSEC 408L", "title": "Ecology Lab", "prereqs": "Prerequisite: QSEC 408 * .\n * May be taken concurrently."},
+        ], "test")
+        advisor.upsert_sections([
+            restricted("91001", "01", "Prerequisite: QSEC 301.\nA minimum grade of D- is required in QSEC 301."),
+            restricted("91002", "02", "Prerequisite: QSEC 201.\nA minimum grade of D- is required in QSEC 201.",
+                       "Enrollment is limited to Undergraduate level students."),
+            restricted("91003", "03", "Prerequisites: QSEC 301 and QSEC 350.", consent="Instructor Approval"),
+            restricted("91004", "04"),
+            restricted("91005", "05", "Prerequisite: minimum score of 1 in 'Admitted to SOE-Secondary'."),
+            restricted("91010", "01", "Prerequisite: QSEC 408 * .\n * May be taken concurrently.\nA minimum grade of D- is required in QSEC 408.",
+                       code="QSEC 408L"),
+            {"term": TERM, "crn": "91011", "code": "QSEC 408", "section": "01", "title": "Ecology"},
+        ])
+        advisor.add_completed(self.uid, [{"code": "QSEC 201", "grade": "B"}], "test")
+
+    def test_section_more_lenient_than_the_course(self):  # DATA 440: one section asks for DATA 201, the course DATA 301
+        course = advisor.readiness(self.uid, "QSEC 440")
+        self.assertEqual((course["basis"], course["status"], course["missing"]), ("course", "missing", ["QSEC 301"]))
+        self.assertNotIn("course_prereqs", course)
+        sec = advisor.readiness(self.uid, "QSEC 440", "91002", TERM)
+        self.assertEqual((sec["basis"], sec["status"], sec["met"], sec["crn"], sec["term"]), ("section", "met", True, "91002", TERM))
+        self.assertEqual((sec["prereq_tree"], sec["course_prereq_tree"]), ([["QSEC 201"]], [["QSEC 301"]]))
+        self.assertIn("QSEC 201", sec["prereqs"])
+        self.assertIn("QSEC 301", sec["course_prereqs"])
+
+    def test_section_stricter_than_the_course(self):
+        advisor.add_completed(self.uid, [{"code": "QSEC 301", "grade": "A"}], "test")
+        self.assertTrue(advisor.readiness(self.uid, "QSEC 440")["met"])
+        sec = advisor.readiness(self.uid, "QSEC 440", "91003", TERM)
+        self.assertEqual((sec["basis"], sec["status"], sec["missing_codes"]), ("section", "missing", ["QSEC 350"]))
+
+    def test_no_section_text_or_no_course_named_falls_back_to_the_course(self):
+        plain = advisor.readiness(self.uid, "QSEC 440", "91004", TERM)
+        self.assertEqual((plain["basis"], plain["prereq_tree"], plain["section_note"]), ("course", [["QSEC 301"]], ""))
+        score = advisor.readiness(self.uid, "QSEC 440", "91005", TERM)
+        self.assertEqual((score["basis"], score["prereq_tree"]), ("course", [["QSEC 301"]]))
+        self.assertTrue(score["section_note"].startswith("Prerequisite: minimum score of 1 in 'Admitted to SOE-Secondary'"))
+
+    def test_shorthand_and_concurrent_markers_parse(self):
+        self.assertEqual(advisor.parse_prereq_cnf("Prerequisites: AFST 205 and (AFST 299 or 399).\nA minimum grade of D- is required in AFST 205."),
+                         [["AFST 205"], ["AFST 299", "AFST 399"]])
+        text = "Prerequisites: BUAD 311, 317 * , 323 and 350.\n * May be taken concurrently."
+        self.assertEqual(advisor.concurrent_codes(text), ["BUAD 317"])
+        self.assertEqual(advisor.concurrent_codes("Prerequisites: BUAD 311, 317 and 323."), [])  # no footnote: no marks
+        self.assertEqual(advisor.prereq_display(text), "BUAD 311, 317, 323 and 350.")
+        lab = advisor.readiness(self.uid, "QSEC 408L", "91010", TERM)
+        self.assertEqual((lab["status"], lab["concurrent_ok"]), ("missing", ["QSEC 408"]))  # still required: before or alongside
+
+    def test_concurrent_code_in_the_same_terms_primary_cart_counts(self):
+        self.add("QSEC 408")
+        cart = self.add("QSEC 408L", section_crn="91010").json()
+        lab = self.item(cart, "QSEC 408L")
+        self.assertNotIn("prereq_missing", lab["flags"])
+        self.assertEqual((lab["section"]["prereq_status"], lab["section"]["concurrent"]), ("met", ["QSEC 408"]))
+        self.assertIn("taking QSEC 408 alongside", advisor_cart.context_block(self.uid, TERM))
+        cart = self.c.patch(f"{self.url}/QSEC 408", json={"term": TERM, "cart_type": "backup"}).json()
+        lab = self.item(cart, "QSEC 408L")  # a backup isn't taken alongside
+        self.assertIn("prereq_missing", lab["flags"])
+        self.assertEqual((lab["section"]["prereq_missing"], lab["section"]["concurrent"]), (["QSEC 408"], []))
+
+    def test_cart_judges_the_chosen_section(self):
+        cart = self.add("QSEC 440").json()
+        item = self.item(cart, "QSEC 440")
+        self.assertTrue(item["sections_differ"])
+        self.assertIn("prereq_missing", item["flags"])  # no section yet: the course rule (QSEC 301)
+        self.assertEqual(item["course_prereq"]["prereqs"], "QSEC 301.")
+        by_crn = {s["crn"]: s for s in item["sections"]}
+        self.assertEqual(by_crn["91002"]["prereq_status"], "met")
+        self.assertEqual((by_crn["91002"]["prereq_basis"], by_crn["91002"]["prereqs"]), ("section", "QSEC 201."))
+        self.assertEqual((by_crn["91001"]["prereq_basis"], by_crn["91001"]["prereqs"]), ("section", ""))  # same as the course
+        self.assertEqual((by_crn["91003"]["consent"], by_crn["91001"]["consent"]), (True, False))
+        self.assertTrue(by_crn["91005"]["prereq_note"] and by_crn["91005"]["score_alternative"] is False)
+        self.assertEqual(by_crn["91001"]["grade_minimum"], "A minimum grade of D- is required in QSEC 301.")
+        self.assertTrue(all("details" not in s for s in item["sections"]))
+        self.assertIn("sections list different prerequisites", advisor_cart.context_block(self.uid, TERM))
+
+        cart = self.c.patch(f"{self.url}/QSEC 440", json={"term": TERM, "section_crn": "91002"}).json()
+        item = self.item(cart, "QSEC 440")
+        self.assertNotIn("prereq_missing", item["flags"])
+        self.assertNotIn("details", item["section"])
+        cart = self.c.patch(f"{self.url}/QSEC 440", json={"term": TERM, "section_crn": "91003"}).json()
+        self.assertIn("prereq_missing", self.item(cart, "QSEC 440")["flags"])
+        self.assertEqual(self.item(cart, "QSEC 440")["section"]["prereq_missing"], ["QSEC 301", "QSEC 350"])
+
+    def test_same_rule_everywhere_is_not_different(self):
+        cart = self.add("QSEC 408").json()
+        self.assertFalse(self.item(cart, "QSEC 408")["sections_differ"])
+
+    def test_readiness_endpoint_crn_and_term(self):
+        url = f"/api/advisor/{self.uid}/readiness"
+        r = self.c.get(f"{url}/QSEC 440?crn=91002&term={TERM}")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["basis"], r.json()["status"], r.json()["term"]), ("section", "met", TERM))
+        self.assertEqual(self.c.get(f"{url}/QSEC 440?crn=90001&term={TERM}").status_code, 400)  # a QCRT 101 section
+        self.assertEqual(self.c.get(f"{url}/QSEC 440?crn=99999&term={TERM}").status_code, 404)
+        self.assertEqual(self.c.get(f"{url}/QSEC 440?crn=91002&term=202710").status_code, 404)  # not in that term
+        self.assertEqual(self.c.get(f"{url}/QSEC 440?crn=91002&term=fall").status_code, 400)
+        # without a CRN the course rule applies and the term plays no part (a bad one is ignored, as before)
+        self.assertEqual(self.c.get(f"{url}/QSEC 440?term=fall").status_code, 200)
+        plain = self.c.get(f"{url}/QSEC 440").json()
+        self.assertEqual((plain["basis"], plain["crn"]), ("course", ""))
+
+    def test_advisor_chat_lists_sections_whose_rule_differs(self):
+        lines = advisor_chat._section_rules(advisor.get_course("QSEC 440"), TERM)
+        self.assertEqual(lines, ["  section 02 (CRN 91002) lists QSEC 201; the course lists QSEC 301",
+                                 "  section 03 (CRN 91003) lists QSEC 301 and QSEC 350; the course lists QSEC 301"])
+
+
 if __name__ == "__main__":
     unittest.main()

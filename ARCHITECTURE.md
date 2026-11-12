@@ -192,7 +192,7 @@ MathLab exposes Desmos-equivalent graphing and analysis tools with three modular
 
 ### 3.3 Course Advisor & Degree Audit Data Contracts
 - **Prerequisite CNF Tree (`prereq_tree`)**: Prerequisites are parsed into Conjunctive Normal Form (AND of OR-choice groups): `List[List[str]]` (e.g. `[["CSCI 141"], ["MATH 111", "MATH 131"]]`). Satisfaction requires at least one course in each inner OR-clause to have a passing grade (`PASSING`).
-- **Readiness Contract (`/api/advisor/{user_id}/readiness/{code}`)**:
+- **Readiness Contract (`/api/advisor/{user_id}/readiness/{code}?crn=&term=`)**:
   ```json
   {
     "code": "CSCI 241",
@@ -205,11 +205,20 @@ MathLab exposes Desmos-equivalent graphing and analysis tools with three modular
     "missing_codes": ["MATH 111", "MATH 131"],
     "met": false,
     "status": "met | missing | none | unknown",
-    "taken": false
+    "taken": false,
+    "basis": "course | section",
+    "crn": "",
+    "term": "202720",
+    "section_note": "",
+    "concurrent_ok": []
   }
   ```
   - `status: "none"`: Course has no prerequisites (explicit none or introductory level < 300).
-  - `status: "unknown"`: 300+ course with empty prerequisite field in catalog data; `met` evaluates to `false` preventing false-positive recommendations.
+  - `status: "unknown"`: 300+ course with empty prerequisite field in catalog data; `met` evaluates to `false` preventing false-positive recommendations. Only on `basis: "course"`.
+  - Per-section rule (`advisor.prereq_rule` / `section_rule`): PATH lists a section's own prerequisites as the first `details.restrictions` line starting `Prerequisite(s)`, and sections of one course can disagree (DATA 440: DATA 301 vs DATA 201). With `crn`, that line decides when it names a course (`basis: "section"`; `prereqs` / `prereq_codes` / `prereq_tree` are the section's, `course_prereqs` / `course_prereq_tree` the course's). A section without that line uses the course rule; one whose line names no course (e.g. "minimum score of 1 in 'Admitted to SOE-Secondary'") uses the course rule with the line in `section_note`.
+  - `concurrent_ok`: codes PATH marks "* May be taken concurrently". They stay in the CNF (before or alongside); the planning cart counts one as met when it is in the same term's primary cart (`concurrent` on its sections). Score/placement alternatives ("or minimum score of 4 in AP Calculus") are not modelled: the CNF keeps the course alternatives only.
+  - `term` defaults to the cart's default (next) term and is echoed. Errors: 400 for a malformed term or a CRN of another course, 404 for a CRN not listed in that term.
+  - Planning cart (`advisor_cart.get`): each section carries `prereq_basis`, `prereq_status` (same vocabulary), `prereq_missing`, `prereqs` (the section's text only when its CNF differs from the course's), `prereq_note`, `concurrent`, `concurrent_ok`, `score_alternative`, `grade_minimum`, `consent` (bool); the item carries `course_prereq` (the same fields for the course rule) and `sections_differ`. `prereq_missing` in `flags` is judged on the chosen section (else the course rule). Raw `details` never leave the server.
 - **Degree Audit Contract (`/api/advisor/{user_id}/degree-audit`)**:
   Computes William & Mary College Curriculum (COLL 100, 150, 200, 300, 400) and Proficiencies (Mathematics, Arts):
   ```json
@@ -527,7 +536,7 @@ The user interface is structured as seven primary modes rendered through `src/Ap
   - Academic Advisor catalog tables:
     - `catalog_courses`: Master catalog course specifications (`school`, `code` PRIMARY KEY, title, credits, description, prerequisites, prereq_codes, attributes, syllabus, `prereq_tree` JSON CNF representation).
     - `completed_courses`: Student academic records (`user_id`, `code` PRIMARY KEY, title, grade, term).
-    - `catalog_sections`: Scheduled course offerings per term (`school`, `term`, `crn` PRIMARY KEY, `code`, section, title, instructor, meeting times, schedule type, seats, status, credits). Indexed on `(school, code)` and `(school, term)` for sub-millisecond section lookups. Raw schedule feeds cached under `content/catalog_cache/sections_<term>.json` (the older `classes_<term>.json` name is still read).
+    - `catalog_sections`: Scheduled course offerings per term (`school`, `term`, `crn` PRIMARY KEY, `code`, section, title, instructor, meeting times, schedule type, seats, status, credits, `details` JSON from PATH: rooms, dates, seats, `restrictions` (the section's own prerequisite line comes first), `consent`). Indexed on `(school, code)` and `(school, term)` for sub-millisecond section lookups. Raw schedule feeds cached under `content/catalog_cache/sections_<term>.json` (the older `classes_<term>.json` name is still read).
 
 ### 5.2 Background Jobs & Event Processing
 - **Queue Architecture**: An in-memory dictionary `JOBS` (capped at 100 entries) runs background coroutines via `asyncio.create_task` or threadsafe dispatch onto `MAIN_LOOP`.
