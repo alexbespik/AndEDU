@@ -39,3 +39,19 @@ SECURITY_FINDINGS*.md
 
 # Claude Code agent worktrees (temporary copies of the repo)
 /.claude/worktrees/
+
+# never publish agent, editor or assistant settings and notes: only the code the app needs
+# (secrets can end up in these, e.g. Claude Code's saved permission commands)
+.claude/
+.cursor/
+.vscode/
+.idea/
+.mcp.json
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+BUGS.md
+docs/agy-tasks/
+docs/plans/
+*HANDOFF*.md
