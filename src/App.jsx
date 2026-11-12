@@ -8,7 +8,8 @@ import CourseView from './components/CourseView';
 import ReviewSession from './components/ReviewSession';
 import DesktopKeySetup from './components/DesktopKeySetup';
 import RewardLayer, { StreakChip } from './components/Rewards';
-import { BookOpen, FlaskConical, MessageSquare, Compass } from 'lucide-react';
+import { BookOpen, FlaskConical, Compass } from 'lucide-react';
+import { TuxIcon } from './components/PenguinShadow';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
 
 // The lesson viewer, the IDE and the workspaces load on demand
@@ -495,7 +496,7 @@ export default function App() {
 
       {!panelOpen && (
         <button type="button" className={`assistant-fab${mode === 'code' || mode === 'class' ? ' fab-left' : ''}`} onClick={() => setPanelOpen(true)} aria-label={agyCli ? 'Ask AGY' : 'Open the assistant'}>
-          <MessageSquare size={20} aria-hidden="true" /><span>{agyCli ? 'Ask AGY' : 'Assistant'}</span>
+          <TuxIcon size={22} /><span>{agyCli ? 'Ask AGY' : 'Assistant'}</span>
         </button>
       )}
       {pendingNav && (
