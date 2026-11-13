@@ -24,10 +24,12 @@ class LocalAccountsMixin:
     Goes before the TestCase in the bases, so a server-mode case's setUp (which turns AUTH_REQUIRED on) is undone."""
     def setUp(self):
         self._account_flags = (server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS)
-        self._key_state = (userkeys.SCRYPT_N, userkeys.DEVICE_KEY, dict(userkeys.UNLOCKED), dict(server._login_failures))
+        self._key_state = (userkeys.SCRYPT_N, userkeys.DEVICE_KEY, dict(userkeys.UNLOCKED), dict(server._login_failures),
+                           userkeys.client_factory, dict(userkeys.HANDLES), dict(userkeys.KEY_STATE))
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, True
         userkeys.SCRYPT_N, userkeys.DEVICE_KEY = TEST_SCRYPT_N, os.urandom(32)
-        userkeys.UNLOCKED.clear()
+        for held in (userkeys.UNLOCKED, userkeys.HANDLES, userkeys.KEY_STATE):
+            held.clear()
         server._login_failures.clear()
         # check_key swallows network errors ("unverified"), so the offline guard alone would not catch a missed mock
         self._no_key_check = mock.patch.object(userkeys, "check_key", side_effect=AssertionError("mock userkeys.check_key"))
@@ -41,9 +43,10 @@ class LocalAccountsMixin:
         finally:
             self._no_key_check.stop()
             server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = self._account_flags
-            userkeys.SCRYPT_N, userkeys.DEVICE_KEY, unlocked, failures = self._key_state
-            userkeys.UNLOCKED.clear()
-            userkeys.UNLOCKED.update(unlocked)
+            userkeys.SCRYPT_N, userkeys.DEVICE_KEY, unlocked, failures, userkeys.client_factory, handles, states = self._key_state
+            for held, saved in ((userkeys.UNLOCKED, unlocked), (userkeys.HANDLES, handles), (userkeys.KEY_STATE, states)):
+                held.clear()
+                held.update(saved)
             server._login_failures.clear()
             server._login_failures.update(failures)
 

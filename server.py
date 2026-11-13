@@ -57,7 +57,7 @@ elif not _ENV_CHOICE:
 
 api_key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
 GEMINI_HTTP = types.HttpOptions(timeout=120_000)  # ms: a hung model call must not hold a worker forever
-client = genai.Client(api_key=api_key, http_options=GEMINI_HTTP) if api_key else None
+client = None  # the env key's client, built below unless accounts on this computer bring their own keys
 
 app = FastAPI(title="&.edu Backend")
 
@@ -97,6 +97,12 @@ LOCAL_PUBLIC_API = {"/api/auth/profiles", "/api/auth/forgot-delete"}  # the sign
 def public_paths() -> set:
     """API paths that answer without signing in."""
     return PUBLIC_API | LOCAL_PUBLIC_API if local_mode() else PUBLIC_API
+
+
+if api_key and not local_mode():  # accounts on this computer never build or read the env key's client (ACCOUNTS.md trap 2)
+    client = genai.Client(api_key=api_key, http_options=GEMINI_HTTP)
+userkeys.client_factory = lambda key: genai.Client(api_key=key, http_options=GEMINI_HTTP)
+
 PRIVACY_VERSION = "2026-11-07"  # the privacy notice's version; a sign-in reports whether the user accepted this one
 CURRENT_USER: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("current_user", default=None)
 CLIENT_KEY: "contextvars.ContextVar[str]" = contextvars.ContextVar("client_key", default="local")
@@ -172,9 +178,24 @@ def idle_lock(user_id: str, path: str) -> bool:
 
 
 def lock_account(user_id: str):
-    """Forgets the account's unlocked key and ends its sessions on this computer."""
-    userkeys.UNLOCKED.pop(user_id, None)
+    """Forgets the account's unlocked key and ends its sessions on this computer. Jobs already running finish on
+    their lease of the key (userkeys.KEY_LEASE_GRACE_S)."""
+    userkeys.forget(user_id)
     db.end_user_sessions(user_id)
+
+# A model call with no key to spend (accounts on this computer): JSON with a `code` the UI acts on, instead of a 500.
+# 409 when the account has no Gemini key unlocked (the UI offers the key form), 401 when a job's account locked long
+# ago (sign in again). A nested `detail` dict would reach the browser as "[object Object]" (ACCOUNTS.md trap 7).
+KEY_ERROR_CODES = {userkeys.NoGeminiKey: (409, "gemini_key_missing"), userkeys.KeyLocked: (401, "key_locked")}
+
+
+async def key_error_response(request, exc):
+    from fastapi.responses import JSONResponse
+    status, code = KEY_ERROR_CODES[type(exc)]
+    return JSONResponse({"detail": friendly_ai_error(exc), "code": code}, status_code=status)
+
+for _key_error in KEY_ERROR_CODES:
+    app.add_exception_handler(_key_error, key_error_response)
 
 @app.middleware("http")
 async def reject_foreign_hosts(request, call_next):
@@ -287,8 +308,20 @@ _budget = {"day": "", "used": 0, "users": {}}
 USER_DAILY_MODEL_CALLS = int(os.environ.get("SCIEDU_USER_DAILY_MODEL_CALLS", str(DAILY_MODEL_CALLS // 2)))
 _budget_lock = threading.Lock()
 
-def spend_model_call():
+def spend_model_call(state=None):
+    """Counts one model request. Accounts on this computer: against the key's own daily budget (`state`, the key's
+    KEY_STATE entry; default: the key of this request or job)."""
     today = time.strftime("%Y-%m-%d")
+    if local_mode():
+        budget = (state if state is not None else _key_handle()[1])["budget"]
+        with _budget_lock:
+            if budget["day"] != today:
+                budget.update(day=today, used=0)
+            if DAILY_MODEL_CALLS > 0 and budget["used"] >= DAILY_MODEL_CALLS:
+                raise RuntimeError(f"Daily model budget reached for your Gemini key ({DAILY_MODEL_CALLS} requests). "
+                                   "It resets at midnight.")
+            budget["used"] += 1
+        return
     with _budget_lock:
         if _budget["day"] != today:
             _budget.update(day=today, used=0, users={})
@@ -312,8 +345,10 @@ def models_for(role: Optional[str]) -> List[str]:
 GROUNDING_PAUSED_UNTIL = 0.0  # after a grounding quota error, skip search for a while instead of failing every check
 
 
-def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], allow_search: bool = True) -> Tuple[types.GenerateContentConfig, bool]:
-    global GROUNDING_PAUSED_UNTIL
+def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], allow_search: bool = True,
+                         state=None) -> Tuple[types.GenerateContentConfig, bool]:
+    """`state`: the key's model state (default: this request's key), whose grounding pause turns search off."""
+    state = _key_handle()[1] if state is None else state
     if orig_config is None:
         cfg = types.GenerateContentConfig()
     else:
@@ -333,7 +368,7 @@ def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], all
     fn_mode = getattr(fn_calling_cfg, "mode", None)
     mode_str = str(fn_mode).upper() if fn_mode is not None else ""
     is_fn_forced = mode_str in ("ANY", "REQUIRED", "1", "2") or "ANY" in mode_str or "REQUIRED" in mode_str
-    search_paused = time.time() < GROUNDING_PAUSED_UNTIL
+    search_paused = time.time() < state["grounding_paused_until"]
 
     existing_tools = list(getattr(cfg, "tools", []) or [])
     has_custom_tools = any(getattr(t, "function_declarations", None) or getattr(t, "code_execution", None) or (not getattr(t, "google_search", None)) for t in existing_tools)
@@ -360,33 +395,77 @@ def _is_bad_key(e: Exception) -> bool:
     return userkeys.is_bad_key_text(str(e), getattr(e, "code", None))
 
 
-def _key_rejected(e: Exception):
+class _EnvKeyState:
+    """The env key's model state, keyed like a userkeys.KEY_STATE entry: the globals MODEL_COOLDOWN,
+    GROUNDING_PAUSED_UNTIL, GEMINI_KEY_INVALID and _budget, looked up at each access (tests patch them)."""
+    _NAMES = {"cooldown": "MODEL_COOLDOWN", "grounding_paused_until": "GROUNDING_PAUSED_UNTIL",
+              "invalid": "GEMINI_KEY_INVALID", "budget": "_budget"}
+
+    def __getitem__(self, name):
+        return globals()[self._NAMES[name]]
+
+    def __setitem__(self, name, value):
+        globals()[self._NAMES[name]] = value
+
+
+class _EnvKeyHandle:
+    """No accounts, or server accounts: the one key from GEMINI_API_KEY / api_KEY, behind the same interface as an
+    account's userkeys.KeyHandle."""
+    user_id = None
+    key_id = "env"
+    revoked_at = None
+
+    @property
+    def client(self):
+        global client
+        if client is None:
+            key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
+            if key:
+                client = genai.Client(api_key=key, http_options=GEMINI_HTTP)
+            else:
+                raise RuntimeError("Gemini API key is not configured in .env")
+        return client
+
+
+ENV_KEY, _ENV_STATE = _EnvKeyHandle(), _EnvKeyState()
+
+
+def _key_handle():
+    """(handle, model state) of the key this call spends. Accounts on this computer: the job's lease (ACTIVE_KEY) or
+    the signed-in account's unlocked key; NoGeminiKey without one, KeyLocked once a lease outlived its grace."""
+    if not local_mode():
+        return ENV_KEY, _ENV_STATE
+    h = userkeys.ACTIVE_KEY.get() or userkeys.handle_for((CURRENT_USER.get() or {}).get("id"))
+    h = userkeys.usable(h)
+    return h, userkeys.key_state(h.key_id)
+
+
+def _key_rejected(e: Exception, h=ENV_KEY, state=None):
     """Every model would fail the same way, so stop here instead of spending a call per fallback model."""
-    global GEMINI_KEY_INVALID
-    if not GEMINI_KEY_INVALID and not AUTH_REQUIRED:
-        emit_event("GEMINI_KEY_INVALID", {})  # the desktop app asks for a new key
-    GEMINI_KEY_INVALID = True
+    state = _ENV_STATE if state is None else state
+    if not state["invalid"]:
+        if local_mode():  # only the accounts holding this key are asked for a new one
+            for owner in {h.user_id} | {uid for uid, other in list(userkeys.HANDLES.items()) if other.key_id == h.key_id}:
+                emit_event("GEMINI_KEY_INVALID", {}, owner=owner)
+        elif not AUTH_REQUIRED:
+            emit_event("GEMINI_KEY_INVALID", {})  # the desktop app asks for a new key
+    state["invalid"] = True
     raise RuntimeError("Google rejected the Gemini API key. Add a working key and try again.") from e
 
 
-def _key_ok(resp):
-    global GEMINI_KEY_INVALID
-    GEMINI_KEY_INVALID = False
+def _key_ok(resp, state=None):
+    (_ENV_STATE if state is None else state)["invalid"] = False
     return resp
 
 
 def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = True, **kwargs):
-    """Invokes Gemini with automatic model fallback for 429 quota, 503 load, and 404 deprecations."""
-    global client, GROUNDING_PAUSED_UNTIL
-    if client is None:
-        key = os.environ.get("api_KEY", os.environ.get("GEMINI_API_KEY"))
-        if key:
-            client = genai.Client(api_key=key, http_options=GEMINI_HTTP)
-        else:
-            raise RuntimeError("Gemini API key is not configured in .env")
+    """Invokes Gemini with automatic model fallback for 429 quota, 503 load, and 404 deprecations.
+    Cooldowns, the grounding pause, the invalid flag and the budget belong to the key in use (_key_handle)."""
+    h, state = _key_handle()
+    cl = h.client
 
     raw_config = kwargs.get("config")
-    cfg, search_injected = _prepare_call_config(raw_config, allow_search=True)
+    cfg, search_injected = _prepare_call_config(raw_config, allow_search=True, state=state)
     call_kwargs = dict(kwargs)
     call_kwargs["config"] = cfg
 
@@ -394,37 +473,38 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
     now = time.time()
     candidates = models_for(role)
     # skip models still cooling down from a quota/overload error, unless every model is
-    ready = [m for m in candidates if MODEL_COOLDOWN.get(m, 0) <= now] or candidates
+    cooldown = state["cooldown"]
+    ready = [m for m in candidates if cooldown.get(m, 0) <= now] or candidates
     for model_id in ready:
-        spend_model_call()  # every attempt counts, fallbacks included
+        spend_model_call(state)  # every attempt counts, fallbacks included
         try:
-            return _key_ok(client.models.generate_content(
+            return _key_ok(cl.models.generate_content(
                 model=model_id,
                 contents=contents,
                 **call_kwargs
-            ))
+            ), state)
         except ClientError as e:
             if _is_bad_key(e):
-                _key_rejected(e)  # before the grounding retry below, which also catches 400
+                _key_rejected(e, h, state)  # before the grounding retry below, which also catches 400
             last_err = e
             err_str = str(e).lower()
             code = getattr(e, "code", None)
 
             # Circuit breaker: On 429 quota or tool conflict, pause search and retry ungrounded immediately
             if search_injected and (code in (429, 400) or "quota" in err_str or "tool" in err_str or "search" in err_str or "conflict" in err_str or "grounding" in err_str):
-                GROUNDING_PAUSED_UNTIL = time.time() + 1800
-                ungrounded_cfg, _ = _prepare_call_config(raw_config, allow_search=False)
+                state["grounding_paused_until"] = time.time() + 1800
+                ungrounded_cfg, _ = _prepare_call_config(raw_config, allow_search=False, state=state)
                 call_kwargs["config"] = ungrounded_cfg
                 search_injected = False
                 try:
-                    return _key_ok(client.models.generate_content(
+                    return _key_ok(cl.models.generate_content(
                         model=model_id,
                         contents=contents,
                         **call_kwargs
-                    ))
+                    ), state)
                 except Exception as retry_err:
                     if _is_bad_key(retry_err):
-                        _key_rejected(retry_err)
+                        _key_rejected(retry_err, h, state)
                     last_err = retry_err
                     err_str = str(retry_err).lower()
                     code = getattr(retry_err, "code", None)
@@ -434,33 +514,33 @@ def call_gemini(contents, role: Optional[str] = None, track_cooldown: bool = Tru
                     pass  # e.g. a search-grounding quota: says nothing about plain generation on this model
                 elif code == 429 or "quota" in err_str:
                     delay = re.search(r"retrydelay'?:\s*'?(\d+)", err_str)
-                    MODEL_COOLDOWN[model_id] = time.time() + min(float(delay.group(1)) if delay else 60.0, 6 * 3600)
+                    cooldown[model_id] = time.time() + min(float(delay.group(1)) if delay else 60.0, 6 * 3600)
                 elif code == 404:
-                    MODEL_COOLDOWN[model_id] = time.time() + 24 * 3600
+                    cooldown[model_id] = time.time() + 24 * 3600
                 elif code == 503:
-                    MODEL_COOLDOWN[model_id] = time.time() + 30
+                    cooldown[model_id] = time.time() + 30
                 print(f"[MODEL FALLBACK] Model {model_id} returned code {code or 'unknown'}, attempting fallback...")
                 continue
             raise e
         except Exception as e:
             if _is_bad_key(e):
-                _key_rejected(e)
+                _key_rejected(e, h, state)
             last_err = e
             err_str = str(e).lower()
             if search_injected and ("quota" in err_str or "tool" in err_str or "search" in err_str or "conflict" in err_str or "grounding" in err_str):
-                GROUNDING_PAUSED_UNTIL = time.time() + 1800
-                ungrounded_cfg, _ = _prepare_call_config(raw_config, allow_search=False)
+                state["grounding_paused_until"] = time.time() + 1800
+                ungrounded_cfg, _ = _prepare_call_config(raw_config, allow_search=False, state=state)
                 call_kwargs["config"] = ungrounded_cfg
                 search_injected = False
                 try:
-                    return _key_ok(client.models.generate_content(
+                    return _key_ok(cl.models.generate_content(
                         model=model_id,
                         contents=contents,
                         **call_kwargs
-                    ))
+                    ), state)
                 except Exception as retry_err:
                     if _is_bad_key(retry_err):
-                        _key_rejected(retry_err)
+                        _key_rejected(retry_err, h, state)
                     last_err = retry_err
                     err_str = str(retry_err).lower()
             if "quota" in err_str or "429" in err_str or "resource_exhausted" in err_str:
@@ -1955,6 +2035,8 @@ async def generate_curriculum(payload: GeneratePayload):
         print("[WARNING generate_curriculum]: Gemini did not invoke build_curriculum, using fallback.")
         fallback = copy.deepcopy(DEFAULT_MATH_CURRICULUM if is_math else DEFAULT_MULTI_CHAPTER_CURRICULUM)
         return normalize_curriculum_data(fallback, default_level=level)
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print("[ERROR generate_curriculum, returning robust default curriculum]:", e)
         fallback_data = copy.deepcopy(DEFAULT_MATH_CURRICULUM if is_math else DEFAULT_MULTI_CHAPTER_CURRICULUM)
@@ -2144,6 +2226,8 @@ async def upload_multimodal(
                 try:
                     response = await acall_gemini(contents=[img_part, prompt])
                     text_content = response.text or ""
+                except userkeys.KEY_ERRORS:
+                    raise
                 except Exception as e:
                     print(f"[ERROR upload_multimodal image {filename!r:.80}]: {type(e).__name__} ({len(file_bytes)} bytes)")
                     text_content = f"[Image uploaded: {filename}]"
@@ -2158,6 +2242,8 @@ async def upload_multimodal(
                         response = await acall_gemini(contents=[pdf_part, "Transcribe every page of this document: all text, "
                             "equations in LaTeX ($...$), tables as Markdown, and describe each diagram in one sentence."])
                         text_content = (response.text or "").strip() or text_content
+                    except userkeys.KEY_ERRORS:
+                        raise
                     except Exception as e:
                         print(f"[OCR fallback failed for {filename!r:.80}]: {type(e).__name__} ({len(file_bytes)} bytes)")
 
@@ -2165,6 +2251,8 @@ async def upload_multimodal(
             processed_names.append(filename)
             files_meta.append({"filename": filename, "extracted_text": text_content})
         except HTTPException:
+            raise
+        except userkeys.KEY_ERRORS:
             raise
         except Exception as e:
             print(f"[ERROR parsing file {f.filename!r:.80}]: {type(e).__name__}")  # never the content or a parser message quoting it
@@ -2343,6 +2431,8 @@ async def tutor_chat(payload: ChatPayload):
             reply_text = "I am reviewing your reasoning. Reflect on the structural invariant: what boundary condition must be preserved?"
 
         return {"reply": reply_text.strip()}
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print("[ERROR tutor_chat]:", e)
         # Socratic rule-based fallback when offline or API encounters error
@@ -2397,6 +2487,8 @@ async def tutor_brief(payload: BriefPayload):
         if not text:
             raise ValueError("Empty briefing from model")
         return {"briefing": text}
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print("[ERROR tutor_brief]:", e)
         # Fallback local briefing (under 35 words)
@@ -2497,6 +2589,8 @@ async def generate_chapter(payload: GenerateChapterPayload):
             if call.name == "build_single_chapter":
                 ch_data = dict(call.args)
                 return normalize_chapter_data(ch_data, next_id, start_global_idx, mode)
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print("[ERROR generate_chapter]:", e)
 
@@ -2593,6 +2687,8 @@ async def generate_problem(payload: GenerateProblemPayload):
             if call.name == "build_single_problem":
                 p_data = dict(call.args)
                 return normalize_single_problem(p_data, cid, ctitle, 999, mode)
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print("[ERROR generate_problem]:", e)
 
@@ -2667,6 +2763,8 @@ async def elevenlabs_voiceover(payload: VoiceoverPayload):
     try:
         resp = await acall_gemini(contents=script_prompt)
         spoken_script = resp.text.strip()
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print("[ERROR generating professor lecture script]:", e)
         spoken_script = (
@@ -3729,16 +3827,24 @@ def _job_note(job: Dict[str, Any], text: str):
 
 
 def start_job(kind: str, label: str, work, then=None) -> Dict[str, Any]:
-    """Schedules `work(job)` (an async function) and returns the job record immediately; `then()` runs once it is done."""
+    """Schedules `work(job)` (an async function) and returns the job record immediately; `then()` runs once it is done.
+    The job runs as whoever started it; with accounts on this computer it holds a lease on their key, so it finishes
+    on that key if the account locks meanwhile (within userkeys.KEY_LEASE_GRACE_S)."""
+    user, client_key = CURRENT_USER.get(), CLIENT_KEY.get()
     job = {"id": f"job-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}", "kind": kind, "label": label,
            "status": "queued", "step": "Queued", "progress": 0.0, "created": time.time(),
            "log": [{"at": time.time(), "step": "Queued"}],
-           "owner": (CURRENT_USER.get() or {}).get("id")}  # its progress events go to whoever started it
+           "owner": (user or {}).get("id")}  # its progress events go to whoever started it
     JOBS[job["id"]] = job
     for old in sorted(list(JOBS), key=lambda k: JOBS[k]["created"])[:-MAX_JOBS]:
         JOBS.pop(old, None)
 
     async def runner():
+        # The task inherits the starter's context; ACTIVE_KEY is set to this job's lease, not one inherited from the
+        # job that queued it. CURRENT_USER and CLIENT_KEY get the same values they inherit: set for clarity only.
+        CURRENT_USER.set(user)
+        CLIENT_KEY.set(client_key)
+        userkeys.ACTIVE_KEY.set(lease)
         _job_update(job, status="running", step="Starting")
         try:
             result = await work(job)
@@ -3748,7 +3854,9 @@ def start_job(kind: str, label: str, work, then=None) -> Dict[str, Any]:
             _job_update(job, status="error", step="Failed", error=friendly_ai_error(e))
             return
         if then:
-            then()
+            then()  # a job it queues runs on the same key (userkeys.acquire)
+
+    lease = userkeys.acquire(job["owner"]) if local_mode() else None  # the handle the job keeps (no count to release)
 
     # Sync handlers run in FastAPI's thread pool, which has no event loop: hand the job to the main loop.
     try:
@@ -3761,10 +3869,19 @@ def start_job(kind: str, label: str, work, then=None) -> Dict[str, Any]:
     task.add_done_callback(_background_tasks.discard)
     return job
 
+NO_KEY_TEXT, KEY_LOCKED_TEXT = "Add your Gemini key in the account menu.", "Sign in again to continue."
+
+
 def friendly_ai_error(e: Exception) -> str:
+    if isinstance(e, userkeys.NoGeminiKey):
+        return NO_KEY_TEXT
+    if isinstance(e, userkeys.KeyLocked):
+        return KEY_LOCKED_TEXT
     text = str(e)
     if "Daily model budget" in text:
         return text
+    if local_mode() and "rejected the Gemini API key" in text:  # not the .env advice below: the key is the account's
+        return "Google rejected your Gemini key. Add a working key in the account menu."
     if "API key" in text or "not configured" in text:
         return "No Gemini API key: add api_KEY=... to SciEdu-Studio/.env and restart the backend."
     if "429" in text or "quota" in text.lower() or "RESOURCE_EXHAUSTED" in text:
@@ -4647,6 +4764,8 @@ async def advisor_ask(user_id: str, req: AdvisorAsk):
             contents=contents, role="planner",
             config=types.GenerateContentConfig(temperature=0.3, system_instruction=advisor_chat.render_system_prompt(context)),
         )
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         raise HTTPException(status_code=503, detail=friendly_ai_error(e))
     reply = (response.text or "").strip()
@@ -4702,6 +4821,8 @@ def launch_planned_course(user_id: str, req: LaunchCourseRequest):
     try:
         job = start_plan_job(cid, n_questions=8, class_count=4)
         job_id = job.get("id")
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception:
         job_id = None
 
@@ -5053,8 +5174,14 @@ def _check_local_password(user: Dict[str, Any], password: str) -> Optional[bytes
     return kek
 
 def _unlock_entry(user_id: str, kek: Optional[bytes]) -> Dict[str, Any]:
+    """The account's UNLOCKED entry with this KEK. A sign-in while already unlocked keeps the open key, so requests
+    and jobs running meanwhile never see it gone."""
     now = time.time()
-    entry = userkeys.UNLOCKED[user_id] = {"key": None, "kek": kek, "unlocked_at": now, "last_active": now}
+    entry = userkeys.UNLOCKED.get(user_id)
+    if entry is None:
+        entry = userkeys.UNLOCKED[user_id] = {"key": None, "kek": kek, "unlocked_at": now, "last_active": now}
+    else:
+        entry.update(kek=kek, unlocked_at=now, last_active=now)
     return entry
 
 def _store_key(user_id: str, key: str, mode: str, kek: Optional[bytes], hint: Optional[str]):
@@ -5114,6 +5241,8 @@ def _local_login(req: AuthRequest, request: Request):
             raise HTTPException(status_code=401, detail="Wrong password.")
     _unlock_entry(user["id"], kek)
     key_state = _open_key(user["id"])
+    if key_state == "ok":
+        resume_for_user(user["id"])
     return {"token": db.create_session(user["id"]), "user": {"id": user["id"], "name": user["name"]},
             "privacyAccepted": True, "keyState": key_state}
 
@@ -5161,7 +5290,7 @@ def logout(request: Request):
         if (db.local_account_info(uid) or {}).get("has_password"):
             lock_account(uid)  # every window of the account signs out with its key
         else:
-            userkeys.UNLOCKED.pop(uid, None)
+            userkeys.forget(uid)
     return {"status": "signed_out"}
 
 @app.get("/api/auth/me")
@@ -5171,7 +5300,13 @@ def me():
     if local_mode() and user:
         info = db.local_account_info(user["id"]) or {}
         minutes = info.get("auto_lock_minutes")
-        out.update(hasPassword=bool(info.get("has_password")), keyState=_open_key(user["id"]),
+        key_state = _open_key(user["id"])
+        key = (userkeys.UNLOCKED.get(user["id"]) or {}).get("key")
+        state = userkeys.KEY_STATE.get(userkeys.key_id(key), {}) if key else {}
+        budget = state.get("budget") or {}
+        used = budget.get("used", 0) if budget.get("day") == time.strftime("%Y-%m-%d") else 0
+        out.update(hasPassword=bool(info.get("has_password")), keyState=key_state, keyInvalid=bool(state.get("invalid")),
+                   modelCallsLeft=max(0, DAILY_MODEL_CALLS - used) if key and DAILY_MODEL_CALLS > 0 else None,
                    autoLockMin=AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes, isAdmin=db.is_local_admin(user["id"]))
     return out
 
@@ -5238,6 +5373,7 @@ def change_password(body: PasswordChangeRequest, request: Request):
                           "without a password. Add the key again from the account menu." if key else
                           "Your saved Gemini key could not be opened and was removed. Add it again from the account menu.")
         key = None
+        userkeys.revoke(uid, hard=True)
     entry = userkeys.UNLOCKED.get(uid) or _unlock_entry(uid, kek)
     entry.update(kek=kek, key=key)
     out["keyState"] = "ok" if key else "none"
@@ -5302,7 +5438,9 @@ def put_my_gemini_key(body: GeminiKeyRequest):
         raise HTTPException(status_code=409, detail="Sign in again to save your key." if has_password else
                             "This computer cannot lock a key for an account without a password yet. Set a password first.")
     _store_key(uid, key, mode, kek, key[-4:])
+    userkeys.revoke(uid)  # jobs on the old key finish within the grace; new calls use this one
     (entry or _unlock_entry(uid, kek))["key"] = key
+    resume_for_user(uid)
     return {"status": "saved", "verified": verdict == "ok", "keyState": "ok", "hint": key[-4:]}
 
 @app.delete("/api/me/gemini-key")
@@ -5310,8 +5448,10 @@ def delete_my_gemini_key():
     require_local_accounts()
     uid = CURRENT_USER.get()["id"]
     removed = db.delete_secret(uid, GEMINI_SECRET)
+    userkeys.revoke(uid, hard=True)  # running jobs stop at their next model call
     if uid in userkeys.UNLOCKED:
         userkeys.UNLOCKED[uid]["key"] = None
+    userkeys.revoke(uid, hard=True)  # again: a request in between may have made a fresh handle from the old key
     return {"status": "removed" if removed else "none", "keyState": "none"}
 
 # ---------------------------------------------------------------- privacy: consent, export, delete (PRIVACY_AND_DEPLOYMENT.md §3)
@@ -5472,7 +5612,7 @@ def delete_account(body: DeleteAccountRequest, request: Request, user_id: Option
 def delete_user_everything(user_id: str) -> Dict[str, int]:
     """The deletion itself, after the caller confirmed who asks: files, rows, quiz log lines, jobs, events and the
     unlocked key. Returns what was removed."""
-    userkeys.UNLOCKED.pop(user_id, None)
+    userkeys.forget(user_id, hard=True)  # its running jobs stop at their next model call
     course_ids = db.user_course_ids(user_id)
     topic_ids = set(db.user_topic_ids(course_ids))
     files = course_topic_files(course_ids)
@@ -6020,8 +6160,8 @@ GROUNDING_NOTE = ("\nUse Google Search to confirm facts, constants and standard 
 async def grounded_json(prompt: str) -> Tuple[Any, List[Dict[str, str]]]:
     """Gemini with Google Search grounding. JSON mode can't be combined with search, so the JSON is cut
     out of the text reply; the pages the model actually used come from grounding metadata, never from its text."""
-    global GROUNDING_PAUSED_UNTIL
-    if time.time() < GROUNDING_PAUSED_UNTIL:
+    state = _key_handle()[1]  # the pause belongs to the key in use
+    if time.time() < state["grounding_paused_until"]:
         raise RuntimeError("search grounding paused after a quota error")
     try:
         response = await acall_gemini(
@@ -6029,7 +6169,7 @@ async def grounded_json(prompt: str) -> Tuple[Any, List[Dict[str, str]]]:
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())], temperature=0.1),
         )
     except Exception:
-        GROUNDING_PAUSED_UNTIL = time.time() + 3600
+        state["grounding_paused_until"] = time.time() + 3600
         raise
     text = response.text or ""
     start, end = text.find("{"), text.rfind("}")
@@ -6059,11 +6199,15 @@ async def verify_questions(questions: List[Dict[str, Any]], context: str, keep_m
     if GROUNDED_CHECKS:
         try:
             data, sources = await grounded_json(prompt + GROUNDING_NOTE)
+        except userkeys.KEY_ERRORS:
+            raise
         except Exception as e:
             print(f"[verify] grounded check unavailable, using offline check: {friendly_ai_error(e)}")
     if data is None:
         try:
             data = await gemini_json(prompt, temperature=0.1, role="planner")
+        except userkeys.KEY_ERRORS:
+            raise
         except Exception as e:
             print(f"[verify] skipped: {e}")
             return questions
@@ -6167,7 +6311,8 @@ def release_next_class(course_id: str) -> bool:
     return True
 
 async def resume_course_generation():
-    """Classes interrupted by a restart pick up where they stopped."""
+    """Classes interrupted by a restart pick up where they stopped. Accounts on this computer: no key is unlocked at
+    boot, so each account's work resumes when it signs in (resume_for_user)."""
     global MAIN_LOOP, PURGE_TASK
     MAIN_LOOP = asyncio.get_running_loop()
     db.init_db()
@@ -6176,12 +6321,40 @@ async def resume_course_generation():
     if AUTH_REQUIRED:
         warn_unknown_admins()
     db.reset_stuck_classes()
-    for course in db.interrupted_planning():  # planning jobs die with the process: redo them from stored materials
-        start_plan_job(course["id"], course.get("plan_questions") or 8, course.get("plan_classes"))
+    if not local_mode():
+        for course in db.interrupted_planning():  # planning jobs die with the process: redo them from stored materials
+            start_plan_job(course["id"], course.get("plan_questions") or 8, course.get("plan_classes"))
     import_topic_files_into_db()
-    for course_id in db.courses_with_pending_classes():
-        queue_course_generation(course_id)
+    if not local_mode():
+        for course_id in db.courses_with_pending_classes():
+            queue_course_generation(course_id)
     PURGE_TASK = asyncio.create_task(purge_cleared_loop())
+
+def resume_for_user(user_id: str):
+    """Accounts on this computer, once the account's key is unlocked (sign-in, a key saved): its planning and class
+    jobs interrupted by a restart, or failed for want of a key, start again as that user and on their key.
+    start_plan_job and queue_course_generation start at most one job per course, so a second window starts nothing."""
+    if not local_mode() or MAIN_LOOP is None:
+        return
+    user = db.get_user(user_id)
+    if not user:
+        return
+    token = CURRENT_USER.set(user)
+    try:
+        for course in db.interrupted_planning(user_id=user_id):
+            start_plan_job(course["id"], course.get("plan_questions") or 8, course.get("plan_classes"))
+        for course_id in db.courses_with_pending_classes(user_id=user_id):
+            queue_course_generation(course_id)
+        # work started without a key (or after a long lock) failed with one of these: it goes on now that one is here
+        for course in db.courses_failed_with(user_id, (NO_KEY_TEXT, KEY_LOCKED_TEXT)):
+            try:
+                _resume_course(course)
+            except HTTPException as e:
+                print(f"[resume] course {course['id']} left as it is: {e.detail}")
+    except Exception as e:  # sign-in or a saved key still succeeds; the courses can be resumed by hand
+        print(f"[resume] stopped: {type(e).__name__}")
+    finally:
+        CURRENT_USER.reset(token)
 
 def delete_course_fully(course_id: str) -> int:
     """A course and everything made for it: topic files, notes, lesson snapshots, then the row (classes cascade).
@@ -6317,8 +6490,12 @@ def start_plan_job(course_id: str, n_questions: int, class_count: Optional[int])
         if course and course.get("mode") == "problem_sprint" and db.list_classes(course_id):
             queue_course_generation(course_id)
 
-    job = start_job("plan", "Diagnostic & syllabus", work, then=write_sprint)
-    ACTIVE_COURSE_JOBS[course_id] = job["id"]
+    with _course_queue_lock:  # check-and-start, as in queue_course_generation: one job per course
+        running = ACTIVE_COURSE_JOBS.get(course_id)
+        if running and JOBS.get(running, {}).get("status") in ("queued", "running"):
+            return JOBS[running]
+        job = start_job("plan", "Diagnostic & syllabus", work, then=write_sprint)
+        ACTIVE_COURSE_JOBS[course_id] = job["id"]
     db.update_course(course_id, job_id=job["id"])
     return job
 
@@ -6424,7 +6601,11 @@ def skip_diagnostic(course_id: str):
 @app.post("/api/courses/{course_id}/resume")
 def resume_course(course_id: str):
     rate_limit("class")
-    course = require_not_cleared(require_course(course_id))
+    return _resume_course(require_not_cleared(require_course(course_id)))
+
+def _resume_course(course: Dict[str, Any]):
+    """Re-plans a course that never got its plan, else writes its pending and failed classes."""
+    course_id = course["id"]
     running = ACTIVE_COURSE_JOBS.get(course_id) or course.get("job_id")
     if running and JOBS.get(running, {}).get("status") in ("queued", "running"):
         raise HTTPException(status_code=409, detail="This course is already being worked on.")
@@ -6626,6 +6807,8 @@ async def lesson_tutor(req: LessonTutorRequest):
         )
         return {"reply": (response.text or "").strip() or "Tell me which step you're on, and what you expected to happen."}
     except HTTPException:
+        raise
+    except userkeys.KEY_ERRORS:
         raise
     except Exception as e:
         raise HTTPException(status_code=503, detail=friendly_ai_error(e))
@@ -7014,6 +7197,8 @@ async def language_roleplay(req: LanguageRoleplayRequest):
                 "corrections": corrections,
             }
         print("[roleplay] model reply had no reply/feedback; using the scripted partner")
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception as e:
         print(f"[roleplay] model unavailable, using the scripted partner: {friendly_ai_error(e)}")
     return {**_get_roleplay_fallback(req.scenario, req.target_lang, req.user_message, req.history or [], req.level or "A2"),
@@ -7066,6 +7251,8 @@ async def explain_answer(req: ExplainAnswerRequest):
                 "key_rule": str(data.get("key_rule", "")),
                 "example": str(data.get("example", ""))
             }
+    except userkeys.KEY_ERRORS:
+        raise
     except Exception:
         pass
     return _explain_answer_fallback(req)
@@ -7566,6 +7753,8 @@ async def post_user_prompt(data: AgyPromptModel):
                 except Exception:
                     pass
 
+        except userkeys.KEY_ERRORS:
+            raise
         except Exception as e:
             print("[ERROR agy prompt Gemini call with tools]:", e)
             reply_content = f"{friendly_ai_error(e)}"
@@ -7613,11 +7802,13 @@ def get_status():
     return {
         "status": "online",
         "topic_count": len(list(TOPICS_DIR.glob("*.json"))),
-        "gemini_configured": bool(os.environ.get("api_KEY") or os.environ.get("GEMINI_API_KEY")),
-        "gemini_key_invalid": GEMINI_KEY_INVALID and not AUTH_REQUIRED,  # the desktop app shows its key card again
+        # accounts on this computer: each account's key state is in /api/auth/me (keyState, keyInvalid), not here
+        "gemini_configured": bool(os.environ.get("api_KEY") or os.environ.get("GEMINI_API_KEY")) and not local_mode(),
+        "gemini_key_invalid": GEMINI_KEY_INVALID and not AUTH_REQUIRED and not local_mode(),  # the desktop app shows its key card again
         "agy_cli_enabled": agy_cli_allowed(),
         "agy_runs_left_today": max(0, AGY_DAILY_RUNS - (_agy_runs["used"] if _agy_runs["day"] == time.strftime("%Y-%m-%d") else 0)),
-        "model_calls_left_today": max(0, DAILY_MODEL_CALLS - (_budget["used"] if _budget["day"] == time.strftime("%Y-%m-%d") else 0)),
+        "model_calls_left_today": None if local_mode() else  # per key: /api/auth/me modelCallsLeft
+            max(0, DAILY_MODEL_CALLS - (_budget["used"] if _budget["day"] == time.strftime("%Y-%m-%d") else 0)),
         "elevenlabs_enabled": ELEVENLABS_ENABLED,
         "active_jobs": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running")),
         "event_cursor": _event_seq,

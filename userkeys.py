@@ -8,14 +8,21 @@ Google before it is saved.
 - Password mode: the KEK from the password. Device mode (accounts without a password): DEVICE_KEY, a 32-byte key the
   desktop app keeps in the OS keychain; None until the app hands it over, and then device mode refuses.
 - The AAD binds each sealed secret to its row: f"{user_id}|{kind}|{mode}".
+- Each unlocked key gets a KeyHandle (its own Gemini client) and per-key model state in KEY_STATE (cooldowns, grounding
+  pause, invalid flag, daily budget). A job keeps the handle of whoever started it (its lease, in ACTIVE_KEY), so a job
+  running when its account locks or signs out finishes on that key within KEY_LEASE_GRACE_S. Deleting the key or the
+  account stops it at the next call (a hard revoke).
 """
+import contextvars
 import hashlib
 import hmac
 import os
 import re
 import secrets
 import threading
-from typing import Any, Dict, Optional, Tuple
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import httpx
 from cryptography.exceptions import InvalidTag
@@ -40,6 +47,20 @@ API_DISABLED_RE = re.compile(r"service_disabled|has not been used in project", r
 _DISABLED_ANSWER_RE = re.compile(API_DISABLED_RE.pattern + r"|is disabled", re.I)
 
 KEY_CHECK_URL = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
+
+
+KEY_LEASE_GRACE_S = 1800  # a job may finish on a locked account's key for this long after the lock
+
+
+class NoGeminiKey(Exception):
+    """The signed-in account (or the job's owner) has no Gemini key unlocked here."""
+
+
+class KeyLocked(Exception):
+    """The job's account locked longer than KEY_LEASE_GRACE_S ago: its key is gone until it signs in again."""
+
+
+KEY_ERRORS = (NoGeminiKey, KeyLocked)  # model calls that could not start: the API answers them with a `code`
 
 
 class KeyUnavailable(Exception):
@@ -149,3 +170,90 @@ def check_key(key: str) -> str:
     except Exception:
         return "unverified"  # offline or timed out: save it unverified, the first real call tells
     return classify_key_response(r.status_code, r.text)
+
+
+# ---- unlocked keys: handles, per-key state, leases ----
+@dataclass(eq=False)
+class KeyHandle:
+    user_id: Optional[str]
+    key_id: str  # sha256(key)[:16]: names the key's state without keeping the key itself here
+    client: Any
+    revoked_at: Optional[float] = None
+    hard: bool = False  # revoked because the key or the account was deleted: no grace
+
+
+client_factory: Optional[Callable[[str], Any]] = None  # key -> Gemini client; server sets it, tests inject fakes
+HANDLES: Dict[str, KeyHandle] = {}  # user id -> handle of the key in UNLOCKED[user id]["key"]
+KEY_STATE: Dict[str, Dict[str, Any]] = {}  # key id -> {cooldown{}, grounding_paused_until, invalid, budget{day, used}}
+ACTIVE_KEY: "contextvars.ContextVar[Optional[KeyHandle]]" = contextvars.ContextVar("active_key", default=None)
+_handles_lock = threading.Lock()
+
+
+def key_id(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def key_state(kid: str) -> Dict[str, Any]:
+    with _handles_lock:
+        return KEY_STATE.setdefault(kid, {"cooldown": {}, "grounding_paused_until": 0.0, "invalid": False,
+                                          "budget": {"day": "", "used": 0}})
+
+
+def handle_for(user_id: Optional[str]) -> Optional[KeyHandle]:
+    """The handle of the account's unlocked key (made on first use), or None. A replaced key revokes the old handle."""
+    key = (UNLOCKED.get(user_id or "") or {}).get("key")
+    with _handles_lock:
+        h = HANDLES.get(user_id or "")
+        if h and key and h.key_id == key_id(key):
+            return h
+        if h:
+            HANDLES.pop(user_id, None)
+            h.revoked_at = h.revoked_at or time.time()
+        if not key:
+            return None
+        if client_factory is None:
+            raise NoGeminiKey("no Gemini client factory")
+        h = HANDLES[user_id] = KeyHandle(user_id=user_id, key_id=key_id(key), client=client_factory(key))
+        return h
+
+
+def revoke(user_id: str, hard: bool = False):
+    """The account's key handle stops. Jobs already holding it finish within KEY_LEASE_GRACE_S (lock, logout, a
+    replaced key); with hard (the key or the account deleted) they stop at their next model call."""
+    with _handles_lock:
+        h = HANDLES.pop(user_id, None)
+        if h:
+            h.revoked_at = h.revoked_at or time.time()
+            h.hard = h.hard or hard
+
+
+def forget(user_id: str, hard: bool = False):
+    """Lock, logout, delete: the unlocked key leaves memory and its handle is revoked."""
+    UNLOCKED.pop(user_id, None)
+    revoke(user_id, hard)
+
+
+def acquire(owner_id: Optional[str]) -> Optional[KeyHandle]:
+    """The lease of a job of `owner_id`: the key running this code if it is the same owner's (a job queued by a job),
+    else the owner's unlocked key. None when the owner has none."""
+    h = ACTIVE_KEY.get()
+    if h is None or h.user_id != owner_id:
+        h = handle_for(owner_id) if owner_id else None
+    return h
+
+
+def usable(h: Optional[KeyHandle]) -> KeyHandle:
+    """The handle a model call may use now. A revoked handle gives way to the owner's current one (signed in again, or
+    a new key); without one it still works within the grace, unless revoked hard. None or hard -> NoGeminiKey, past
+    the grace -> KeyLocked."""
+    if h is None:
+        raise NoGeminiKey("no Gemini key")
+    if h.revoked_at is not None:
+        fresh = handle_for(h.user_id)
+        if fresh is not None:
+            return fresh
+        if h.hard:
+            raise NoGeminiKey("Gemini key deleted")
+        if time.time() - h.revoked_at > KEY_LEASE_GRACE_S:
+            raise KeyLocked("account locked")
+    return h

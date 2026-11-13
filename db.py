@@ -504,17 +504,34 @@ def reset_stuck_classes():
     conn().commit()
 
 
-def interrupted_planning() -> List[Dict[str, Any]]:
-    """Courses whose planning job died with the process; their materials are stored, so they can be re-planned."""
-    return [_row(r) for r in conn().execute("SELECT * FROM courses WHERE status = 'planning'").fetchall()]
+def interrupted_planning(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Courses whose planning job died with the process; their materials are stored, so they can be re-planned.
+    With user_id, only that user's (accounts on this computer resume each account once it signs in)."""
+    if user_id is None:
+        rows = conn().execute("SELECT * FROM courses WHERE status = 'planning'").fetchall()
+    else:
+        rows = conn().execute("SELECT * FROM courses WHERE status = 'planning' AND user_id = ?", (user_id,)).fetchall()
+    return [_row(r) for r in rows]
 
 
-def courses_with_pending_classes() -> List[str]:
-    rows = conn().execute("""
+def courses_with_pending_classes(user_id: Optional[str] = None) -> List[str]:
+    sql = """
         SELECT DISTINCT c.id FROM courses c JOIN classes k ON k.course_id = c.id
         WHERE c.status = 'generating' AND k.status = 'pending'
-    """).fetchall()
+    """
+    rows = conn().execute(sql, ()).fetchall() if user_id is None else conn().execute(sql + " AND c.user_id = ?", (user_id,)).fetchall()
     return [r["id"] for r in rows]
+
+
+def courses_failed_with(user_id: str, texts) -> List[Dict[str, Any]]:
+    """The user's courses in 'error' whose error message contains one of these texts."""
+    texts = list(texts)
+    if not texts:
+        return []
+    where = " OR ".join("instr(error, ?) > 0" for _ in texts)
+    rows = conn().execute(f"SELECT * FROM courses WHERE user_id = ? AND status = 'error' AND ({where})",
+                          (user_id, *texts)).fetchall()
+    return [_row(r) for r in rows]
 
 
 # ---- lessons & attempts ----
