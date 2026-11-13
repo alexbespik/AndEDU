@@ -387,7 +387,7 @@ def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], all
 
 
 # Google's answer when the key itself is wrong, revoked or lacks the Gemini API: the expressions live in userkeys,
-# which also reads the test request made before a key is saved (desktop/keycheck.cjs until phase 4 removes it).
+# which also reads the test request made before a key is saved (userkeys.check_key).
 GEMINI_KEY_INVALID = False  # set when Google rejects the key mid-run, cleared by the next successful call
 
 
@@ -3268,8 +3268,14 @@ def is_admin() -> bool:
     No accounts: everyone."""
     me = CURRENT_USER.get()
     if local_mode():
-        return bool(me and db.is_local_admin(me["id"]))
+        return bool(me and _local_admin(me["id"]))
     return not AUTH_REQUIRED or bool(me and me.get("id") in ADMINS)
+
+def not_admin(detail: str) -> HTTPException:
+    """The 403 of an admin-only action. While the saved-key offer waits, nobody is the admin yet: say so."""
+    if admin_election_waits():
+        detail += " Answer the offer of the key saved on this computer first (account menu): until then nobody is the admin."
+    return HTTPException(status_code=403, detail=detail)
 
 def warn_unknown_admins():
     for entry in sorted(ADMINS):
@@ -3294,7 +3300,7 @@ def require_topic_write(topic_id: str, incoming: Optional[Dict[str, Any]] = None
             if not (course and me and course["user_id"] == me["id"]):
                 raise HTTPException(status_code=404, detail="Topic not found")
         elif not is_admin():
-            raise HTTPException(status_code=403, detail="Only an administrator can change shared library lessons.")
+            raise not_admin("Only an administrator can change shared library lessons.")
 
 def topic_visible(topic: Dict[str, Any], courses: Optional[Dict[str, Any]] = None) -> bool:
     """With accounts on, a lesson generated for someone's course is visible only to that person;
@@ -4694,7 +4700,7 @@ async def catalog_import(body: CatalogImport):
     text the parser can't."""
     rate_limit("upload")
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can change the shared catalog.")
+        raise not_admin("Only an administrator can change the shared catalog.")
     rows = list(body.rows or [])
     text = (body.text or "")[:400000]
     if text:
@@ -4851,7 +4857,7 @@ def advisor_classify_catalog(req: Optional[ClassifyCatalogRequest] = None):
     rate_limit("course")
     req = req or ClassifyCatalogRequest()
     if scoped() and not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can classify catalog courses.")
+        raise not_admin("Only an administrator can classify catalog courses.")
 
     for existing_job in JOBS.values():
         if existing_job.get("kind") == "classify_catalog" and existing_job.get("status") in ("queued", "running"):
@@ -5042,7 +5048,7 @@ def generate_simulation(req: SimulationRequest):
 def backfill_simulations():
     """Queues a simulation for every topic that has neither a built-in nor a generated one."""
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can backfill simulations.")
+        raise not_admin("Only an administrator can backfill simulations.")
     rate_limit("simulation")
     jobs = []
     for path in sorted(TOPICS_DIR.glob("*.json")):
@@ -5220,7 +5226,7 @@ def _local_register(req: AuthRequest, request: Request):
     if db.get_user_by_name(name):
         raise HTTPException(status_code=409, detail="That name is taken on this computer. Sign in, or choose another name.")
     stored, kek = userkeys.hash_password(password) if password else (None, None)
-    user = db.create_local_account(name, stored)
+    user = db.create_local_account(name, stored, elect=not admin_election_waits())
     _unlock_entry(user["id"], kek)
     return {"token": db.create_session(user["id"]), "user": user, "privacyAccepted": True, "keyState": "none"}
 
@@ -5307,7 +5313,9 @@ def me():
         used = budget.get("used", 0) if budget.get("day") == time.strftime("%Y-%m-%d") else 0
         out.update(hasPassword=bool(info.get("has_password")), keyState=key_state, keyInvalid=bool(state.get("invalid")),
                    modelCallsLeft=max(0, DAILY_MODEL_CALLS - used) if key and DAILY_MODEL_CALLS > 0 else None,
-                   autoLockMin=AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes, isAdmin=db.is_local_admin(user["id"]))
+                   autoLockMin=AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes,
+                   isAdmin=_local_admin(user["id"]),
+                   legacyKeyOffer=legacy_key_pending())
     return out
 
 def require_local_accounts():
@@ -5411,7 +5419,26 @@ def set_auth_prefs(body: AuthPrefsRequest):
     return {"autoLockMin": body.autoLockMin}
 
 class GeminiKeyRequest(BaseModel):
-    key: str = Field(max_length=200)
+    key: Optional[str] = Field(default=None, max_length=200)
+    adoptLegacy: bool = False  # use the key an older version saved on this computer (legacyKeyOffer in /api/auth/me)
+
+# The key an older desktop version saved for the whole computer (userkeys.LEGACY_KEY, from desktop_main.py) is offered
+# once: the first account to answer takes it (PUT /api/me/gemini-key {adoptLegacy: true}) or declines it (DELETE
+# /api/me/legacy-key); the app then deletes the file (sciedu:removeLegacyKey, refused while /api/status still says
+# legacy_key_pending). Meanwhile an upgraded database chooses no admin, so the account that adopts the key can become it
+# (decided 2026-11-12), else the oldest user, as before. The wait lasts this run at most: an adopt that cannot store
+# the key (409) ends it, and the offer itself comes back on the next launch while the file is there.
+_legacy_lock = threading.Lock()
+_legacy = {"busy": False, "admin_wait_over": False}  # busy: an adopt is checking the key with Google
+
+def legacy_key_pending() -> bool:
+    return local_mode() and bool(userkeys.LEGACY_KEY)
+
+def admin_election_waits() -> bool:
+    return legacy_key_pending() and not _legacy["admin_wait_over"]
+
+def _local_admin(user_id: str) -> bool:
+    return db.is_local_admin(user_id, elect=not admin_election_waits())
 
 @app.put("/api/me/gemini-key")
 def put_my_gemini_key(body: GeminiKeyRequest):
@@ -5420,7 +5447,34 @@ def put_my_gemini_key(body: GeminiKeyRequest):
     require_local_accounts()
     rate_limit("key_check")
     uid = CURRENT_USER.get()["id"]
-    key = body.key.strip()
+    if not body.adoptLegacy:
+        return _save_my_key(uid, (body.key or "").strip())
+    with _legacy_lock:  # one account takes it; the check with Google runs outside the lock
+        key = userkeys.LEGACY_KEY if legacy_key_pending() else None
+        if not key:
+            raise HTTPException(status_code=409, detail="There is no key saved on this computer any more. Paste your key instead.")
+        if _legacy["busy"]:
+            raise HTTPException(status_code=409, detail="The key saved on this computer is being checked. Try again in a moment.")
+        _legacy["busy"] = True
+    outcome = None
+    try:
+        out = _save_my_key(uid, key)
+        outcome = "saved"
+        return out
+    except HTTPException as e:
+        outcome = {400: "rejected", 409: "not_stored"}.get(e.status_code)
+        raise
+    finally:
+        with _legacy_lock:
+            _legacy["busy"] = False
+            if outcome in ("saved", "rejected"):  # rejected by Google: no use offering it again
+                userkeys.LEGACY_KEY = None
+            elif outcome == "not_stored":  # stays offered (set a password, then take it), but no longer holds up the admin
+                _legacy["admin_wait_over"] = True
+            if outcome == "saved":
+                db.elect_local_admin(uid)  # only while no admin was chosen (a database from before accounts)
+
+def _save_my_key(uid: str, key: str):
     if len(key) < 8 or any(ch.isspace() for ch in key):
         raise HTTPException(status_code=422, detail="Paste the whole key, without spaces.")
     verdict = userkeys.check_key(key)
@@ -5442,6 +5496,17 @@ def put_my_gemini_key(body: GeminiKeyRequest):
     (entry or _unlock_entry(uid, kek))["key"] = key
     resume_for_user(uid)
     return {"status": "saved", "verified": verdict == "ok", "keyState": "ok", "hint": key[-4:]}
+
+@app.delete("/api/me/legacy-key")
+def decline_legacy_key():
+    """No to the key an older version saved on this computer: it is forgotten here, and the app deletes its file."""
+    require_local_accounts()
+    with _legacy_lock:
+        if _legacy["busy"]:
+            raise HTTPException(status_code=409, detail="The key saved on this computer is being checked. Try again in a moment.")
+        had = legacy_key_pending()
+        userkeys.LEGACY_KEY = None
+    return {"status": "declined" if had else "none"}
 
 @app.delete("/api/me/gemini-key")
 def delete_my_gemini_key():
@@ -7772,7 +7837,7 @@ MAX_INBOX_FILE_BYTES = 2_000_000
 @app.get("/api/agy/inbox")
 def get_agy_inbox():
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can read the agent inbox.")
+        raise not_admin("Only an administrator can read the agent inbox.")
     items = []
     if INBOX_FILE.exists():
         with open(INBOX_FILE, "r", encoding="utf-8") as f:
@@ -7786,7 +7851,7 @@ def get_agy_inbox():
 @app.post("/api/agy/inbox")
 def post_agy_inbox(item: Dict[str, Any]):
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can write to the agent inbox.")
+        raise not_admin("Only an administrator can write to the agent inbox.")
     line = json.dumps({**item, "timestamp": time.time()})
     if len(line) > MAX_INBOX_BYTES:
         raise HTTPException(status_code=413, detail=f"Inbox items are limited to {MAX_INBOX_BYTES} bytes")
@@ -7815,6 +7880,8 @@ def get_status():
         "auth_required": AUTH_REQUIRED,
         "port": int(os.environ.get("SCIEDU_PORT", "8090")),
         "instance_id": os.environ.get("SCIEDU_INSTANCE_ID"),  # lets the desktop app tell its backend from another on the port
+        # the desktop app deletes the old computer-wide key file only once this is false (sciedu:removeLegacyKey)
+        "legacy_key_pending": legacy_key_pending(),
         "privacy_version": PRIVACY_VERSION,
         "features": [
             "courses", "sqlite_storage", "simspec_simulations", "background_jobs", "code_sandbox",

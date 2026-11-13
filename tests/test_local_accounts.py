@@ -1,7 +1,8 @@
 """Accounts on this computer (docs/plans/ACCOUNTS.md). Phase 1: SCIEDU_LOCAL_ACCOUNTS scopes every request to its
 signed-in user like SCIEDU_AUTH, keeps the server-only rules off, never hands out password hashes, and loses to
 SCIEDU_AUTH when both are set. Phase 2: sign-in with optional passwords, the admin account, each account's sealed
-Gemini key, lock, auto-lock, forgot-password delete and the pre-migration backup."""
+Gemini key, lock, auto-lock, forgot-password delete and the pre-migration backup. Phase 4: the key an older desktop
+version saved for the computer, offered once (adopt or decline; the adopter is an upgraded database's admin)."""
 from test_lab import LOCAL, TestClient, server, db, engage  # noqa: F401  (sets up the temp content dir first)
 
 import ast
@@ -610,6 +611,204 @@ class LocalSignIn(LocalAccountsCase):
         self.assertEqual(self.c.post("/api/auth/lock", headers=headers).json(), {"status": "locked"})
         self.assertNotIn(uid, userkeys.UNLOCKED)
         self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
+
+    # ---- phase 4: the key an older desktop version saved for the whole computer, offered once
+    def adopt(self, headers, verdict="ok"):
+        with mock.patch.object(userkeys, "check_key", return_value=verdict) as check:
+            r = self.c.put("/api/me/gemini-key", json={"adoptLegacy": True}, headers=headers)
+        return r, check
+
+    def test_legacy_key_is_offered_until_one_account_adopts_it(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-5555"
+        first, uid = self.register("Legacy Lea", PASSWORD)
+        second, other = self.register("Legacy Leo")
+        for headers in (first, second):
+            self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["legacyKeyOffer"])
+        r, check = self.adopt(first)
+        self.assertEqual(r.status_code, 200, r.text)
+        check.assert_called_once_with("AIza-legacy-key-5555")
+        self.assertEqual((r.json()["hint"], r.json()["keyState"]), ("5555", "ok"))
+        self.assertNotIn("AIza-legacy", r.text)
+        self.assertEqual(db.get_secret(uid, "gemini")["mode"], "password")
+        self.assertEqual(userkeys.UNLOCKED[uid]["key"], "AIza-legacy-key-5555")
+        self.assertIsNone(userkeys.LEGACY_KEY)
+        for headers in (first, second):
+            me = self.c.get("/api/auth/me", headers=headers)
+            self.assertFalse(me.json()["legacyKeyOffer"])
+            self.assertNotIn("AIza-legacy", me.text)
+        r, check = self.adopt(second)  # taken once: nobody else gets it
+        self.assertEqual(r.status_code, 409)
+        check.assert_not_called()
+        self.assertIsNone(db.get_secret(other, "gemini"))
+
+    def test_declined_legacy_key_is_forgotten(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-6666"
+        headers, uid = self.register("Decline Dee")
+        self.assertEqual(self.c.delete("/api/me/legacy-key", headers=headers).json(), {"status": "declined"})
+        self.assertIsNone(userkeys.LEGACY_KEY)
+        self.assertFalse(self.c.get("/api/auth/me", headers=headers).json()["legacyKeyOffer"])
+        self.assertEqual(self.adopt(headers)[0].status_code, 409)
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+        self.assertEqual(self.c.delete("/api/me/legacy-key", headers=headers).json(), {"status": "none"})
+        self.assertEqual(self.c.delete("/api/me/legacy-key").status_code, 401)  # signed in only
+
+    def test_legacy_key_google_rejects_is_not_offered_again(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-7777"
+        headers, uid = self.register("Reject Rex", PASSWORD)
+        r, _ = self.adopt(headers, verdict="invalid")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("rejected", r.json()["detail"])
+        self.assertIsNone(userkeys.LEGACY_KEY)
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+
+    def test_legacy_key_stays_offered_when_this_account_cannot_store_it(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-8888"
+        userkeys.DEVICE_KEY = None  # no keyring: an account without a password cannot keep a key
+        headers, uid = self.register("Nokey Nia")
+        r, _ = self.adopt(headers, verdict="ok")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("Set a password", r.json()["detail"])
+        self.assertEqual(userkeys.LEGACY_KEY, "AIza-legacy-key-8888")  # set a password, then take it
+        self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["legacyKeyOffer"])
+
+    def test_upgrade_admin_is_the_account_that_adopts_the_legacy_key(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Oldest {self.tag}")
+            db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+            db.conn().commit()
+            old_headers = local_account(f"Oldest {self.tag}")[0]
+            new_headers, new = local_account(f"Adopter {self.tag}")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-9999"
+            # while the offer waits, nobody is the admin yet and nothing is elected
+            self.assertFalse(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertEqual(self.c.get("/api/agy/inbox", headers=old_headers).status_code, 403)
+            self.assertIsNone(db.conn().execute("SELECT 1 FROM users WHERE is_admin IS NOT NULL").fetchone())
+            r, _ = self.adopt(new_headers, verdict="unverified")
+            self.assertEqual((r.status_code, r.json()["verified"]), (200, False))
+            self.assertTrue(self.c.get("/api/auth/me", headers=new_headers).json()["isAdmin"])
+            self.assertFalse(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_upgrade_admin_is_the_oldest_user_when_the_legacy_key_is_declined(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Elder {self.tag}")
+            db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+            db.conn().commit()
+            old_headers = local_account(f"Elder {self.tag}")[0]
+            new_headers, new = local_account(f"Decliner {self.tag}")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1010"
+            self.assertFalse(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.c.delete("/api/me/legacy-key", headers=new_headers)
+            self.assertTrue(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertFalse(db.is_local_admin(new))
+
+    def test_adopting_does_not_move_an_admin_already_chosen(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Chosen Cy")
+            headers, uid = self.register("Late Lu")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1111"
+            self.assertTrue(self.c.get("/api/auth/me", headers=admin_headers).json()["isAdmin"])
+            self.assertEqual(self.adopt(headers)[0].status_code, 200)
+            self.assertTrue(db.is_local_admin(admin))
+            self.assertFalse(db.is_local_admin(uid))
+
+    def upgraded_db_with_elder(self):
+        old = db.get_or_create_user(f"Elder {self.tag}")
+        db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+        db.conn().commit()
+        return local_account(f"Elder {self.tag}")[0], old["id"]
+
+    def test_account_registered_while_the_offer_waits_can_become_the_admin(self):
+        with fresh_db():
+            old_headers, old = self.upgraded_db_with_elder()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1313"
+            headers, uid = self.register("Joiner Jo")
+            # the election stays open: the new row is NULL like the older ones
+            self.assertIsNone(db.conn().execute("SELECT 1 FROM users WHERE is_admin IS NOT NULL").fetchone())
+            self.assertEqual(self.adopt(headers)[0].status_code, 200)
+            self.assertTrue(db.is_local_admin(uid))
+            self.assertFalse(db.is_local_admin(old))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_account_registered_while_the_offer_waits_then_declined_leaves_the_oldest_admin(self):
+        with fresh_db():
+            old_headers, old = self.upgraded_db_with_elder()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1414"
+            headers, uid = self.register("Joiner Jay")
+            self.c.delete("/api/me/legacy-key", headers=headers)
+            self.assertFalse(self.c.get("/api/auth/me", headers=headers).json()["isAdmin"])
+            self.assertTrue(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_fresh_install_first_account_is_admin_even_with_a_pending_offer(self):
+        with fresh_db():
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1515"
+            headers, uid = self.register("Founder Fi")
+            _, other = self.register("Second Si")
+            self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["isAdmin"])
+            self.assertFalse(db.is_local_admin(other))
+            self.assertEqual(self.adopt(headers)[0].status_code, 200)
+            self.assertTrue(db.is_local_admin(uid))
+
+    def test_admin_refusals_name_the_offer_while_it_waits(self):
+        with fresh_db():
+            old_headers, _ = self.upgraded_db_with_elder()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1616"
+            r = self.c.get("/api/agy/inbox", headers=old_headers)
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("Answer the offer of the key saved on this computer first", r.json()["detail"])
+            self.c.delete("/api/me/legacy-key", headers=old_headers)
+            self.assertEqual(self.c.get("/api/agy/inbox", headers=old_headers).status_code, 200)
+
+    def test_an_adopt_that_cannot_store_the_key_ends_the_admin_wait(self):
+        with fresh_db():
+            old_headers, old = self.upgraded_db_with_elder()
+            headers, uid = local_account(f"Open Ola {self.tag}")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1717"
+            userkeys.DEVICE_KEY = None
+            self.assertEqual(self.adopt(headers)[0].status_code, 409)
+            self.assertTrue(server.legacy_key_pending())  # still offered (set a password, then take it)
+            self.assertFalse(server.admin_election_waits())
+            self.assertTrue(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertNotIn("Answer the offer", self.c.get("/api/agy/inbox", headers=headers).json()["detail"])
+
+    def test_the_check_with_google_runs_outside_the_lock_and_one_adopt_at_a_time(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-1818"
+        headers, uid = self.register("Busy Bea", PASSWORD)
+        seen = []
+
+        def check(key):
+            free = server._legacy_lock.acquire(blocking=False)
+            if free:
+                server._legacy_lock.release()
+            seen.append((free, server._legacy["busy"]))
+            # a second answer meanwhile is refused, not run twice
+            seen.append(self.c.delete("/api/me/legacy-key", headers=headers).status_code)
+            seen.append(self.c.put("/api/me/gemini-key", json={"adoptLegacy": True}, headers=headers).status_code)
+            return "ok"
+
+        with mock.patch.object(userkeys, "check_key", side_effect=check):
+            r = self.c.put("/api/me/gemini-key", json={"adoptLegacy": True}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(seen, [(True, True), 409, 409])
+        self.assertFalse(server._legacy["busy"])
+        self.assertIsNone(userkeys.LEGACY_KEY)
+
+    def test_status_says_whether_the_offer_waits(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-1919"
+        status = self.c.get("/api/status")
+        self.assertTrue(status.json()["legacy_key_pending"])
+        self.assertNotIn("AIza-legacy", status.text)
+        headers, _ = self.register("Status Sol")
+        self.c.delete("/api/me/legacy-key", headers=headers)
+        self.assertFalse(self.c.get("/api/status").json()["legacy_key_pending"])
+
+    def test_legacy_key_offer_only_with_local_accounts(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-1212"
+        server.LOCAL_ACCOUNTS = False
+        self.assertNotIn("legacyKeyOffer", self.c.get("/api/auth/me").json())
+        self.assertEqual(self.c.delete("/api/me/legacy-key").status_code, 404)
+        self.assertFalse(server.legacy_key_pending())
 
     def test_forgot_password_deletes_the_account_after_its_name_is_typed(self):
         _, open_id = self.register("Forgot Open")

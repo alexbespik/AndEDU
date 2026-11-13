@@ -1,5 +1,5 @@
 """userkeys.py: scrypt2 hashes with a KEK, sealed secrets (password and device mode), and the Gemini key check
-(the same verdicts as desktop/keycheck.cjs, the sample answers of desktop/keycheck.test.cjs)."""
+(the verdicts and sample answers of the desktop key check it replaced, desktop/keycheck.cjs)."""
 import os
 import sys
 import unittest
@@ -92,7 +92,7 @@ class KeyStore(unittest.TestCase):
 
 
 class KeyCheck(unittest.TestCase):
-    """The cases of desktop/keycheck.test.cjs, with this module's verdict names."""
+    """The cases of the former desktop/keycheck.test.cjs, with this module's verdict names."""
     def test_classify_key_response(self):
         cases = [(200, '{"models":[]}', "ok"), (400, INVALID, "invalid"), (403, LEAKED, "invalid"),
                  (403, DISABLED, "service_disabled"), (429, QUOTA, "unverified"), (400, PLAIN_400, "unverified"),

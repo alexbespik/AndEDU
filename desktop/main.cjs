@@ -1,14 +1,13 @@
 // Desktop shell for &.edu: starts the bundled Python backend on 127.0.0.1 and shows the app in a window.
 // The backend contract (env allowlist, stdin settings line, instance id) is described in desktop_main.py
 // and ARCHITECTURE.md section 5.4.
-const { app, BrowserWindow, dialog, ipcMain, net: electronNet, safeStorage, session, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { StringDecoder } = require('node:string_decoder');
-const { classifyKeyResponse } = require('./keycheck.cjs');
 const { buildStartPage, parseStartupChunk, renderLog } = require('./startpage.cjs');
 
 const PORT_RANGE = [38090, 38190];
@@ -17,7 +16,6 @@ const LOG_LIMIT_BYTES = 5 * 1024 * 1024;
 const START_PAGE_URL = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildStartPage());
 const STARTUP_LINES = 6;
 const STARTUP_READ_BYTES = 64 * 1024;
-const KEY_RE = /^[A-Za-z0-9_-]{30,100}$/;
 const DEV = !app.isPackaged;
 const ROOT = path.resolve(__dirname, '..');
 const BACKEND_DIR = DEV ? ROOT : path.join(process.resourcesPath, 'backend');
@@ -52,7 +50,7 @@ const CSP = [
 const PYTHON = DEV ? path.join(ROOT, '.venv', 'bin', 'python') : path.join(process.resourcesPath, 'python', 'bin', 'python3');
 const SEED_DIR = path.join(BACKEND_DIR, 'seed', 'topics');
 
-let dataDir, configPath, keyPath, logDir;
+let dataDir, configPath, deviceKeyPath, legacyKeyPath, logDir;
 let win = null;
 let backend = null;   // { child, port, origin, instanceId, ready }
 let quitting = false;
@@ -110,7 +108,7 @@ function openLog() {
 }
 
 // On Linux, safeStorage falls back to 'basic_text' (a fixed password built into Chromium) when no keyring
-// (GNOME Keyring, KWallet) answers; that is no better than plain text, so the key is not stored or read then.
+// (GNOME Keyring, KWallet) answers; that is no better than plain text, so no secret is stored or read then.
 // Call only after app 'ready'.
 function secureStoreOk() {
   if (!safeStorage.isEncryptionAvailable()) return false;
@@ -118,16 +116,44 @@ function secureStoreOk() {
   return !['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend());
 }
 
-const NO_SECURE_STORE = process.platform === 'linux'
-  ? 'No system keyring (GNOME Keyring or KWallet) is available, so the key cannot be stored safely. Install or unlock one, then try again.'
-  : 'The macOS Keychain is not available, so the key cannot be stored safely.';
-
-function loadKey() {
+// The device key (32 random bytes, base64) seals the Gemini keys of accounts without a password (userkeys.py).
+// Made once, kept in the Keychain/keyring through safeStorage. A file that exists but does not open (another build
+// the Keychain no longer trusts, a locked keyring) is never replaced: that would lose every key sealed with it.
+// No secure store: no device key, and only accounts with a password can keep a key.
+function loadDeviceKey() {
+  if (!secureStoreOk()) return '';
+  let sealed;
   try {
-    if (!secureStoreOk()) return '';
-    return safeStorage.decryptString(fs.readFileSync(keyPath));
+    sealed = fs.readFileSync(deviceKeyPath);
+  } catch (err) {
+    if (err.code !== 'ENOENT') return '';
+    try {
+      const key = crypto.randomBytes(32).toString('base64');
+      fs.mkdirSync(path.dirname(deviceKeyPath), { recursive: true, mode: 0o700 });
+      const tmp = deviceKeyPath + '.tmp';
+      fs.writeFileSync(tmp, safeStorage.encryptString(key), { mode: 0o600 });
+      fs.renameSync(tmp, deviceKeyPath);
+      return key;
+    } catch {
+      return '';
+    }
+  }
+  try {
+    const key = safeStorage.decryptString(sealed);
+    return Buffer.from(key, 'base64').length === 32 ? key : '';
   } catch {
-    return '';  // missing, or made by another build the Keychain/keyring no longer trusts: ask again
+    return '';
+  }
+}
+
+// The Gemini key older versions saved for the whole computer: handed to the backend, which offers it once to an
+// account; the page then asks for the file to be deleted (removeLegacyKey).
+function loadLegacyKey() {
+  try {
+    if (!secureStoreOk() || !fs.existsSync(legacyKeyPath)) return '';
+    return safeStorage.decryptString(fs.readFileSync(legacyKeyPath));
+  } catch {
+    return '';  // made by another build the Keychain/keyring no longer trusts: nothing to offer
   }
 }
 
@@ -143,6 +169,7 @@ function backendEnv(port, instanceId) {
     SCIEDU_ENV_FILE: 'none',
     SCIEDU_INSTANCE_ID: instanceId,
     SCIEDU_ALLOWED_ORIGINS: `http://127.0.0.1:${port}`,
+    SCIEDU_LOCAL_ACCOUNTS: '1',  // accounts on this computer: each with its own data and its own Gemini key
     AGY_CLI: '0',
     SCIEDU_ELEVENLABS: '0',
     PYTHONDONTWRITEBYTECODE: '1',
@@ -167,8 +194,13 @@ async function startBackend() {
     stdio: ['pipe', log, log],
   });
   fs.closeSync(log);
-  const key = loadKey();
-  child.stdin.write(JSON.stringify(key ? { gemini_key: key } : {}) + '\n');  // stdin stays open: EOF stops the backend
+  // secrets go on stdin, never in env or argv (other processes of the user can read those); stdin stays open: EOF stops the backend
+  const settings = {};
+  const deviceKey = loadDeviceKey();
+  if (deviceKey) settings.device_key = deviceKey;
+  const legacyKey = loadLegacyKey();
+  if (legacyKey) settings.legacy_gemini_key = legacyKey;
+  child.stdin.write(JSON.stringify(settings) + '\n');
   child.stdin.on('error', () => {});
 
   const current = { child, port, origin: `http://127.0.0.1:${port}`, instanceId, ready: false, error: null };
@@ -195,7 +227,7 @@ function startupProgress(b, offset) {
   let carry = '';
   let decoder = new StringDecoder('utf8');  // a 64 KB cut can split a UTF-8 character
   let lines = [];
-  let shown = null;  // push once even when empty: a relaunch on the start page clears the previous run's lines
+  let shown = null;  // push once even when empty: a restart on the start page clears the previous run's lines
   return () => {
     let fd = null;
     try {
@@ -281,62 +313,30 @@ function fromBackend(event) {
   }
 }
 
-// Asks Google whether a key works before it is stored (the model list costs no generation quota).
-// The key goes only in the header; nothing here is logged, and the page gets fixed strings back.
-async function checkKey(key) {
-  try {
-    const res = await electronNet.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
-      headers: { 'x-goog-api-key': key },
-      signal: AbortSignal.timeout(8000),
-    });
-    return classifyKeyResponse(res.status, await res.text().catch(() => ''));
-  } catch {
-    return 'unknown';  // offline, timed out, blocked: save it unverified
-  }
-}
-
-const KEY_ERRORS = {
-  rejected: 'Google rejected this key. Check that you copied all of it, or make a new one.',
-  disabled: "This key's Google Cloud project doesn't have the Gemini API turned on. Enable it, or make a key at aistudio.google.com/apikey.",
-};
-
 function registerIpc() {
-  ipcMain.handle('sciedu:hasKey', (event) => fromBackend(event) && Boolean(loadKey()));
-  ipcMain.handle('sciedu:saveKey', async (event, value) => {
-    if (!fromBackend(event)) return { ok: false, error: 'Not allowed.' };
-    const key = typeof value === 'string' ? value.trim() : '';
-    if (!KEY_RE.test(key)) return { ok: false, error: 'That does not look like a Gemini API key.' };
-    if (!secureStoreOk()) return { ok: false, error: NO_SECURE_STORE };
-    const verdict = await checkKey(key);
-    if (KEY_ERRORS[verdict]) return { ok: false, error: KEY_ERRORS[verdict] };
-    fs.mkdirSync(path.dirname(keyPath), { recursive: true, mode: 0o700 });
-    const tmp = keyPath + '.tmp';
-    fs.writeFileSync(tmp, safeStorage.encryptString(key), { mode: 0o600 });
-    fs.renameSync(tmp, keyPath);
-    setTimeout(relaunchBackend, 100);  // reply first: the page reloads when the new backend is up
-    return verdict === 'valid' ? { ok: true } : { ok: true, unverified: true };
-  });
-  ipcMain.handle('sciedu:clearKey', (event) => {
+  // After an account took the old key (PUT /api/me/gemini-key {adoptLegacy}) or declined it (DELETE /api/me/legacy-key),
+  // the file goes. The backend decides: while its /api/status says legacy_key_pending (no answer yet, or the account
+  // could not store the key), or when it cannot be asked, the file stays and is offered again next launch.
+  ipcMain.handle('sciedu:removeLegacyKey', async (event) => {
     if (!fromBackend(event)) return { ok: false };
-    fs.rmSync(keyPath, { force: true });
-    setTimeout(relaunchBackend, 100);
+    const b = backend;
+    try {
+      const res = await fetch(`${b.origin}/api/status`, { signal: AbortSignal.timeout(2000) });
+      const st = res.ok ? await res.json() : null;
+      if (!st || st.instance_id !== b.instanceId || st.legacy_key_pending !== false) return { ok: false };
+    } catch {
+      return { ok: false };
+    }
+    fs.rmSync(legacyKeyPath, { force: true });
     return { ok: true };
   });
 }
 
-// Starts, restarts and key relaunches run one at a time, so two of them never race for the port or the window.
+// Starts and restarts run one at a time, so two of them never race for the port or the window.
 let queue = Promise.resolve();
 function serially(task) {
   queue = queue.then(task, task);
   return queue;
-}
-
-function relaunchBackend() {
-  return serially(async () => {
-    await showStartPage();  // before the stop, so the page never talks to a backend that is going away
-    await stopBackend();
-    await startAndShow();
-  });
 }
 
 function launch() {
@@ -397,7 +397,7 @@ function createWindow() {
 
 async function startAndShow() {
   if (quitting) return;
-  await showStartPage();  // relaunches and restarts come from the app page: show the progress again
+  await showStartPage();  // restarts come from the app page: show the progress again
   try {
     const b = await startBackend();
     if (win && backend === b) await win.loadURL(`${b.origin}/`);
@@ -428,7 +428,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     dataDir = app.getPath('userData');
     configPath = path.join(dataDir, 'config.json');
-    keyPath = path.join(dataDir, 'secrets', 'gemini.key.enc');
+    deviceKeyPath = path.join(dataDir, 'secrets', 'device.key.enc');
+    legacyKeyPath = path.join(dataDir, 'secrets', 'gemini.key.enc');  // older versions: one key for the computer
     logDir = path.join(dataDir, 'logs');
     fs.mkdirSync(dataDir, { recursive: true });
     registerIpc();

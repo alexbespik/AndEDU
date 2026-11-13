@@ -15,7 +15,6 @@ asar: true
 files:
   - desktop/main.cjs
   - desktop/preload.cjs
-  - desktop/keycheck.cjs   # the key check main.cjs requires (not its test)
   - desktop/startpage.cjs  # the start page and its startup log (not its test)
   - package.json
   - "!node_modules/**/*"
