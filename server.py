@@ -91,7 +91,7 @@ def local_mode() -> bool:
     return LOCAL_ACCOUNTS and not AUTH_REQUIRED
 
 
-LOCAL_PUBLIC_API = {"/api/auth/profiles", "/api/auth/forgot-delete"}  # the sign-in screen of accounts on this computer
+LOCAL_PUBLIC_API = {"/api/auth/profiles"}  # the sign-in screen of accounts on this computer
 
 
 def public_paths() -> set:
@@ -5387,24 +5387,43 @@ def change_password(body: PasswordChangeRequest, request: Request):
     out["keyState"] = "ok" if key else "none"
     return out
 
-class ForgotDeleteRequest(BaseModel):
-    userId: str
-    confirmName: str
+# No password recovery and no deleting from the sign-in screen: only the admin deletes accounts (decided 2026-11-13),
+# so someone who forgot their password asks the admin to delete the account (POST /api/auth/delete-account {userId}).
 
-@app.post("/api/auth/forgot-delete")
-def forgot_password_delete(body: ForgotDeleteRequest, request: Request):
-    """No password recovery: a forgotten password means deleting the account and its data from the sign-in screen,
-    confirmed by typing its name."""
+class AdminTransferRequest(BaseModel):
+    userId: str
+    password: Optional[str] = None  # the admin's own password, when it has one
+
+def _require_admin_password(me: Dict[str, Any], password: Optional[str]):
+    """The admin confirms with its own password (if it has one) before deleting an account or handing the role on."""
+    auth_me = db.get_user_auth(me["id"]) or {}
+    if auth_me.get("password_hash") and _verify_local_password(auth_me, password) is None:
+        raise HTTPException(status_code=401, detail="Wrong password")
+
+@app.get("/api/auth/accounts")
+def local_accounts_list():
+    """The admin's list of accounts on this computer: [{id, name, locked, isAdmin}]."""
+    require_local_accounts()
+    if not is_admin():
+        raise not_admin("Only the admin of this computer can manage accounts.")
+    return db.list_local_accounts()
+
+@app.post("/api/auth/admin/transfer")
+def transfer_local_admin(body: AdminTransferRequest, request: Request):
+    """The admin hands its role to another account (confirmed by the admin's password, if it has one)."""
     require_local_accounts()
     auth_rate_limit(request)
-    user = db.get_user_auth(body.userId)
-    if not user:
+    me = CURRENT_USER.get()
+    if not is_admin():
+        raise not_admin("Only the admin of this computer can hand the admin role on.")
+    if body.userId == me["id"]:
+        raise HTTPException(status_code=400, detail="You are already the admin.")
+    if not db.get_user(body.userId):
         raise HTTPException(status_code=404, detail="Account not found.")
-    if not user.get("password_hash"):
-        raise HTTPException(status_code=409, detail="This account has no password: sign in and delete it from the account menu.")
-    if not _names_match(body.confirmName, user["name"]):
-        raise HTTPException(status_code=422, detail="Type the account's name exactly as it appears to confirm.")
-    return {"status": "deleted", "removed": delete_user_everything(user["id"])}
+    _require_admin_password(me, body.password)
+    if not db.transfer_local_admin(me["id"], body.userId):
+        raise HTTPException(status_code=409, detail="You are no longer the admin of this computer.")
+    return {"status": "ok", "admin": body.userId}
 
 class AuthPrefsRequest(BaseModel):
     autoLockMin: int
@@ -5525,7 +5544,9 @@ class ConsentRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     confirmName: str
-    password: Optional[str] = None  # required with accounts on
+    password: Optional[str] = None  # required with accounts on (accounts on this computer: the admin's own, if it has one)
+    userId: Optional[str] = None      # accounts on this computer: the account the admin deletes (default: itself)
+    transferTo: Optional[str] = None  # accounts on this computer: the admin deleting itself hands the role here first
 
 def require_upload_consent():
     """Accounts mode: an uploaded file or image goes to Gemini only after its owner agreed to that once."""
@@ -5655,8 +5676,10 @@ def export_my_data(user_id: str):
 def delete_account(body: DeleteAccountRequest, request: Request, user_id: Optional[str] = None):
     """Deletes the user, their courses, lessons, progress, files and quiz log lines. Shared library lessons stay.
     Accounts mode: the signed-in user, confirmed by password (accounts on this computer: if it has one).
-    Personal machine: /api/users/{id}/delete."""
-    if AUTH_REQUIRED or local_mode():
+    Personal machine: /api/users/{id}/delete. Accounts on this computer: only the admin (_local_delete_account)."""
+    if local_mode():
+        return _local_delete_account(body, request, user_id)
+    if AUTH_REQUIRED:
         auth_rate_limit(request)
         user_id = user_id or CURRENT_USER.get()["id"]
     elif not user_id:
@@ -5668,11 +5691,36 @@ def delete_account(body: DeleteAccountRequest, request: Request, user_id: Option
     stored = auth_user.get("password_hash")
     if AUTH_REQUIRED and not db.check_password(body.password or "", stored):
         raise HTTPException(status_code=401, detail="Wrong password")
-    if local_mode() and stored and _verify_local_password(auth_user, body.password) is None:
-        raise HTTPException(status_code=401, detail="Wrong password")
     if AUTH_REQUIRED and user_id in ADMINS:
         raise HTTPException(status_code=409, detail="Remove your id from SCIEDU_ADMINS before deleting this account.")
     return {"status": "deleted", "removed": delete_user_everything(user_id)}
+
+def _local_delete_account(body: DeleteAccountRequest, request: Request, path_id: Optional[str]):
+    """Accounts on this computer: only the admin deletes accounts (decided 2026-11-13), any of them, confirmed by the
+    account's name and the admin's own password (if it has one). The admin deletes itself only after handing the role
+    to another account (transferTo), unless it is the last account. Everything is checked before the role moves; the
+    order is transfer, then delete (a failed delete leaves the new admin in place)."""
+    auth_rate_limit(request)
+    me = CURRENT_USER.get()
+    if path_id and body.userId and path_id != body.userId:
+        raise HTTPException(status_code=400, detail="The request names two different accounts.")
+    target_id = path_id or body.userId or me["id"]
+    if not is_admin():
+        raise not_admin("Only the admin of this computer can delete accounts. Ask them to delete this one.")
+    target = db.get_user(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    if not _names_match(body.confirmName, target["name"]):
+        raise HTTPException(status_code=422, detail="Type the account's name exactly as it appears to confirm.")
+    _require_admin_password(me, body.password)
+    if target_id == me["id"]:
+        others = {u["id"] for u in db.list_local_profiles()} - {me["id"]}
+        if others:
+            if body.transferTo not in others:
+                raise HTTPException(status_code=409, detail="Hand the admin role to another account before deleting yours.")
+            if not db.transfer_local_admin(me["id"], body.transferTo):
+                raise HTTPException(status_code=409, detail="You are no longer the admin of this computer.")
+    return {"status": "deleted", "removed": delete_user_everything(target_id)}
 
 def delete_user_everything(user_id: str) -> Dict[str, int]:
     """The deletion itself, after the caller confirmed who asks: files, rows, quiz log lines, jobs, events and the
@@ -7878,6 +7926,7 @@ def get_status():
         "active_jobs": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running")),
         "event_cursor": _event_seq,
         "auth_required": AUTH_REQUIRED,
+        "local_accounts": local_mode(),  # accounts on this computer: the sign-in screen shows account tiles
         "port": int(os.environ.get("SCIEDU_PORT", "8090")),
         "instance_id": os.environ.get("SCIEDU_INSTANCE_ID"),  # lets the desktop app tell its backend from another on the port
         # the desktop app deletes the old computer-wide key file only once this is false (sciedu:removeLegacyKey)

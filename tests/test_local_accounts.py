@@ -326,7 +326,7 @@ class LocalSignIn(LocalAccountsCase):
 
     def test_public_paths_add_the_sign_in_screen_only_locally(self):
         self.assertEqual(server.public_paths(), {"/api/status", "/api/auth/login", "/api/auth/register",
-                                                 "/api/auth/profiles", "/api/auth/forgot-delete"})
+                                                 "/api/auth/profiles"})
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = True, True
         self.assertNotIn("/api/auth/profiles", server.public_paths())
         self.assertEqual(self.c.get("/api/auth/profiles").status_code, 401)
@@ -429,14 +429,99 @@ class LocalSignIn(LocalAccountsCase):
             self.assertFalse(db.is_local_admin(later["id"]))
             self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
 
-    def test_deleting_the_admin_hands_the_role_to_nobody(self):
+    def test_a_computer_without_an_admin_gets_its_oldest_account_back_as_admin(self):
+        with fresh_db():
+            _, first = self.register("Boss Bo", PASSWORD)
+            _, second = self.register("Next Ned")
+            _, third = self.register("Last Lu")
+            set_admin(first, False)  # an older version deleted the admin from the sign-in screen
+            db.conn().execute("DELETE FROM users WHERE id = ?", (first,))
+            db.conn().commit()
+            self.assertFalse(db.is_local_admin(third))  # the oldest left becomes it, once
+            self.assertTrue(db.is_local_admin(second))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_only_the_admin_deletes_accounts(self):
         with fresh_db():
             admin_headers, admin = self.register("Boss Bo", PASSWORD)
-            _, other = self.register("Next Ned")
-            self.assertTrue(db.is_local_admin(admin))
-            r = self.c.post("/api/auth/forgot-delete", json={"userId": admin, "confirmName": f"Boss Bo {self.tag}"})
+            other_headers, other = self.register("Plain Pat")
+            _, third = self.register("Third Tia", PASSWORD)
+            name = lambda who: f"{who} {self.tag}"  # noqa: E731
+            # a non-admin can delete nobody, itself included, by either route
+            for path, body in (("/api/auth/delete-account", {"confirmName": name("Plain Pat")}),
+                               ("/api/auth/delete-account", {"confirmName": name("Third Tia"), "userId": third}),
+                               (f"/api/users/{third}/delete", {"confirmName": name("Third Tia")}),
+                               (f"/api/users/{admin}/delete", {"confirmName": name("Boss Bo")})):
+                r = self.c.post(path, json=body, headers=other_headers)
+                self.assertEqual(r.status_code, 403, (path, r.text))
+                self.assertIn("admin", r.json()["detail"])
+            self.assertEqual(self.c.get("/api/auth/accounts", headers=other_headers).status_code, 403)
+            # the admin: the account's name and the admin's own password
+            body = {"userId": third, "confirmName": name("Third Tia")}
+            self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=admin_headers).status_code, 401)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "confirmName": "Tia"},
+                                         headers=admin_headers).status_code, 422)
+            self.assertEqual(self.c.post(f"/api/users/{other}/delete", json={**body, "password": PASSWORD},
+                                         headers=admin_headers).status_code, 400)  # two different accounts named
+            r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=admin_headers)
             self.assertEqual(r.status_code, 200, r.text)
-            self.assertFalse(db.is_local_admin(other))
+            self.assertIsNone(db.get_user(third))
+            listed = self.c.get("/api/auth/accounts", headers=admin_headers).json()
+            self.assertEqual([(a["id"], a["isAdmin"]) for a in listed], [(admin, True), (other, False)])
+            self.assertNotIn("password_hash", str(listed))
+
+    def test_the_admin_hands_the_role_on_before_deleting_itself(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Boss Bo", PASSWORD)
+            other_headers, other = self.register("Plain Pat")
+            body = {"confirmName": f"Boss Bo {self.tag}", "password": PASSWORD}
+            r = self.c.post("/api/auth/delete-account", json=body, headers=admin_headers)
+            self.assertEqual(r.status_code, 409, r.text)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "transferTo": "u-none"},
+                                         headers=admin_headers).status_code, 409)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "transferTo": other, "password": "wrong password"},
+                                         headers=admin_headers).status_code, 401)
+            self.assertTrue(db.is_local_admin(admin))  # nothing moved before every check passed
+            r = self.c.post("/api/auth/delete-account", json={**body, "transferTo": other}, headers=admin_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIsNone(db.get_user(admin))
+            self.assertTrue(db.is_local_admin(other))
+            self.assertTrue(self.c.get("/api/auth/me", headers=other_headers).json()["isAdmin"])
+            # the last account deletes itself without a transfer; the next account created is the admin
+            r = self.c.post("/api/auth/delete-account", json={"confirmName": f"Plain Pat {self.tag}"}, headers=other_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            _, fresh = self.register("New Nia")
+            self.assertTrue(db.is_local_admin(fresh))
+
+    def test_admin_transfer(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Boss Bo", PASSWORD)
+            other_headers, other = self.register("Plain Pat")
+            url = "/api/auth/admin/transfer"
+            self.assertEqual(self.c.post(url, json={"userId": admin}, headers=other_headers).status_code, 403)
+            self.assertEqual(self.c.post(url, json={"userId": admin, "password": PASSWORD}, headers=admin_headers).status_code, 400)
+            self.assertEqual(self.c.post(url, json={"userId": "u-none", "password": PASSWORD}, headers=admin_headers).status_code, 404)
+            self.assertEqual(self.c.post(url, json={"userId": other, "password": "wrong password"}, headers=admin_headers).status_code, 401)
+            r = self.c.post(url, json={"userId": other, "password": PASSWORD}, headers=admin_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertFalse(db.is_local_admin(admin))
+            self.assertTrue(db.is_local_admin(other))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+            self.assertFalse(db.transfer_local_admin(admin, other))  # no longer the admin: nothing changes
+            self.assertEqual(self.c.post(url, json={"userId": other, "password": PASSWORD}, headers=admin_headers).status_code, 403)
+
+    def test_nobody_can_delete_while_the_saved_key_offer_waits(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Old Ola {self.tag}")
+            db.conn().execute("UPDATE users SET is_admin = NULL")
+            db.conn().commit()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1212"
+            r = self.c.post("/api/auth/login", json={"name": f"Old Ola {self.tag}"})
+            headers = bearer(r.json()["token"])
+            r = self.c.post("/api/auth/delete-account", json={"confirmName": f"Old Ola {self.tag}"}, headers=headers)
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("offer", r.json()["detail"])
+            self.assertIsNotNone(db.get_user(old["id"]))
 
     def test_upgrade_elects_the_admin_before_a_new_account_joins(self):
         with fresh_db():
@@ -550,6 +635,7 @@ class LocalSignIn(LocalAccountsCase):
 
     def test_password_change_and_delete_share_the_backoff(self):
         headers, uid = self.register("Guess Gus", PASSWORD)
+        set_admin(uid, True)  # only the admin deletes accounts; the password is checked after that
         body = {"confirmName": f"Guess Gus {self.tag}", "password": "wrong password"}
         for _ in range(3):
             self.assertEqual(self.c.post("/api/auth/password", json={"current": "wrong password", "new": "x" * 9},
@@ -810,37 +896,48 @@ class LocalSignIn(LocalAccountsCase):
         self.assertEqual(self.c.delete("/api/me/legacy-key").status_code, 404)
         self.assertFalse(server.legacy_key_pending())
 
-    def test_forgot_password_deletes_the_account_after_its_name_is_typed(self):
-        _, open_id = self.register("Forgot Open")
-        headers, uid = self.register("Forgot Fred", PASSWORD)
-        self.put_key(headers)
-        course = db.create_course(uid, "Fred course", "g", "", [])
-        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": "Fred"})
-        self.assertEqual(r.status_code, 422)
-        r = self.c.post("/api/auth/forgot-delete", json={"userId": open_id, "confirmName": f"Forgot Open {self.tag}"})
-        self.assertEqual(r.status_code, 409)  # an open account just signs in to delete itself
-        self.assertEqual(self.c.post("/api/auth/forgot-delete", json={"userId": "u-none", "confirmName": "x"}).status_code, 404)
-        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": f" forgot  FRED {self.tag}"})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json()["removed"]["user_secrets"], 1)
-        self.assertIsNone(db.get_user(uid))
-        self.assertIsNone(db.get_course(course["id"]))
-        self.assertIsNone(db.get_secret(uid, "gemini"))
-        self.assertNotIn(uid, userkeys.UNLOCKED)
-        self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
-        self.assertNotIn(uid, [p["id"] for p in self.c.get("/api/auth/profiles").json()])
+    def test_forgot_password_cannot_delete_from_the_sign_in_screen(self):
+        _, uid = self.register("Forgot Fred", PASSWORD)
+        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": f"Forgot Fred {self.tag}"})
+        self.assertIn(r.status_code, (401, 404, 405))
+        self.assertIsNotNone(db.get_user(uid))
 
-    def test_deleting_a_password_account_needs_its_password(self):
-        headers, uid = self.register("Delete Dora", PASSWORD)
-        body = {"confirmName": f"Delete Dora {self.tag}"}
-        self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 401)
-        self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "password": "wrong password"}, headers=headers).status_code, 401)
-        r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=headers)
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertIsNone(db.get_user(uid))
-        open_headers, open_id = self.register("Delete Open")  # no password: the typed name is enough
-        r = self.c.post(f"/api/users/{open_id}/delete", json={"confirmName": f"Delete Open {self.tag}"}, headers=open_headers)
-        self.assertEqual(r.status_code, 200, r.text)
+    def test_deleted_account_loses_its_key_and_sessions(self):
+        with fresh_db():
+            admin_headers, _ = self.register("Boss Bo")
+            headers, uid = self.register("Gone Gil", PASSWORD)
+            self.put_key(headers)
+            course = db.create_course(uid, "Gil course", "g", "", [])
+            r = self.c.post("/api/auth/delete-account", json={"userId": uid, "confirmName": f" gone  GIL {self.tag}"},
+                            headers=admin_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["removed"]["user_secrets"], 1)
+            self.assertIsNone(db.get_user(uid))
+            self.assertIsNone(db.get_course(course["id"]))
+            self.assertIsNone(db.get_secret(uid, "gemini"))
+            self.assertNotIn(uid, userkeys.UNLOCKED)
+            self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
+            self.assertNotIn(uid, [p["id"] for p in self.c.get("/api/auth/profiles").json()])
+
+    def test_an_admin_with_a_password_confirms_with_it(self):
+        with fresh_db():
+            headers, uid = self.register("Delete Dora", PASSWORD)
+            _, other = self.register("Next Ned")
+            body = {"confirmName": f"Delete Dora {self.tag}", "transferTo": other}
+            self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 401)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "password": "wrong password"}, headers=headers).status_code, 401)
+            r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIsNone(db.get_user(uid))
+
+    def test_an_open_admin_confirms_with_the_name_alone(self):
+        with fresh_db():
+            headers, uid = self.register("Delete Open")
+            _, other = self.register("Other Oz", PASSWORD)
+            r = self.c.post(f"/api/users/{other}/delete", json={"confirmName": f"Other Oz {self.tag}"}, headers=headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            r = self.c.post(f"/api/users/{uid}/delete", json={"confirmName": f"Delete Open {self.tag}"}, headers=headers)
+            self.assertEqual(r.status_code, 200, r.text)  # the last account: nobody to hand the role to
 
     def test_idle_password_account_locks_itself(self):
         headers, uid = self.register("Idle Ida", PASSWORD)
@@ -892,7 +989,7 @@ class LocalSignIn(LocalAccountsCase):
         headers, _ = self.register("Modes Max")
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, False
         for method, path in (("get", "/api/auth/profiles"), ("post", "/api/auth/lock"), ("post", "/api/auth/password"),
-                             ("post", "/api/auth/forgot-delete"), ("put", "/api/auth/prefs"), ("put", "/api/me/gemini-key"),
+                             ("get", "/api/auth/accounts"), ("post", "/api/auth/admin/transfer"), ("put", "/api/auth/prefs"), ("put", "/api/me/gemini-key"),
                              ("delete", "/api/me/gemini-key")):
             body = {"get": {}, "delete": {}}.get(method, {"json": {"userId": "u", "confirmName": "x", "autoLockMin": 1, "key": "k"}})
             self.assertEqual(getattr(self.c, method)(path, **body).status_code, 404, path)

@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ShieldCheck, Trash2, X } from 'lucide-react';
 import { api, authFetch, downloadFile } from '../lib/api';
+import { useModalFocus } from '../lib/useModalFocus';
 
 /** Plain-language privacy notice (PRIVACY_AND_DEPLOYMENT.md §3). Used at sign-up, sign-in and in the account menu. */
-export function PrivacyNotice({ elevenlabs = false, authRequired = false }) {
+export function PrivacyNotice({ elevenlabs = false, authRequired = false, local = false }) {
   return (
     <div className="privacy-notice">
       <h3>Stored on this server</h3>
@@ -38,9 +39,12 @@ export function PrivacyNotice({ elevenlabs = false, authRequired = false }) {
         <li>Server backups and server logs, until the site administrator rotates them.</li>
         <li>Lessons shared in the library.</li>
         <li>Saved copies of lessons from a course you deleted earlier (they are no longer linked to your profile).</li>
-        {!authRequired && <li>On this local install (no accounts), the shared assistant message history.</li>}
+        {!authRequired && !local && <li>On this local install (no accounts), the shared assistant message history.</li>}
       </ul>
-      {!authRequired && (
+      {local ? (
+        <p><b>Accounts on this computer:</b> each keeps its own courses and Gemini key, and only the admin of this computer can
+          delete an account. The data sits in one folder that anyone signed in to this computer as you can read.</p>
+      ) : !authRequired && (
         <p><b>This install has no accounts:</b> anyone using this computer can open, export or delete any profile.</p>
       )}
 
@@ -76,42 +80,41 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const [passError, setPassError] = useState(null);
+  const [hasPassword, setHasPassword] = useState(false);  // accounts on this computer: only then is the password asked
   const panel = useRef(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  // accounts on this computer: only the admin deletes accounts, and hands the role on before deleting its own
+  const local = Boolean(user?.local);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [others, setOthers] = useState([]);  // the admin's list: who can take the role
+  const [transferTo, setTransferTo] = useState('');
+  useModalFocus(open, panel, onClose, returnFocus);
 
   useEffect(() => {
     if (!open) return undefined;
     let active = true;
-    const fallbackFocus = returnFocus?.current;  // the account button: still mounted when the dialog closes
-    const before = document.activeElement;
-    setConfirmName(''); setPassword(''); setError(null); setPassError(null); setBusy(null);
+    setConfirmName(''); setPassword(''); setError(null); setPassError(null); setBusy(null); setHasPassword(false);
+    setIsAdmin(false); setOthers([]); setTransferTo('');
     api('/api/status').then((st) => { if (active) setStatus(st); }).catch(() => { if (active) setError('The backend is offline.'); });
-    panel.current?.focus();
-    const onKey = (e) => {
-      if (e.key === 'Escape') { onCloseRef.current(); return; }
-      if (e.key !== 'Tab' || !panel.current) return;
-      // keep Tab inside the modal dialog
-      const items = [...panel.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-        .filter((el) => !el.disabled && el.offsetParent !== null);
-      if (!items.length) return;
-      const first = items[0], last = items[items.length - 1];
-      if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      active = false;
-      window.removeEventListener('keydown', onKey);
-      const target = before && document.contains(before) ? before : fallbackFocus;
-      if (target && typeof target.focus === 'function') target.focus();
-    };
-  }, [open, returnFocus]);
+    if (local) {
+      api('/api/auth/me').then((me) => {
+        if (!active) return;
+        setHasPassword(Boolean(me.hasPassword));
+        setIsAdmin(Boolean(me.isAdmin));
+        if (me.isAdmin) {
+          api('/api/auth/accounts').then((list) => { if (active) setOthers((list || []).filter((a) => a.id !== user?.id)); }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [open, local, user?.id]);
 
   if (!open || !user) return null;
   const authRequired = Boolean(status?.auth_required);
   const nameOk = confirmName.trim() === (user.name || '').trim() && confirmName.trim() !== '';
-  const canDelete = Boolean(status) && nameOk && (!authRequired || password) && !busy;
+  const askPassword = authRequired || (local && hasPassword);
+  const needsTransfer = local && others.length > 0;
+  const canDelete = Boolean(status) && nameOk && (!askPassword || password) && (!needsTransfer || transferTo) && !busy
+    && (!local || isAdmin);
 
   const exportData = async () => {
     setBusy('export'); setError(null);
@@ -125,8 +128,10 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
     e.preventDefault();
     if (!canDelete) return;
     setBusy('delete'); setError(null); setPassError(null);
-    const [path, body] = authRequired
-      ? ['/api/auth/delete-account', { confirmName: confirmName.trim(), password }]
+    const [path, body] = authRequired || local
+      ? ['/api/auth/delete-account', {
+        confirmName: confirmName.trim(), ...(askPassword ? { password } : {}), ...(needsTransfer ? { transferTo } : {}),
+      }]
       : [`/api/users/${encodeURIComponent(user.id)}/delete`, { confirmName: confirmName.trim() }];
     try {
       const res = await authFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -140,9 +145,9 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
           setBusy(null);
           return;
         }
-        if (res.status === 401) setPassError('Wrong password');
+        if (res.status === 401) { setHasPassword(true); setPassError('Wrong password'); }  // the field shows if it was hidden
         else if (res.status === 422) setError(msg || 'The name you typed does not match this profile.');
-        else if (res.status === 409) setError(msg || 'Admin accounts cannot be deleted here. Ask the site administrator.');
+        else if (res.status === 409 || res.status === 403) setError(msg || 'Admin accounts cannot be deleted here. Ask the site administrator.');
         else setError(msg || `Delete failed (HTTP ${res.status})`);
         setBusy(null);
         return;
@@ -165,7 +170,7 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
           </button>
         </div>
 
-        <PrivacyNotice elevenlabs={Boolean(status?.elevenlabs_enabled)} authRequired={authRequired} />
+        <PrivacyNotice elevenlabs={Boolean(status?.elevenlabs_enabled)} authRequired={authRequired} local={local} />
         {status?.privacy_version && <p className="hint">Notice version {status.privacy_version}</p>}
 
         <section className="stack-sm" aria-labelledby="privacy-export-h">
@@ -178,6 +183,13 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
           </div>
         </section>
 
+        {local && !isAdmin ? (
+          <section className="privacy-danger stack-sm" aria-labelledby="privacy-delete-h">
+            <h3 id="privacy-delete-h">Delete my account and data</h3>
+            <p className="hint">Only the admin of this computer can delete accounts. Ask them to delete yours from their account
+              menu (Accounts on this computer).</p>
+          </section>
+        ) : (
         <form className="privacy-danger stack-sm" onSubmit={deleteAccount} aria-labelledby="privacy-delete-h">
           <h3 id="privacy-delete-h">Delete my account and data</h3>
           <div className="privacy-lists">
@@ -189,7 +201,7 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
               <span className="label">Not removed</span>
               <ul>
                 {KEPT.map((t) => <li key={t}>{t}</li>)}
-                {status && !authRequired && <li>The shared assistant message history on this computer</li>}
+                {status && !authRequired && !local && <li>The shared assistant message history on this computer</li>}
               </ul>
             </div>
           </div>
@@ -198,7 +210,7 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
             <label htmlFor="privacy-confirm">Type your name, <b>{user.name}</b>, to confirm</label>
             <input id="privacy-confirm" className="input" value={confirmName} onChange={(e) => setConfirmName(e.target.value)} autoComplete="off" />
           </div>
-          {authRequired && (
+          {askPassword && (
             <div className="field">
               <label htmlFor="privacy-pass">Password</label>
               <input id="privacy-pass" className="input" type="password" value={password} autoComplete="current-password"
@@ -207,12 +219,23 @@ export function PrivacyDialog({ open, onClose, user, returnFocus }) {
               {passError && <span id="privacy-pass-err" className="hint err" role="alert">{passError}</span>}
             </div>
           )}
+          {needsTransfer && (
+            <div className="field">
+              <label htmlFor="privacy-transfer">You are the admin of this computer. Hand the role to</label>
+              <select id="privacy-transfer" className="select" value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
+                <option value="">Choose an account…</option>
+                {others.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <span className="hint">They can then delete accounts and change the shared library.</span>
+            </div>
+          )}
           <div className="btn-row">
             <button type="submit" className="btn btn-danger" disabled={!canDelete}>
               <Trash2 size={14} aria-hidden="true" /> {busy === 'delete' ? 'Deleting…' : 'Delete my account and data'}
             </button>
           </div>
         </form>
+        )}
 
         {error && <p className="notice notice-bad" role="alert">{error}</p>}
       </div>
