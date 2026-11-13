@@ -1,10 +1,15 @@
 """Test helpers for accounts on this computer (SCIEDU_LOCAL_ACCOUNTS, docs/plans/ACCOUNTS.md).
 
-Local sign-in does not exist yet, so accounts and sessions are made directly with the db helpers the server's own
-sign-in uses (get_or_create_user, set_consent, create_session)."""
+local_account() makes a name-only account and its session directly with the db helpers; the sign-in endpoints have
+their own tests in test_local_accounts.py."""
+import os
 import unittest
+from unittest import mock
 
 from test_lab import server, db  # noqa: F401  (sets up the temp content dir first)
+import userkeys
+
+TEST_SCRYPT_N = 2 ** 10  # the real 2^17 takes 128 MiB and a good part of a second per derivation
 
 
 def local_account(name):
@@ -19,7 +24,14 @@ class LocalAccountsMixin:
     Goes before the TestCase in the bases, so a server-mode case's setUp (which turns AUTH_REQUIRED on) is undone."""
     def setUp(self):
         self._account_flags = (server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS)
+        self._key_state = (userkeys.SCRYPT_N, userkeys.DEVICE_KEY, dict(userkeys.UNLOCKED), dict(server._login_failures))
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, True
+        userkeys.SCRYPT_N, userkeys.DEVICE_KEY = TEST_SCRYPT_N, os.urandom(32)
+        userkeys.UNLOCKED.clear()
+        server._login_failures.clear()
+        # check_key swallows network errors ("unverified"), so the offline guard alone would not catch a missed mock
+        self._no_key_check = mock.patch.object(userkeys, "check_key", side_effect=AssertionError("mock userkeys.check_key"))
+        self._no_key_check.start()
         super().setUp()
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, True
 
@@ -27,7 +39,13 @@ class LocalAccountsMixin:
         try:
             super().tearDown()
         finally:
+            self._no_key_check.stop()
             server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = self._account_flags
+            userkeys.SCRYPT_N, userkeys.DEVICE_KEY, unlocked, failures = self._key_state
+            userkeys.UNLOCKED.clear()
+            userkeys.UNLOCKED.update(unlocked)
+            server._login_failures.clear()
+            server._login_failures.update(failures)
 
 
 class BothFlagsMixin:

@@ -360,6 +360,7 @@ cryptography==48.0.1 \
     --hash=sha256:fe0180af5bf9236518a087e35bf2d9a347d5f5f51e63c579d683ddff424e3d46
     # via
     #   -c desktop/constraints-mac-x64.txt
+    #   -r requirements.txt
     #   google-auth
 distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \

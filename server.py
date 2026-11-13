@@ -41,6 +41,7 @@ import advisor_cart
 import advisor_chat
 import advisor_classifier
 import sprint
+import userkeys
 import wm_advising
 
 # SCIEDU_ENV_FILE: unset = .env beside this file (or the nearest one up the tree); a path = only that file;
@@ -90,9 +91,12 @@ def local_mode() -> bool:
     return LOCAL_ACCOUNTS and not AUTH_REQUIRED
 
 
+LOCAL_PUBLIC_API = {"/api/auth/profiles", "/api/auth/forgot-delete"}  # the sign-in screen of accounts on this computer
+
+
 def public_paths() -> set:
     """API paths that answer without signing in."""
-    return PUBLIC_API
+    return PUBLIC_API | LOCAL_PUBLIC_API if local_mode() else PUBLIC_API
 PRIVACY_VERSION = "2026-11-07"  # the privacy notice's version; a sign-in reports whether the user accepted this one
 CURRENT_USER: "contextvars.ContextVar[Optional[Dict[str, Any]]]" = contextvars.ContextVar("current_user", default=None)
 CLIENT_KEY: "contextvars.ContextVar[str]" = contextvars.ContextVar("client_key", default="local")
@@ -101,7 +105,7 @@ LOCAL_DAY: contextvars.ContextVar = contextvars.ContextVar("local_day", default=
 # Requests that spend model quota, per signed-in user (or per client address without accounts), per hour.
 # SCIEDU_RATE_SCALE multiplies every limit; 0 turns limiting off.
 RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload": 30, "ide": 120, "chat": 240, "quiz": 600,
-               "language_roleplay": 120, "advisor": 60, "language_tts": 300, "explain": 20}
+               "language_roleplay": 120, "advisor": 60, "language_tts": 300, "explain": 20, "key_check": 20}
 RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
 _rate_hits: Dict[Tuple[str, str], List[float]] = {}
 _rate_lock = threading.Lock()
@@ -141,6 +145,37 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Local-Day"],
 )
 
+# Accounts on this computer: polls the UI makes on its own, which must not count as activity (ACCOUNTS.md trap 3)
+IDLE_EXEMPT_PATHS = {"/api/agy/events", "/api/jobs", "/api/topics/version", "/api/status", "/api/auth/me"}
+AUTO_LOCK_DEFAULT_MIN = 30
+
+
+def idle_lock(user_id: str, path: str) -> bool:
+    """Server-side backstop of the UI's idle timer: a password account unused for its auto-lock minutes is locked
+    (key dropped, sessions ended) and this request refused. Otherwise records the activity; True means locked."""
+    entry = userkeys.UNLOCKED.get(user_id)
+    info = db.local_account_info(user_id) or {}
+    if entry is None:
+        if info.get("has_password"):  # a session left over after logout or lock: the password is asked again
+            lock_account(user_id)
+            return True
+        return False
+    now = time.time()
+    minutes = info.get("auto_lock_minutes")
+    minutes = AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes
+    if info.get("has_password") and minutes > 0 and now - entry["last_active"] > minutes * 60:
+        lock_account(user_id)
+        return True
+    if path not in IDLE_EXEMPT_PATHS and not path.startswith("/api/jobs/"):
+        entry["last_active"] = now
+    return False
+
+
+def lock_account(user_id: str):
+    """Forgets the account's unlocked key and ends its sessions on this computer."""
+    userkeys.UNLOCKED.pop(user_id, None)
+    db.end_user_sessions(user_id)
+
 @app.middleware("http")
 async def reject_foreign_hosts(request, call_next):
     """Blocks DNS-rebinding: a hostile page can't reach us under its own hostname."""
@@ -160,6 +195,9 @@ async def reject_foreign_hosts(request, call_next):
         user = db.user_for_token(auth[7:].strip()) if auth.lower().startswith("bearer ") else None
         if not user:
             return JSONResponse({"detail": "Sign in to continue."}, status_code=401)
+        if local_mode() and idle_lock(user["id"], request.url.path):
+            return JSONResponse({"detail": "Your account locked itself after a while without activity. Sign in again."},
+                                status_code=401)
         CURRENT_USER.set(user)
     CLIENT_KEY.set(CURRENT_USER.get()["id"] if CURRENT_USER.get() else (request.client.host if request.client else "local"))
     LOCAL_DAY.set(engage.clean_day(request.headers.get("x-local-day")))
@@ -313,16 +351,13 @@ def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], all
     return cfg, search_injected
 
 
-# Google's answer when the key itself is wrong, revoked or lacks the Gemini API. desktop/keycheck.cjs reads the
-# same text before a key is saved; keep the two in step (ARCHITECTURE.md section 5.4).
-_BAD_KEY_RE = re.compile(r"api_key_invalid|api key not valid")
-_REVOKED_KEY_RE = re.compile(r"leaked|suspended|service_disabled|has not been used in project")
+# Google's answer when the key itself is wrong, revoked or lacks the Gemini API: the expressions live in userkeys,
+# which also reads the test request made before a key is saved (desktop/keycheck.cjs until phase 4 removes it).
 GEMINI_KEY_INVALID = False  # set when Google rejects the key mid-run, cleared by the next successful call
 
 
 def _is_bad_key(e: Exception) -> bool:
-    text = str(e).lower()
-    return bool(_BAD_KEY_RE.search(text)) or (getattr(e, "code", None) == 403 and bool(_REVOKED_KEY_RE.search(text)))
+    return userkeys.is_bad_key_text(str(e), getattr(e, "code", None))
 
 
 def _key_rejected(e: Exception):
@@ -3131,7 +3166,11 @@ class AgyPromptModel(BaseModel):
 ADMINS = {n.strip() for n in os.environ.get("SCIEDU_ADMINS", "").split(",") if n.strip()}
 
 def is_admin() -> bool:
+    """Server accounts: ids in SCIEDU_ADMINS. Accounts on this computer: the admin account (db.is_local_admin).
+    No accounts: everyone."""
     me = CURRENT_USER.get()
+    if local_mode():
+        return bool(me and db.is_local_admin(me["id"]))
     return not AUTH_REQUIRED or bool(me and me.get("id") in ADMINS)
 
 def warn_unknown_admins():
@@ -3141,7 +3180,7 @@ def warn_unknown_admins():
 
 def require_topic_write(topic_id: str, incoming: Optional[Dict[str, Any]] = None):
     """Accounts mode: a course lesson may be changed only by its course's owner; the shared library and anything
-    that isn't a course lesson only by an admin (SCIEDU_ADMINS; any signed-in user with local accounts).
+    that isn't a course lesson only by an admin (SCIEDU_ADMINS; the admin account with local accounts).
     Personal machine: anything goes."""
     if not scoped():
         return
@@ -4690,7 +4729,7 @@ class ClassifyCatalogRequest(BaseModel):
 def advisor_classify_catalog(req: Optional[ClassifyCatalogRequest] = None):
     rate_limit("course")
     req = req or ClassifyCatalogRequest()
-    if AUTH_REQUIRED and not is_admin():
+    if scoped() and not is_admin():
         raise HTTPException(status_code=403, detail="Only an administrator can classify catalog courses.")
 
     for existing_job in JOBS.values():
@@ -4955,9 +4994,11 @@ def require_not_cleared(course: Dict[str, Any]) -> Dict[str, Any]:
 
 class AuthRequest(BaseModel):
     name: str
-    password: str
+    password: Optional[str] = None  # server accounts: required; accounts on this computer: optional
     adult: Optional[bool] = None   # required on sign-up: the Gemini API terms require users to be 18+
     privacy: Optional[bool] = None  # required on sign-up: the privacy notice (PRIVACY_VERSION) was accepted
+
+MIN_PASSWORD = 8
 
 def _clean_name(raw: str) -> str:
     name = " ".join((raw or "").split())[:40]
@@ -4965,8 +5006,121 @@ def _clean_name(raw: str) -> str:
         raise HTTPException(status_code=422, detail="Use a name with at least 2 characters.")
     return name
 
+def _names_match(typed: Optional[str], name: str) -> bool:
+    return " ".join((typed or "").split()).casefold() == " ".join(name.split()).casefold()
+
+# ---- accounts on this computer (SCIEDU_LOCAL_ACCOUNTS; docs/plans/ACCOUNTS.md): passwords, the sealed Gemini key
+GEMINI_SECRET = "gemini"  # user_secrets.kind of the account's own Gemini key
+LOGIN_FREE_FAILURES, LOGIN_MAX_WAIT_S = 5, 900
+_login_failures: Dict[str, Dict[str, float]] = {}  # casefolded name -> {"count", "until"}; in memory only
+
+def _login_attempt(name: str):
+    """Counts a password attempt before it is checked, so parallel guesses can't all slip past the wait: five wrong
+    passwords are free; after that each one waits 2^n seconds (n = attempts past five), up to 15 min. A right
+    password clears the count (_login_ok)."""
+    with _rate_lock:
+        f = _login_failures.setdefault(name.casefold(), {"count": 0, "until": 0.0})
+        wait = int((f["until"] - time.time()) + 0.999)
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=f"Too many wrong passwords. Try again in {wait} s.")
+        f["count"] += 1
+        if f["count"] > LOGIN_FREE_FAILURES:
+            f["until"] = time.time() + min(2 ** (f["count"] - LOGIN_FREE_FAILURES), LOGIN_MAX_WAIT_S)
+
+def _login_ok(name: str):
+    with _rate_lock:
+        _login_failures.pop(name.casefold(), None)
+
+def _verify_local_password(user: Dict[str, Any], password: Optional[str]) -> Optional[bytes]:
+    """The account's KEK when the password matches, else None; every check (sign-in, password change, delete) goes
+    through the same per-name backoff."""
+    _login_attempt(user["name"])
+    kek = _check_local_password(user, password or "")
+    if kek is not None:
+        _login_ok(user["name"])
+    return kek
+
+def _check_local_password(user: Dict[str, Any], password: str) -> Optional[bytes]:
+    """The account's KEK when the password matches, else None. A scrypt$ hash (made before local accounts) is
+    replaced by a scrypt2$ one here, since only that yields a KEK."""
+    stored = user.get("password_hash")
+    if (stored or "").startswith("scrypt2$"):
+        return userkeys.verify_password(password, stored)
+    if not db.check_password(password, stored):
+        return None
+    stored, kek = userkeys.hash_password(password)
+    db.set_password_hash(user["id"], stored)
+    return kek
+
+def _unlock_entry(user_id: str, kek: Optional[bytes]) -> Dict[str, Any]:
+    now = time.time()
+    entry = userkeys.UNLOCKED[user_id] = {"key": None, "kek": kek, "unlocked_at": now, "last_active": now}
+    return entry
+
+def _store_key(user_id: str, key: str, mode: str, kek: Optional[bytes], hint: Optional[str]):
+    nonce, ciphertext = userkeys.wrap(key, user_id, GEMINI_SECRET, mode, kek)
+    db.set_secret(user_id, GEMINI_SECRET, mode, nonce, ciphertext, hint)
+
+def _open_key(user_id: str) -> str:
+    """Puts the account's Gemini key into userkeys.UNLOCKED when it can be opened here. Returns the key state:
+    none | ok | locked (what seals it is not here: no password KEK or no device key) | unreadable."""
+    row = db.get_secret(user_id, GEMINI_SECRET)
+    if not row:
+        return "none"
+    entry = userkeys.UNLOCKED.get(user_id)
+    if entry and entry.get("key"):
+        return "ok"
+    kek = (entry or {}).get("kek")
+    try:
+        key = userkeys.unwrap(row["nonce"], row["ciphertext"], user_id, GEMINI_SECRET, row["mode"], kek)
+    except userkeys.KeyUnavailable:
+        return "locked"
+    except userkeys.KeyUnreadable:
+        return "unreadable"
+    if row["mode"] == "device" and kek:  # a password account's key sealed with the device key: move it under the password
+        _store_key(user_id, key, "password", kek, row.get("hint"))
+    (entry or _unlock_entry(user_id, kek))["key"] = key
+    return "ok"
+
+def _local_register(req: AuthRequest, request: Request):
+    """Accounts on this computer: a name and an optional password. The privacy notice is shown, not signed (as with
+    name-only profiles). The first account on this computer is its admin."""
+    auth_rate_limit(request)
+    name = _clean_name(req.name)
+    password = req.password or None
+    if password is not None and len(password) < MIN_PASSWORD:
+        raise HTTPException(status_code=422, detail=f"Use a password of at least {MIN_PASSWORD} characters, or none.")
+    if db.get_user_by_name(name):
+        raise HTTPException(status_code=409, detail="That name is taken on this computer. Sign in, or choose another name.")
+    stored, kek = userkeys.hash_password(password) if password else (None, None)
+    user = db.create_local_account(name, stored)
+    _unlock_entry(user["id"], kek)
+    return {"token": db.create_session(user["id"]), "user": user, "privacyAccepted": True, "keyState": "none"}
+
+def _local_login(req: AuthRequest, request: Request):
+    """Accounts on this computer: an account without a password opens with its name; one with a password needs it
+    (and its key unlocks with it). Wrong passwords back off per name."""
+    auth_rate_limit(request)
+    name = _clean_name(req.name)
+    user = db.get_user_by_name(name)
+    if not user:
+        raise HTTPException(status_code=401, detail="There is no account with that name on this computer.")
+    kek = None
+    if user.get("password_hash"):
+        if not req.password:
+            raise HTTPException(status_code=401, detail="This account has a password. Enter it to sign in.")
+        kek = _verify_local_password(user, req.password)
+        if kek is None:
+            raise HTTPException(status_code=401, detail="Wrong password.")
+    _unlock_entry(user["id"], kek)
+    key_state = _open_key(user["id"])
+    return {"token": db.create_session(user["id"]), "user": {"id": user["id"], "name": user["name"]},
+            "privacyAccepted": True, "keyState": key_state}
+
 @app.post("/api/auth/register")
 def register(req: AuthRequest, request: Request):
+    if local_mode():
+        return _local_register(req, request)
     if not AUTH_REQUIRED:
         raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
     auth_rate_limit(request)
@@ -4975,7 +5129,7 @@ def register(req: AuthRequest, request: Request):
         raise HTTPException(status_code=422, detail="This service uses the Gemini API, which is for people 18 or older. Confirm your age to continue.")
     if req.privacy is not True:
         raise HTTPException(status_code=422, detail="Please accept the privacy notice.")
-    if len(req.password) < 8:
+    if len(req.password or "") < MIN_PASSWORD:
         raise HTTPException(status_code=422, detail="Use a password of at least 8 characters.")
     # a name-only profile (from local use) is not up for grabs either: whoever typed its name first would own its courses
     if db.get_user_by_name(name):
@@ -4986,11 +5140,13 @@ def register(req: AuthRequest, request: Request):
 
 @app.post("/api/auth/login")
 def login(req: AuthRequest, request: Request):
+    if local_mode():
+        return _local_login(req, request)
     if not AUTH_REQUIRED:
         raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
     auth_rate_limit(request)
     user = db.get_user_by_name(_clean_name(req.name))
-    if not user or not db.check_password(req.password, user.get("password_hash")):
+    if not user or not db.check_password(req.password or "", user.get("password_hash")):
         raise HTTPException(status_code=401, detail="Wrong name or password.")
     return {"token": db.create_session(user["id"]), "user": {"id": user["id"], "name": user["name"]},
             "privacyAccepted": user.get("privacy_version") == PRIVACY_VERSION}
@@ -5000,11 +5156,163 @@ def logout(request: Request):
     auth = request.headers.get("authorization") or ""
     if auth.lower().startswith("bearer "):
         db.end_session(auth[7:].strip())
+    if local_mode() and CURRENT_USER.get():
+        uid = CURRENT_USER.get()["id"]
+        if (db.local_account_info(uid) or {}).get("has_password"):
+            lock_account(uid)  # every window of the account signs out with its key
+        else:
+            userkeys.UNLOCKED.pop(uid, None)
     return {"status": "signed_out"}
 
 @app.get("/api/auth/me")
 def me():
-    return {"user": CURRENT_USER.get(), "authRequired": AUTH_REQUIRED}
+    user = CURRENT_USER.get()
+    out = {"user": user, "authRequired": AUTH_REQUIRED, "localAccounts": local_mode()}
+    if local_mode() and user:
+        info = db.local_account_info(user["id"]) or {}
+        minutes = info.get("auto_lock_minutes")
+        out.update(hasPassword=bool(info.get("has_password")), keyState=_open_key(user["id"]),
+                   autoLockMin=AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes, isAdmin=db.is_local_admin(user["id"]))
+    return out
+
+def require_local_accounts():
+    if not local_mode():
+        raise HTTPException(status_code=404, detail="Only with accounts on this computer.")
+
+@app.get("/api/auth/profiles")
+def local_profiles():
+    """The sign-in screen's account tiles: [{id, name, locked}] (locked = the account has a password)."""
+    require_local_accounts()
+    return db.list_local_profiles()
+
+@app.post("/api/auth/lock")
+def lock_my_account():
+    """Locks the signed-in account now: its key leaves memory and its sessions end (the UI's idle timer calls this)."""
+    require_local_accounts()
+    lock_account(CURRENT_USER.get()["id"])
+    return {"status": "locked"}
+
+class PasswordChangeRequest(BaseModel):
+    current: Optional[str] = None  # required when the account has a password
+    new: Optional[str] = None      # empty or missing: remove the password
+
+@app.post("/api/auth/password")
+def change_password(body: PasswordChangeRequest, request: Request):
+    """Sets, changes or removes the account's password. The stored Gemini key moves with it: sealed with the new
+    password, or with this computer's device key when the password goes (without a device key it is deleted)."""
+    require_local_accounts()
+    auth_rate_limit(request)
+    uid = CURRENT_USER.get()["id"]
+    user = db.get_user_auth(uid) or {}
+    old_kek = None
+    if user.get("password_hash"):
+        if not body.current:
+            raise HTTPException(status_code=401, detail="Enter your current password.")
+        old_kek = _verify_local_password(user, body.current)
+        if old_kek is None:
+            raise HTTPException(status_code=401, detail="Wrong password.")
+    new = body.new or None
+    if new is None and not user.get("password_hash"):
+        raise HTTPException(status_code=422, detail=f"Enter a new password of at least {MIN_PASSWORD} characters.")
+    if new is not None and len(new) < MIN_PASSWORD:
+        raise HTTPException(status_code=422, detail=f"Use a password of at least {MIN_PASSWORD} characters.")
+    row = db.get_secret(uid, GEMINI_SECRET)
+    key = (userkeys.UNLOCKED.get(uid) or {}).get("key")
+    if row and not key:
+        try:
+            key = userkeys.unwrap(row["nonce"], row["ciphertext"], uid, GEMINI_SECRET, row["mode"], old_kek)
+        except (userkeys.KeyUnavailable, userkeys.KeyUnreadable):
+            key = None
+    stored, kek = userkeys.hash_password(new) if new else (None, None)
+    mode = "password" if new else "device"
+    out = {"status": "ok", "hasPassword": bool(new), "keyRemoved": False}
+    sealed = None
+    if row and key and (mode == "password" or userkeys.DEVICE_KEY):
+        sealed = (mode, *userkeys.wrap(key, uid, GEMINI_SECRET, mode, kek), row.get("hint"))
+    db.set_password_and_secret(uid, stored, GEMINI_SECRET, sealed)  # sealed first: nothing is written if that fails
+    auth = request.headers.get("authorization") or ""
+    db.end_user_sessions(uid, keep_token=auth[7:].strip() if auth.lower().startswith("bearer ") else None)
+    if row and sealed is None:
+        out["keyRemoved"] = True
+        out["message"] = ("Your saved Gemini key was removed: this computer has no device key to keep it locked "
+                          "without a password. Add the key again from the account menu." if key else
+                          "Your saved Gemini key could not be opened and was removed. Add it again from the account menu.")
+        key = None
+    entry = userkeys.UNLOCKED.get(uid) or _unlock_entry(uid, kek)
+    entry.update(kek=kek, key=key)
+    out["keyState"] = "ok" if key else "none"
+    return out
+
+class ForgotDeleteRequest(BaseModel):
+    userId: str
+    confirmName: str
+
+@app.post("/api/auth/forgot-delete")
+def forgot_password_delete(body: ForgotDeleteRequest, request: Request):
+    """No password recovery: a forgotten password means deleting the account and its data from the sign-in screen,
+    confirmed by typing its name."""
+    require_local_accounts()
+    auth_rate_limit(request)
+    user = db.get_user_auth(body.userId)
+    if not user:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    if not user.get("password_hash"):
+        raise HTTPException(status_code=409, detail="This account has no password: sign in and delete it from the account menu.")
+    if not _names_match(body.confirmName, user["name"]):
+        raise HTTPException(status_code=422, detail="Type the account's name exactly as it appears to confirm.")
+    return {"status": "deleted", "removed": delete_user_everything(user["id"])}
+
+class AuthPrefsRequest(BaseModel):
+    autoLockMin: int
+
+@app.put("/api/auth/prefs")
+def set_auth_prefs(body: AuthPrefsRequest):
+    """Minutes without activity before a password account locks itself; 0 = never."""
+    require_local_accounts()
+    if not 0 <= body.autoLockMin <= 1440:
+        raise HTTPException(status_code=422, detail="Auto-lock takes 0 (never) to 1440 minutes.")
+    db.set_auto_lock(CURRENT_USER.get()["id"], body.autoLockMin)
+    return {"autoLockMin": body.autoLockMin}
+
+class GeminiKeyRequest(BaseModel):
+    key: str = Field(max_length=200)
+
+@app.put("/api/me/gemini-key")
+def put_my_gemini_key(body: GeminiKeyRequest):
+    """Checks the key with Google, then keeps it for this account only: sealed with the account's password, or with
+    this computer's device key for an account without one. The key is never sent back (only its last 4 characters)."""
+    require_local_accounts()
+    rate_limit("key_check")
+    uid = CURRENT_USER.get()["id"]
+    key = body.key.strip()
+    if len(key) < 8 or any(ch.isspace() for ch in key):
+        raise HTTPException(status_code=422, detail="Paste the whole key, without spaces.")
+    verdict = userkeys.check_key(key)
+    if verdict == "invalid":
+        raise HTTPException(status_code=400, detail="Google rejected this key. Check that you copied all of it, "
+                                                    "or create a new key in Google AI Studio.")
+    if verdict == "service_disabled":
+        raise HTTPException(status_code=400, detail="This key's Google Cloud project does not have the Gemini API "
+                                                    "turned on. Turn it on for the project, or use a key from Google AI Studio.")
+    entry = userkeys.UNLOCKED.get(uid)
+    kek = (entry or {}).get("kek")
+    has_password = bool((db.local_account_info(uid) or {}).get("has_password"))
+    mode = "password" if has_password and kek else "device"
+    if mode == "device" and not userkeys.DEVICE_KEY:
+        raise HTTPException(status_code=409, detail="Sign in again to save your key." if has_password else
+                            "This computer cannot lock a key for an account without a password yet. Set a password first.")
+    _store_key(uid, key, mode, kek, key[-4:])
+    (entry or _unlock_entry(uid, kek))["key"] = key
+    return {"status": "saved", "verified": verdict == "ok", "keyState": "ok", "hint": key[-4:]}
+
+@app.delete("/api/me/gemini-key")
+def delete_my_gemini_key():
+    require_local_accounts()
+    uid = CURRENT_USER.get()["id"]
+    removed = db.delete_secret(uid, GEMINI_SECRET)
+    if uid in userkeys.UNLOCKED:
+        userkeys.UNLOCKED[uid]["key"] = None
+    return {"status": "removed" if removed else "none", "keyState": "none"}
 
 # ---------------------------------------------------------------- privacy: consent, export, delete (PRIVACY_AND_DEPLOYMENT.md §3)
 class ConsentRequest(BaseModel):
@@ -5141,20 +5449,30 @@ def export_my_data(user_id: str):
 @app.post("/api/users/{user_id}/delete")
 def delete_account(body: DeleteAccountRequest, request: Request, user_id: Optional[str] = None):
     """Deletes the user, their courses, lessons, progress, files and quiz log lines. Shared library lessons stay.
-    Accounts mode: the signed-in user, confirmed by password. Personal machine: /api/users/{id}/delete."""
-    if AUTH_REQUIRED:
+    Accounts mode: the signed-in user, confirmed by password (accounts on this computer: if it has one).
+    Personal machine: /api/users/{id}/delete."""
+    if AUTH_REQUIRED or local_mode():
         auth_rate_limit(request)
         user_id = user_id or CURRENT_USER.get()["id"]
     elif not user_id:
         raise HTTPException(status_code=404, detail="Accounts are off on this server (SCIEDU_AUTH is not set).")
     user = require_user(user_id)
-    if " ".join((body.confirmName or "").split()).casefold() != " ".join(user["name"].split()).casefold():
+    if not _names_match(body.confirmName, user["name"]):
         raise HTTPException(status_code=422, detail="Type your name exactly as it appears on your account to confirm.")
-    if AUTH_REQUIRED:
-        if not db.check_password(body.password or "", (db.get_user_auth(user_id) or {}).get("password_hash")):
-            raise HTTPException(status_code=401, detail="Wrong password")
-        if user_id in ADMINS:
-            raise HTTPException(status_code=409, detail="Remove your id from SCIEDU_ADMINS before deleting this account.")
+    auth_user = db.get_user_auth(user_id) or {}
+    stored = auth_user.get("password_hash")
+    if AUTH_REQUIRED and not db.check_password(body.password or "", stored):
+        raise HTTPException(status_code=401, detail="Wrong password")
+    if local_mode() and stored and _verify_local_password(auth_user, body.password) is None:
+        raise HTTPException(status_code=401, detail="Wrong password")
+    if AUTH_REQUIRED and user_id in ADMINS:
+        raise HTTPException(status_code=409, detail="Remove your id from SCIEDU_ADMINS before deleting this account.")
+    return {"status": "deleted", "removed": delete_user_everything(user_id)}
+
+def delete_user_everything(user_id: str) -> Dict[str, int]:
+    """The deletion itself, after the caller confirmed who asks: files, rows, quiz log lines, jobs, events and the
+    unlocked key. Returns what was removed."""
+    userkeys.UNLOCKED.pop(user_id, None)
     course_ids = db.user_course_ids(user_id)
     topic_ids = set(db.user_topic_ids(course_ids))
     files = course_topic_files(course_ids)
@@ -5171,7 +5489,7 @@ def delete_account(body: DeleteAccountRequest, request: Request, user_id: Option
     with _events_lock:
         ui_events_queue[:] = [e for e in ui_events_queue if e.get("owner") != user_id]
     emit_event("TOPIC_UPDATED", {"autoSelect": False})
-    return {"status": "deleted", "removed": counts}
+    return counts
 
 def public_course(course: Dict[str, Any]) -> Dict[str, Any]:
     """Course + classes for the UI. Diagnostic answer keys stay hidden until the student submits; problem sprint
@@ -5911,6 +6229,12 @@ async def lifespan(_app):
         db.close_all()  # uvicorn has finished the open requests by now
 
 app.router.lifespan_context = lifespan
+
+def start_signed_out():
+    """Accounts on this computer: each launch starts signed out, since the unlocked keys are gone with the last run."""
+    if local_mode():
+        db.init_db()
+        db.clear_sessions()
 
 def import_topic_files_into_db():
     for path in TOPICS_DIR.glob("*.json"):
@@ -7349,5 +7673,6 @@ if __name__ == "__main__":
     if host not in ("127.0.0.1", "localhost", "::1") and not AUTH_REQUIRED:
         sys.exit("Refusing to listen on {} without accounts: set SCIEDU_AUTH=1 (and SCIEDU_ALLOWED_HOSTS) "
                  "before serving other machines.".format(host))
+    start_signed_out()
     print(f"Starting &.edu backend on http://{host}:{port} ...")
     uvicorn.run(app, host=host, port=port)

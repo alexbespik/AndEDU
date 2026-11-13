@@ -219,7 +219,8 @@ class LocalDelete(unittest.TestCase):
 
 class Guard(unittest.TestCase):
     def test_every_user_id_table_is_covered_by_export_and_delete(self):
-        known = set(db.USER_DATA_TABLES) | {"users", "courses", "classes", "lessons", "sessions"}
+        # user_secrets: delete_user removes it explicitly; exports must never carry the sealed keys
+        known = set(db.USER_DATA_TABLES) | {"users", "courses", "classes", "lessons", "sessions", "user_secrets"}
         missing = [t for t in user_id_tables() if t not in known]
         self.assertEqual(missing, [], "add these tables to db.USER_DATA_TABLES so export and delete cover them")
 

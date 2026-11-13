@@ -1,11 +1,15 @@
-"""Accounts on this computer, phase 1 (docs/plans/ACCOUNTS.md): SCIEDU_LOCAL_ACCOUNTS scopes every request to its
+"""Accounts on this computer (docs/plans/ACCOUNTS.md). Phase 1: SCIEDU_LOCAL_ACCOUNTS scopes every request to its
 signed-in user like SCIEDU_AUTH, keeps the server-only rules off, never hands out password hashes, and loses to
-SCIEDU_AUTH when both are set."""
+SCIEDU_AUTH when both are set. Phase 2: sign-in with optional passwords, the admin account, each account's sealed
+Gemini key, lock, auto-lock, forgot-password delete and the pre-migration backup."""
 from test_lab import LOCAL, TestClient, server, db, engage  # noqa: F401  (sets up the temp content dir first)
 
 import ast
+import contextlib
 import json
 import os
+import sqlite3
+import tempfile
 import time
 import unittest
 import uuid
@@ -14,7 +18,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 import language_tts
-from local_accounts import LocalAccountsCase, local_account
+import userkeys
+from local_accounts import TEST_SCRYPT_N, LocalAccountsCase, local_account
 
 QUIZ = [{"id": "q1", "question": "2+2?", "options": ["4", "5"], "correctAnswer": 0}]
 PASSWORD = "correct horse battery"
@@ -29,6 +34,11 @@ def setUpModule():
 
 def topic(tid, **extra):
     return {"id": tid, "title": "Local", "category": "Physics", "markdownContent": "# Local", **extra}
+
+
+def set_admin(user_id, on):
+    db.conn().execute("UPDATE users SET is_admin = ? WHERE id = ?", (1 if on else 0, user_id))
+    db.conn().commit()
 
 
 class Flags(unittest.TestCase):
@@ -106,8 +116,13 @@ class LocalScoping(LocalAccountsCase):
         evil = topic(tid, source={"courseId": "x"})
         self.assertEqual(self.c.post("/api/topics", json=evil, headers=self.b).status_code, 404)
         self.assertEqual(self.c.post(f"/api/topics/{tid}/flashcards", json={"items": []}, headers=self.a).status_code, 200)
-        # the shared library: any signed-in local user may write it (is_admin stays server-only)
-        self.assertEqual(self.c.post("/api/topics", json=topic(f"local-{self.tag}-lib"), headers=self.b).status_code, 200)
+        # the shared library: only the admin account on this computer may write it (phase 2, Admin decision)
+        self.assertEqual(self.c.post("/api/topics", json=topic(f"local-{self.tag}-lib"), headers=self.b).status_code, 403)
+        set_admin(self.b_id, True)
+        try:
+            self.assertEqual(self.c.post("/api/topics", json=topic(f"local-{self.tag}-lib"), headers=self.b).status_code, 200)
+        finally:
+            set_admin(self.b_id, False)
 
     def test_opening_someone_elses_lesson_does_not_write_their_next_class(self):
         tid = f"local-{self.tag}-open"
@@ -255,13 +270,507 @@ class Profiles(unittest.TestCase):
                 self.assertEqual(self.c.post("/api/execute-code", json={"code": "print(1)"}, headers=headers).status_code, 403)
 
 
+@contextlib.contextmanager
+def fresh_db():
+    """An empty database for this block (first-account and migration checks); the shared one comes back afterwards."""
+    old = db.DB_PATH
+    with tempfile.TemporaryDirectory(prefix="andedu-accounts-") as d:
+        with server._purge_running:  # the running app's purge thread must not be mid-query when connections close
+            db.close_all()
+            db.DB_PATH = Path(d) / "edu_studio.db"
+        try:
+            db.init_db()
+            yield Path(d)
+        finally:
+            with server._purge_running:
+                db.close_all()
+                db.DB_PATH = old
+
+
+def bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+class LocalSignIn(LocalAccountsCase):
+    """Phase 2: sign-in, passwords, the account's own Gemini key, lock and auto-lock (ACCOUNTS.md)."""
+    def setUp(self):
+        super().setUp()
+        self.limits = mock.patch.object(server, "AUTH_ATTEMPTS_PER_MINUTE", 10_000)
+        self.limits.start()
+        self.ctx = TestClient(server.app, base_url=LOCAL)
+        self.c = self.ctx.__enter__()
+        self.tag = uuid.uuid4().hex[:6]
+
+    def tearDown(self):
+        self.ctx.__exit__(None, None, None)
+        self.limits.stop()
+        server._rate_hits.pop(("key_check", "testclient"), None)
+        db.close_all()
+        super().tearDown()
+
+    def register(self, who, password=None):
+        body = {"name": f"{who} {self.tag}", **({"password": password} if password else {})}
+        r = self.c.post("/api/auth/register", json=body)
+        self.assertEqual(r.status_code, 200, r.text)
+        return bearer(r.json()["token"]), r.json()["user"]["id"]
+
+    def login(self, who, password=None):
+        return self.c.post("/api/auth/login", json={"name": f"{who} {self.tag}", **({"password": password} if password else {})})
+
+    def put_key(self, headers, key="AIza-test-key-1234", verdict="ok"):
+        with mock.patch.object(userkeys, "check_key", return_value=verdict) as check:
+            r = self.c.put("/api/me/gemini-key", json={"key": key}, headers=headers)
+        check.assert_called_once_with(key)
+        return r
+
+    def test_public_paths_add_the_sign_in_screen_only_locally(self):
+        self.assertEqual(server.public_paths(), {"/api/status", "/api/auth/login", "/api/auth/register",
+                                                 "/api/auth/profiles", "/api/auth/forgot-delete"})
+        server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = True, True
+        self.assertNotIn("/api/auth/profiles", server.public_paths())
+        self.assertEqual(self.c.get("/api/auth/profiles").status_code, 401)
+
+    def test_profiles_never_leak_hashes(self):
+        _, open_id = self.register("Open Olga")
+        _, locked_id = self.register("Locked Lena", PASSWORD)
+        r = self.c.get("/api/auth/profiles")  # no session: the sign-in screen
+        self.assertEqual(r.status_code, 200)
+        tiles = {p["id"]: p for p in r.json()}
+        self.assertEqual(tiles[open_id], {"id": open_id, "name": f"Open Olga {self.tag}", "locked": False})
+        self.assertEqual(tiles[locked_id], {"id": locked_id, "name": f"Locked Lena {self.tag}", "locked": True})
+        self.assertTrue(all(set(p) == {"id", "name", "locked"} for p in r.json()))
+        self.assertNotIn("scrypt", r.text)
+
+    def test_register_takes_an_optional_password_of_8_or_more(self):
+        r = self.c.post("/api/auth/register", json={"name": f"Short {self.tag}", "password": "1234567"})
+        self.assertEqual(r.status_code, 422)
+        headers, uid = self.register("Nopass Nina")  # no adult or privacy field needed on this computer
+        me = self.c.get("/api/auth/me", headers=headers).json()
+        self.assertEqual((me["localAccounts"], me["hasPassword"], me["keyState"], me["autoLockMin"]), (True, False, "none", 30))
+        self.assertIsNone(db.get_user_auth(uid)["password_hash"])
+        headers, uid = self.register("Pass Paul", PASSWORD)
+        self.assertTrue(db.get_user_auth(uid)["password_hash"].startswith(f"scrypt2${TEST_SCRYPT_N}$8$1$"))
+        self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["hasPassword"])
+        self.assertEqual(self.c.post("/api/auth/register", json={"name": f"pass paul {self.tag}"}).status_code, 409)
+
+    def test_login_is_passwordless_only_without_a_password(self):
+        self.register("Open Otto")
+        self.register("Locked Lars", PASSWORD)
+        r = self.login("Open Otto")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.c.get("/api/auth/me", headers=bearer(r.json()["token"])).json()["user"]["name"], f"Open Otto {self.tag}")
+        self.assertEqual(self.login("Locked Lars").status_code, 401)
+        self.assertEqual(self.login("Locked Lars", "wrong password").status_code, 401)
+        self.assertEqual(self.login("Nobody").status_code, 401)
+        r = self.login("Locked Lars", PASSWORD)
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("scrypt", r.text)
+
+    def test_wrong_passwords_back_off_per_name(self):
+        self.register("Backoff Bea", PASSWORD)
+        self.register("Other Olli", PASSWORD)
+        name = f"backoff bea {self.tag}"
+        for _ in range(5):  # five free failures
+            self.assertEqual(self.login("Backoff Bea", "wrong password").status_code, 401)
+        self.assertLessEqual(server._login_failures[name]["until"], time.time())
+        self.assertEqual(self.login("Backoff Bea", "wrong password").status_code, 401)
+        self.assertAlmostEqual(server._login_failures[name]["until"] - time.time(), 2, delta=1)
+        r = self.login("Backoff Bea", PASSWORD)  # even the right password waits
+        self.assertEqual(r.status_code, 429)
+        self.assertIn("Try again in", r.json()["detail"])
+        self.assertEqual(self.login("Other Olli", PASSWORD).status_code, 200)  # per name, not per computer
+        server._login_failures[name]["until"] = 0
+        self.assertEqual(self.login("Backoff Bea", "wrong password").status_code, 401)
+        self.assertAlmostEqual(server._login_failures[name]["until"] - time.time(), 4, delta=1)
+        server._login_failures[name].update(count=100, until=0)
+        self.login("Backoff Bea", "wrong password")
+        self.assertLessEqual(server._login_failures[name]["until"] - time.time(), 900)
+        server._login_failures[name]["until"] = 0
+        self.assertEqual(self.login("Backoff Bea", PASSWORD).status_code, 200)
+        self.assertNotIn(name, server._login_failures)  # a success starts over
+
+    def test_old_scrypt_hash_is_upgraded_on_local_login(self):
+        name = f"Legacy Lou {self.tag}"
+        user = db.create_account(name, PASSWORD)  # server-mode hash: scrypt$, n=2^14
+        self.assertTrue(db.get_user_auth(user["id"])["password_hash"].startswith("scrypt$"))
+        self.assertEqual(self.login("Legacy Lou", PASSWORD).status_code, 200)
+        stored = db.get_user_auth(user["id"])["password_hash"]
+        self.assertTrue(stored.startswith("scrypt2$"))
+        self.assertTrue(db.check_password(PASSWORD, stored))
+        self.assertFalse(db.check_password("wrong password", stored))
+        self.assertEqual(self.login("Legacy Lou", PASSWORD).status_code, 200)
+        self.assertTrue(db.hash_password(PASSWORD).startswith("scrypt$"))  # server accounts keep scrypt$
+
+    def test_first_account_is_the_admin(self):
+        with fresh_db():
+            first, first_id = self.register("First Fay")
+            second, _ = self.register("Second Sam", PASSWORD)
+            self.assertTrue(self.c.get("/api/auth/me", headers=first).json()["isAdmin"])
+            self.assertFalse(self.c.get("/api/auth/me", headers=second).json()["isAdmin"])
+            lib = topic(f"local-{self.tag}-admin")
+            self.assertEqual(self.c.post("/api/topics", json=lib, headers=second).status_code, 403)
+            self.assertEqual(self.c.post("/api/topics", json=lib, headers=first).status_code, 200)
+            self.assertEqual(self.c.post("/api/simulations/backfill", headers=second).status_code, 403)
+            self.assertEqual(self.c.get("/api/agy/inbox", headers=second).status_code, 403)
+            self.assertEqual(self.c.get("/api/agy/inbox", headers=first).status_code, 200)
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+        server._unlink_topic(None, lib["id"])
+
+    def test_upgrade_makes_the_oldest_user_admin_once(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Oldest {self.tag}")
+            new = db.get_or_create_user(f"Newer {self.tag}")
+            db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+            db.conn().commit()
+            self.assertFalse(db.is_local_admin(new["id"]))
+            self.assertTrue(db.is_local_admin(old["id"]))
+            later = db.create_local_account(f"Later {self.tag}", None)
+            self.assertFalse(db.is_local_admin(later["id"]))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_deleting_the_admin_hands_the_role_to_nobody(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Boss Bo", PASSWORD)
+            _, other = self.register("Next Ned")
+            self.assertTrue(db.is_local_admin(admin))
+            r = self.c.post("/api/auth/forgot-delete", json={"userId": admin, "confirmName": f"Boss Bo {self.tag}"})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertFalse(db.is_local_admin(other))
+
+    def test_upgrade_elects_the_admin_before_a_new_account_joins(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Elder {self.tag}")
+            new = db.create_local_account(f"Newcomer {self.tag}", None)
+            self.assertTrue(db.is_local_admin(old["id"]))
+            self.assertFalse(db.is_local_admin(new["id"]))
+
+    def test_is_admin_outside_local_mode_is_unchanged(self):
+        _, uid = self.register("Mode Mia")
+        token = server.CURRENT_USER.set({"id": uid, "name": "x"})
+        try:
+            server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, False
+            self.assertTrue(server.is_admin())  # personal machine: everyone
+            server.AUTH_REQUIRED = True
+            self.assertFalse(server.is_admin())  # server accounts: SCIEDU_ADMINS only
+            with mock.patch.object(server, "ADMINS", {uid}):
+                self.assertTrue(server.is_admin())
+        finally:
+            server.CURRENT_USER.reset(token)
+
+    def test_gemini_key_is_checked_sealed_and_never_returned(self):
+        headers, uid = self.register("Key Kim", PASSWORD)
+        self.assertEqual(server.RATE_LIMITS["key_check"], 20)
+        r = self.put_key(headers, verdict="invalid")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("rejected", r.json()["detail"])
+        r = self.put_key(headers, verdict="service_disabled")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Gemini API", r.json()["detail"])
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+        r = self.put_key(headers, key="AIza-secret-key-9876")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["verified"], r.json()["hint"], r.json()["keyState"]), (True, "9876", "ok"))
+        self.assertNotIn("AIza-secret", r.text)
+        row = db.get_secret(uid, "gemini")
+        self.assertEqual((row["mode"], row["hint"]), ("password", "9876"))
+        self.assertNotIn(b"AIza-secret", row["ciphertext"])
+        self.assertEqual(userkeys.UNLOCKED[uid]["key"], "AIza-secret-key-9876")
+        me = self.c.get("/api/auth/me", headers=headers)
+        self.assertEqual(me.json()["keyState"], "ok")
+        self.assertNotIn("AIza-secret", me.text)
+        # the key comes back only with the password
+        self.c.post("/api/auth/lock", headers=headers)
+        r = self.login("Key Kim", PASSWORD)
+        self.assertEqual(r.json()["keyState"], "ok")
+        self.assertEqual(userkeys.UNLOCKED[uid]["key"], "AIza-secret-key-9876")
+        r = self.c.delete("/api/me/gemini-key", headers=bearer(r.json()["token"]))
+        self.assertEqual(r.json(), {"status": "removed", "keyState": "none"})
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+        self.assertIsNone(userkeys.UNLOCKED[uid]["key"])
+        self.assertEqual(self.c.put("/api/me/gemini-key", json={"key": "has spaces in it"}, headers=headers).status_code, 401)
+
+    def test_open_account_key_uses_the_device_key(self):
+        headers, uid = self.register("Device Dan")
+        self.assertEqual(self.c.put("/api/me/gemini-key", json={"key": "two words"}, headers=headers).status_code, 422)
+        r = self.put_key(headers, verdict="unverified")
+        self.assertEqual((r.status_code, r.json()["verified"]), (200, False))
+        self.assertEqual(db.get_secret(uid, "gemini")["mode"], "device")
+        userkeys.UNLOCKED.clear()
+        self.assertEqual(self.login("Device Dan").json()["keyState"], "ok")
+        userkeys.DEVICE_KEY = None  # no keychain on this computer: nothing is stored, the old key cannot be opened
+        userkeys.UNLOCKED.clear()
+        r = self.login("Device Dan")
+        self.assertEqual(r.json()["keyState"], "locked")
+        r = self.put_key(bearer(r.json()["token"]))
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("Set a password", r.json()["detail"])
+
+    def test_password_set_change_and_remove_rewrap_the_key(self):
+        headers, uid = self.register("Rewrap Rae")
+        self.put_key(headers, key="AIza-rewrap-0001")
+        self.assertEqual(self.c.post("/api/auth/password", json={}, headers=headers).status_code, 422)
+        # set: the key moves under the password
+        r = self.c.post("/api/auth/password", json={"new": PASSWORD}, headers=headers)
+        self.assertEqual((r.status_code, r.json()["hasPassword"], r.json()["keyRemoved"]), (200, True, False))
+        self.assertEqual(db.get_secret(uid, "gemini")["mode"], "password")
+        # change: the current password is required, then the key opens only with the new one
+        self.assertEqual(self.c.post("/api/auth/password", json={"new": "another password"}, headers=headers).status_code, 401)
+        r = self.c.post("/api/auth/password", json={"current": "wrong password", "new": "another password"}, headers=headers)
+        self.assertEqual(r.status_code, 401)
+        r = self.c.post("/api/auth/password", json={"current": PASSWORD, "new": "another password"}, headers=headers)
+        self.assertEqual(r.status_code, 200)
+        userkeys.UNLOCKED.clear()
+        self.assertEqual(self.login("Rewrap Rae", PASSWORD).status_code, 401)
+        r = self.login("Rewrap Rae", "another password")
+        self.assertEqual(r.json()["keyState"], "ok")
+        self.assertEqual(userkeys.UNLOCKED[uid]["key"], "AIza-rewrap-0001")
+        headers = bearer(r.json()["token"])
+        # remove with a device key: the key moves to device mode
+        r = self.c.post("/api/auth/password", json={"current": "another password"}, headers=headers)
+        self.assertEqual((r.json()["hasPassword"], r.json()["keyRemoved"], r.json()["keyState"]), (False, False, "ok"))
+        self.assertEqual(db.get_secret(uid, "gemini")["mode"], "device")
+        self.assertIsNone(db.get_user_auth(uid)["password_hash"])
+        # remove without a device key: the key cannot be kept, and the answer says so
+        self.c.post("/api/auth/password", json={"new": PASSWORD}, headers=headers)
+        userkeys.DEVICE_KEY = None
+        r = self.c.post("/api/auth/password", json={"current": PASSWORD}, headers=headers)
+        self.assertEqual((r.status_code, r.json()["keyRemoved"], r.json()["keyState"]), (200, True, "none"))
+        self.assertIn("removed", r.json()["message"])
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+
+    def test_parallel_guesses_cannot_skip_the_backoff(self):
+        _, uid = self.register("Race Rex", PASSWORD)
+        user = db.get_user_auth(uid)
+        for _ in range(6):  # attempts are counted before the password is checked
+            server._login_attempt(user["name"])
+        with self.assertRaises(server.HTTPException) as e:
+            server._login_attempt(user["name"])
+        self.assertEqual(e.exception.status_code, 429)
+
+    def test_password_change_and_delete_share_the_backoff(self):
+        headers, uid = self.register("Guess Gus", PASSWORD)
+        body = {"confirmName": f"Guess Gus {self.tag}", "password": "wrong password"}
+        for _ in range(3):
+            self.assertEqual(self.c.post("/api/auth/password", json={"current": "wrong password", "new": "x" * 9},
+                                         headers=headers).status_code, 401)
+        for _ in range(3):
+            self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 401)
+        self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 429)
+        self.assertEqual(self.login("Guess Gus", PASSWORD).status_code, 429)
+        self.assertIsNotNone(db.get_user(uid))
+
+    def test_logout_signs_out_every_window_of_a_password_account(self):
+        a, uid = self.register("Two Tabs", PASSWORD)
+        b = bearer(self.login("Two Tabs", PASSWORD).json()["token"])
+        self.assertEqual(self.c.post("/api/auth/logout", headers=a).status_code, 200)
+        self.assertEqual(self.c.get("/api/topics", headers=b).status_code, 401)
+        # a session left without an unlocked key (e.g. lost in a race) is refused as well
+        c = bearer(self.login("Two Tabs", PASSWORD).json()["token"])
+        userkeys.UNLOCKED.pop(uid)
+        self.assertEqual(self.c.get("/api/topics", headers=c).status_code, 401)
+        self.assertEqual(self.c.get("/api/topics", headers=c).status_code, 401)
+        # an open account's other windows stay signed in (it has nothing to lock)
+        o1, _ = self.register("Open Tabs")
+        o2 = bearer(self.login("Open Tabs").json()["token"])
+        self.c.post("/api/auth/logout", headers=o1)
+        self.assertEqual(self.c.get("/api/topics", headers=o2).status_code, 200)
+
+    def test_password_change_ends_the_other_sessions(self):
+        a, uid = self.register("Change Cal", PASSWORD)
+        b = bearer(self.login("Change Cal", PASSWORD).json()["token"])
+        r = self.c.post("/api/auth/password", json={"current": PASSWORD, "new": "another password"}, headers=a)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.c.get("/api/topics", headers=a).status_code, 200)
+        self.assertEqual(self.c.get("/api/topics", headers=b).status_code, 401)
+
+    def test_failed_rewrap_keeps_the_old_password_and_key(self):
+        headers, uid = self.register("Atomic Ada", PASSWORD)
+        self.put_key(headers, key="AIza-atomic-0001")
+        before = db.get_user_auth(uid)["password_hash"], db.get_secret(uid, "gemini")["ciphertext"]
+        with mock.patch.object(userkeys, "wrap", side_effect=RuntimeError("boom")), self.assertRaises(RuntimeError):
+            self.c.post("/api/auth/password", json={"current": PASSWORD, "new": "another password"}, headers=headers)
+        self.assertEqual((db.get_user_auth(uid)["password_hash"], db.get_secret(uid, "gemini")["ciphertext"]), before)
+        userkeys.UNLOCKED.clear()
+        r = self.login("Atomic Ada", PASSWORD)
+        self.assertEqual(r.json()["keyState"], "ok")
+
+    def test_export_never_includes_the_sealed_key(self):
+        headers, uid = self.register("Export Eve", PASSWORD)
+        self.put_key(headers, key="AIza-export-0001")
+        r = self.c.get(f"/api/users/{uid}/export", headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertNotIn("user_secrets", r.text)
+        self.assertNotIn("0001", r.text)
+        self.assertNotIn("scrypt", r.text)
+
+    def test_lock_drops_the_key_and_the_session(self):
+        headers, uid = self.register("Lock Liv", PASSWORD)
+        self.put_key(headers)
+        self.assertIn(uid, userkeys.UNLOCKED)
+        self.assertEqual(self.c.post("/api/auth/lock", headers=headers).json(), {"status": "locked"})
+        self.assertNotIn(uid, userkeys.UNLOCKED)
+        self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
+
+    def test_forgot_password_deletes_the_account_after_its_name_is_typed(self):
+        _, open_id = self.register("Forgot Open")
+        headers, uid = self.register("Forgot Fred", PASSWORD)
+        self.put_key(headers)
+        course = db.create_course(uid, "Fred course", "g", "", [])
+        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": "Fred"})
+        self.assertEqual(r.status_code, 422)
+        r = self.c.post("/api/auth/forgot-delete", json={"userId": open_id, "confirmName": f"Forgot Open {self.tag}"})
+        self.assertEqual(r.status_code, 409)  # an open account just signs in to delete itself
+        self.assertEqual(self.c.post("/api/auth/forgot-delete", json={"userId": "u-none", "confirmName": "x"}).status_code, 404)
+        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": f" forgot  FRED {self.tag}"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["removed"]["user_secrets"], 1)
+        self.assertIsNone(db.get_user(uid))
+        self.assertIsNone(db.get_course(course["id"]))
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+        self.assertNotIn(uid, userkeys.UNLOCKED)
+        self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
+        self.assertNotIn(uid, [p["id"] for p in self.c.get("/api/auth/profiles").json()])
+
+    def test_deleting_a_password_account_needs_its_password(self):
+        headers, uid = self.register("Delete Dora", PASSWORD)
+        body = {"confirmName": f"Delete Dora {self.tag}"}
+        self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 401)
+        self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "password": "wrong password"}, headers=headers).status_code, 401)
+        r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIsNone(db.get_user(uid))
+        open_headers, open_id = self.register("Delete Open")  # no password: the typed name is enough
+        r = self.c.post(f"/api/users/{open_id}/delete", json={"confirmName": f"Delete Open {self.tag}"}, headers=open_headers)
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_idle_password_account_locks_itself(self):
+        headers, uid = self.register("Idle Ida", PASSWORD)
+        self.assertEqual(self.c.get("/api/topics", headers=headers).status_code, 200)
+        userkeys.UNLOCKED[uid]["last_active"] = time.time() - 31 * 60
+        r = self.c.get("/api/topics/version", headers=headers)  # a poll after the idle time is refused too
+        self.assertEqual(r.status_code, 401)
+        self.assertIn("locked", r.json()["detail"])
+        self.assertNotIn(uid, userkeys.UNLOCKED)
+        self.assertEqual(self.c.get("/api/topics", headers=headers).status_code, 401)  # the session is gone
+
+    def test_polls_do_not_count_as_activity(self):
+        headers, uid = self.register("Poll Pia", PASSWORD)
+        start = time.time() - 100
+        userkeys.UNLOCKED[uid]["last_active"] = start
+        for path in ("/api/agy/events", "/api/jobs", "/api/jobs/job-none", "/api/topics/version", "/api/status", "/api/auth/me"):
+            self.c.get(path, headers=headers)
+            self.assertEqual(userkeys.UNLOCKED[uid]["last_active"], start, path)
+        self.c.get("/api/topics", headers=headers)
+        self.assertGreater(userkeys.UNLOCKED[uid]["last_active"], start)
+
+    def test_auto_lock_minutes_per_account(self):
+        headers, uid = self.register("Prefs Pam", PASSWORD)
+        self.assertEqual(self.c.put("/api/auth/prefs", json={"autoLockMin": 5000}, headers=headers).status_code, 422)
+        self.assertEqual(self.c.put("/api/auth/prefs", json={"autoLockMin": 1}, headers=headers).json(), {"autoLockMin": 1})
+        self.assertEqual(self.c.get("/api/auth/me", headers=headers).json()["autoLockMin"], 1)
+        userkeys.UNLOCKED[uid]["last_active"] = time.time() - 61
+        self.assertEqual(self.c.get("/api/topics", headers=headers).status_code, 401)
+        r = self.login("Prefs Pam", PASSWORD)
+        headers = bearer(r.json()["token"])
+        self.c.put("/api/auth/prefs", json={"autoLockMin": 0}, headers=headers)  # never
+        userkeys.UNLOCKED[uid]["last_active"] = time.time() - 86400
+        self.assertEqual(self.c.get("/api/topics", headers=headers).status_code, 200)
+        # an account without a password never locks itself
+        open_headers, open_id = self.register("Prefs Open")
+        userkeys.UNLOCKED[open_id]["last_active"] = time.time() - 86400
+        self.assertEqual(self.c.get("/api/topics", headers=open_headers).status_code, 200)
+
+    def test_sessions_are_cleared_at_launch_only_locally(self):
+        headers, _ = self.register("Launch Leo")
+        server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, False
+        server.start_signed_out()
+        server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, True
+        self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 200)
+        server.start_signed_out()
+        self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
+
+    def test_local_endpoints_are_off_in_other_modes(self):
+        headers, _ = self.register("Modes Max")
+        server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, False
+        for method, path in (("get", "/api/auth/profiles"), ("post", "/api/auth/lock"), ("post", "/api/auth/password"),
+                             ("post", "/api/auth/forgot-delete"), ("put", "/api/auth/prefs"), ("put", "/api/me/gemini-key"),
+                             ("delete", "/api/me/gemini-key")):
+            body = {"get": {}, "delete": {}}.get(method, {"json": {"userId": "u", "confirmName": "x", "autoLockMin": 1, "key": "k"}})
+            self.assertEqual(getattr(self.c, method)(path, **body).status_code, 404, path)
+        me = self.c.get("/api/auth/me").json()
+        self.assertEqual(me, {"user": None, "authRequired": False, "localAccounts": False})
+
+
+class MigrationBackup(unittest.TestCase):
+    """The first start with accounts copies the database once (edu_studio.pre-accounts.db) before migrating it."""
+    def old_database(self, d, users=1):
+        path = Path(d) / "edu_studio.db"
+        c = sqlite3.connect(path)
+        c.execute("CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at REAL NOT NULL, last_seen REAL NOT NULL)")
+        for i in range(users):
+            c.execute("INSERT INTO users VALUES (?, ?, 1, 1)", (f"u-{i}", f"Old {i}"))
+        c.commit()
+        c.close()
+        return path
+
+    @contextlib.contextmanager
+    def database_at(self, path):
+        old = db.DB_PATH
+        with server._purge_running:
+            db.close_all()
+            db.DB_PATH = path
+        try:
+            yield
+        finally:
+            with server._purge_running:
+                db.close_all()
+                db.DB_PATH = old
+
+    def test_backup_is_written_once_before_the_migration(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.old_database(d)
+            backup = Path(d) / "backups" / "edu_studio.pre-accounts.db"
+            with self.database_at(path):
+                db.init_db()
+                self.assertTrue(backup.exists())
+                copy = sqlite3.connect(backup)
+                tables = {r[0] for r in copy.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                cols = {r[1] for r in copy.execute("PRAGMA table_info(users)")}
+                self.assertEqual(copy.execute("SELECT name FROM users").fetchall(), [("Old 0",)])
+                copy.close()
+                self.assertEqual(tables, {"users"})  # taken before any CREATE or ALTER
+                self.assertNotIn("is_admin", cols)
+                cols = {r["name"] for r in db.conn().execute("PRAGMA table_info(users)")}
+                self.assertTrue({"is_admin", "auto_lock_minutes", "password_hash"} <= cols)
+                before = backup.stat().st_mtime_ns
+                db.init_db()  # migrated now: no second copy
+                self.assertEqual(backup.stat().st_mtime_ns, before)
+
+    def test_existing_backup_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.old_database(d)
+            backup = Path(d) / "backups" / "edu_studio.pre-accounts.db"
+            backup.parent.mkdir()
+            backup.write_bytes(b"an earlier copy")
+            with self.database_at(path):
+                db.init_db()
+            self.assertEqual(backup.read_bytes(), b"an earlier copy")
+
+    def test_new_or_empty_database_needs_no_backup(self):
+        for users in (None, 0):
+            with self.subTest(users=users), tempfile.TemporaryDirectory() as d:
+                path = Path(d) / "edu_studio.db" if users is None else self.old_database(d, users)
+                with self.database_at(path):
+                    db.init_db()
+                self.assertFalse((Path(d) / "backups").exists())
+
 class FlagGuard(unittest.TestCase):
     """Every AUTH_REQUIRED / LOCAL_ACCOUNTS read in server.py sits in a function that is meant to tell the modes apart.
     Anything else should call scoped() (both accounts modes) or local_mode() (this computer only)."""
     ALLOWED = {
         "scoped", "local_mode",
         # S rows: server accounts only
-        "execute_code", "is_admin", "submit_quiz_answer", "activity_result", "advisor_classify_catalog",
+        "execute_code", "is_admin", "submit_quiz_answer", "activity_result",
         "require_upload_consent", "resume_course_generation",
         # C rows, changed in later phases (sign-in, per-key budget and key state, status)
         "spend_model_call", "_key_rejected", "register", "login", "me", "delete_account", "get_status",
