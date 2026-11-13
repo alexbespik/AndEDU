@@ -91,7 +91,7 @@ def local_mode() -> bool:
     return LOCAL_ACCOUNTS and not AUTH_REQUIRED
 
 
-LOCAL_PUBLIC_API = {"/api/auth/profiles", "/api/auth/forgot-delete"}  # the sign-in screen of accounts on this computer
+LOCAL_PUBLIC_API = {"/api/auth/profiles"}  # the sign-in screen of accounts on this computer
 
 
 def public_paths() -> set:
@@ -387,7 +387,7 @@ def _prepare_call_config(orig_config: Optional[types.GenerateContentConfig], all
 
 
 # Google's answer when the key itself is wrong, revoked or lacks the Gemini API: the expressions live in userkeys,
-# which also reads the test request made before a key is saved (desktop/keycheck.cjs until phase 4 removes it).
+# which also reads the test request made before a key is saved (userkeys.check_key).
 GEMINI_KEY_INVALID = False  # set when Google rejects the key mid-run, cleared by the next successful call
 
 
@@ -3268,8 +3268,14 @@ def is_admin() -> bool:
     No accounts: everyone."""
     me = CURRENT_USER.get()
     if local_mode():
-        return bool(me and db.is_local_admin(me["id"]))
+        return bool(me and _local_admin(me["id"]))
     return not AUTH_REQUIRED or bool(me and me.get("id") in ADMINS)
+
+def not_admin(detail: str) -> HTTPException:
+    """The 403 of an admin-only action. While the saved-key offer waits, nobody is the admin yet: say so."""
+    if admin_election_waits():
+        detail += " Answer the offer of the key saved on this computer first (account menu): until then nobody is the admin."
+    return HTTPException(status_code=403, detail=detail)
 
 def warn_unknown_admins():
     for entry in sorted(ADMINS):
@@ -3294,7 +3300,7 @@ def require_topic_write(topic_id: str, incoming: Optional[Dict[str, Any]] = None
             if not (course and me and course["user_id"] == me["id"]):
                 raise HTTPException(status_code=404, detail="Topic not found")
         elif not is_admin():
-            raise HTTPException(status_code=403, detail="Only an administrator can change shared library lessons.")
+            raise not_admin("Only an administrator can change shared library lessons.")
 
 def topic_visible(topic: Dict[str, Any], courses: Optional[Dict[str, Any]] = None) -> bool:
     """With accounts on, a lesson generated for someone's course is visible only to that person;
@@ -4694,7 +4700,7 @@ async def catalog_import(body: CatalogImport):
     text the parser can't."""
     rate_limit("upload")
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can change the shared catalog.")
+        raise not_admin("Only an administrator can change the shared catalog.")
     rows = list(body.rows or [])
     text = (body.text or "")[:400000]
     if text:
@@ -4851,7 +4857,7 @@ def advisor_classify_catalog(req: Optional[ClassifyCatalogRequest] = None):
     rate_limit("course")
     req = req or ClassifyCatalogRequest()
     if scoped() and not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can classify catalog courses.")
+        raise not_admin("Only an administrator can classify catalog courses.")
 
     for existing_job in JOBS.values():
         if existing_job.get("kind") == "classify_catalog" and existing_job.get("status") in ("queued", "running"):
@@ -5042,7 +5048,7 @@ def generate_simulation(req: SimulationRequest):
 def backfill_simulations():
     """Queues a simulation for every topic that has neither a built-in nor a generated one."""
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can backfill simulations.")
+        raise not_admin("Only an administrator can backfill simulations.")
     rate_limit("simulation")
     jobs = []
     for path in sorted(TOPICS_DIR.glob("*.json")):
@@ -5220,7 +5226,7 @@ def _local_register(req: AuthRequest, request: Request):
     if db.get_user_by_name(name):
         raise HTTPException(status_code=409, detail="That name is taken on this computer. Sign in, or choose another name.")
     stored, kek = userkeys.hash_password(password) if password else (None, None)
-    user = db.create_local_account(name, stored)
+    user = db.create_local_account(name, stored, elect=not admin_election_waits())
     _unlock_entry(user["id"], kek)
     return {"token": db.create_session(user["id"]), "user": user, "privacyAccepted": True, "keyState": "none"}
 
@@ -5307,7 +5313,9 @@ def me():
         used = budget.get("used", 0) if budget.get("day") == time.strftime("%Y-%m-%d") else 0
         out.update(hasPassword=bool(info.get("has_password")), keyState=key_state, keyInvalid=bool(state.get("invalid")),
                    modelCallsLeft=max(0, DAILY_MODEL_CALLS - used) if key and DAILY_MODEL_CALLS > 0 else None,
-                   autoLockMin=AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes, isAdmin=db.is_local_admin(user["id"]))
+                   autoLockMin=AUTO_LOCK_DEFAULT_MIN if minutes is None else minutes,
+                   isAdmin=_local_admin(user["id"]),
+                   legacyKeyOffer=legacy_key_pending())
     return out
 
 def require_local_accounts():
@@ -5379,24 +5387,43 @@ def change_password(body: PasswordChangeRequest, request: Request):
     out["keyState"] = "ok" if key else "none"
     return out
 
-class ForgotDeleteRequest(BaseModel):
-    userId: str
-    confirmName: str
+# No password recovery and no deleting from the sign-in screen: only the admin deletes accounts (decided 2026-11-13),
+# so someone who forgot their password asks the admin to delete the account (POST /api/auth/delete-account {userId}).
 
-@app.post("/api/auth/forgot-delete")
-def forgot_password_delete(body: ForgotDeleteRequest, request: Request):
-    """No password recovery: a forgotten password means deleting the account and its data from the sign-in screen,
-    confirmed by typing its name."""
+class AdminTransferRequest(BaseModel):
+    userId: str
+    password: Optional[str] = None  # the admin's own password, when it has one
+
+def _require_admin_password(me: Dict[str, Any], password: Optional[str]):
+    """The admin confirms with its own password (if it has one) before deleting an account or handing the role on."""
+    auth_me = db.get_user_auth(me["id"]) or {}
+    if auth_me.get("password_hash") and _verify_local_password(auth_me, password) is None:
+        raise HTTPException(status_code=401, detail="Wrong password")
+
+@app.get("/api/auth/accounts")
+def local_accounts_list():
+    """The admin's list of accounts on this computer: [{id, name, locked, isAdmin}]."""
+    require_local_accounts()
+    if not is_admin():
+        raise not_admin("Only the admin of this computer can manage accounts.")
+    return db.list_local_accounts()
+
+@app.post("/api/auth/admin/transfer")
+def transfer_local_admin(body: AdminTransferRequest, request: Request):
+    """The admin hands its role to another account (confirmed by the admin's password, if it has one)."""
     require_local_accounts()
     auth_rate_limit(request)
-    user = db.get_user_auth(body.userId)
-    if not user:
+    me = CURRENT_USER.get()
+    if not is_admin():
+        raise not_admin("Only the admin of this computer can hand the admin role on.")
+    if body.userId == me["id"]:
+        raise HTTPException(status_code=400, detail="You are already the admin.")
+    if not db.get_user(body.userId):
         raise HTTPException(status_code=404, detail="Account not found.")
-    if not user.get("password_hash"):
-        raise HTTPException(status_code=409, detail="This account has no password: sign in and delete it from the account menu.")
-    if not _names_match(body.confirmName, user["name"]):
-        raise HTTPException(status_code=422, detail="Type the account's name exactly as it appears to confirm.")
-    return {"status": "deleted", "removed": delete_user_everything(user["id"])}
+    _require_admin_password(me, body.password)
+    if not db.transfer_local_admin(me["id"], body.userId):
+        raise HTTPException(status_code=409, detail="You are no longer the admin of this computer.")
+    return {"status": "ok", "admin": body.userId}
 
 class AuthPrefsRequest(BaseModel):
     autoLockMin: int
@@ -5411,7 +5438,26 @@ def set_auth_prefs(body: AuthPrefsRequest):
     return {"autoLockMin": body.autoLockMin}
 
 class GeminiKeyRequest(BaseModel):
-    key: str = Field(max_length=200)
+    key: Optional[str] = Field(default=None, max_length=200)
+    adoptLegacy: bool = False  # use the key an older version saved on this computer (legacyKeyOffer in /api/auth/me)
+
+# The key an older desktop version saved for the whole computer (userkeys.LEGACY_KEY, from desktop_main.py) is offered
+# once: the first account to answer takes it (PUT /api/me/gemini-key {adoptLegacy: true}) or declines it (DELETE
+# /api/me/legacy-key); the app then deletes the file (sciedu:removeLegacyKey, refused while /api/status still says
+# legacy_key_pending). Meanwhile an upgraded database chooses no admin, so the account that adopts the key can become it
+# (decided 2026-11-12), else the oldest user, as before. The wait lasts this run at most: an adopt that cannot store
+# the key (409) ends it, and the offer itself comes back on the next launch while the file is there.
+_legacy_lock = threading.Lock()
+_legacy = {"busy": False, "admin_wait_over": False}  # busy: an adopt is checking the key with Google
+
+def legacy_key_pending() -> bool:
+    return local_mode() and bool(userkeys.LEGACY_KEY)
+
+def admin_election_waits() -> bool:
+    return legacy_key_pending() and not _legacy["admin_wait_over"]
+
+def _local_admin(user_id: str) -> bool:
+    return db.is_local_admin(user_id, elect=not admin_election_waits())
 
 @app.put("/api/me/gemini-key")
 def put_my_gemini_key(body: GeminiKeyRequest):
@@ -5420,7 +5466,34 @@ def put_my_gemini_key(body: GeminiKeyRequest):
     require_local_accounts()
     rate_limit("key_check")
     uid = CURRENT_USER.get()["id"]
-    key = body.key.strip()
+    if not body.adoptLegacy:
+        return _save_my_key(uid, (body.key or "").strip())
+    with _legacy_lock:  # one account takes it; the check with Google runs outside the lock
+        key = userkeys.LEGACY_KEY if legacy_key_pending() else None
+        if not key:
+            raise HTTPException(status_code=409, detail="There is no key saved on this computer any more. Paste your key instead.")
+        if _legacy["busy"]:
+            raise HTTPException(status_code=409, detail="The key saved on this computer is being checked. Try again in a moment.")
+        _legacy["busy"] = True
+    outcome = None
+    try:
+        out = _save_my_key(uid, key)
+        outcome = "saved"
+        return out
+    except HTTPException as e:
+        outcome = {400: "rejected", 409: "not_stored"}.get(e.status_code)
+        raise
+    finally:
+        with _legacy_lock:
+            _legacy["busy"] = False
+            if outcome in ("saved", "rejected"):  # rejected by Google: no use offering it again
+                userkeys.LEGACY_KEY = None
+            elif outcome == "not_stored":  # stays offered (set a password, then take it), but no longer holds up the admin
+                _legacy["admin_wait_over"] = True
+            if outcome == "saved":
+                db.elect_local_admin(uid)  # only while no admin was chosen (a database from before accounts)
+
+def _save_my_key(uid: str, key: str):
     if len(key) < 8 or any(ch.isspace() for ch in key):
         raise HTTPException(status_code=422, detail="Paste the whole key, without spaces.")
     verdict = userkeys.check_key(key)
@@ -5443,6 +5516,17 @@ def put_my_gemini_key(body: GeminiKeyRequest):
     resume_for_user(uid)
     return {"status": "saved", "verified": verdict == "ok", "keyState": "ok", "hint": key[-4:]}
 
+@app.delete("/api/me/legacy-key")
+def decline_legacy_key():
+    """No to the key an older version saved on this computer: it is forgotten here, and the app deletes its file."""
+    require_local_accounts()
+    with _legacy_lock:
+        if _legacy["busy"]:
+            raise HTTPException(status_code=409, detail="The key saved on this computer is being checked. Try again in a moment.")
+        had = legacy_key_pending()
+        userkeys.LEGACY_KEY = None
+    return {"status": "declined" if had else "none"}
+
 @app.delete("/api/me/gemini-key")
 def delete_my_gemini_key():
     require_local_accounts()
@@ -5460,7 +5544,9 @@ class ConsentRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     confirmName: str
-    password: Optional[str] = None  # required with accounts on
+    password: Optional[str] = None  # required with accounts on (accounts on this computer: the admin's own, if it has one)
+    userId: Optional[str] = None      # accounts on this computer: the account the admin deletes (default: itself)
+    transferTo: Optional[str] = None  # accounts on this computer: the admin deleting itself hands the role here first
 
 def require_upload_consent():
     """Accounts mode: an uploaded file or image goes to Gemini only after its owner agreed to that once."""
@@ -5590,8 +5676,10 @@ def export_my_data(user_id: str):
 def delete_account(body: DeleteAccountRequest, request: Request, user_id: Optional[str] = None):
     """Deletes the user, their courses, lessons, progress, files and quiz log lines. Shared library lessons stay.
     Accounts mode: the signed-in user, confirmed by password (accounts on this computer: if it has one).
-    Personal machine: /api/users/{id}/delete."""
-    if AUTH_REQUIRED or local_mode():
+    Personal machine: /api/users/{id}/delete. Accounts on this computer: only the admin (_local_delete_account)."""
+    if local_mode():
+        return _local_delete_account(body, request, user_id)
+    if AUTH_REQUIRED:
         auth_rate_limit(request)
         user_id = user_id or CURRENT_USER.get()["id"]
     elif not user_id:
@@ -5603,11 +5691,36 @@ def delete_account(body: DeleteAccountRequest, request: Request, user_id: Option
     stored = auth_user.get("password_hash")
     if AUTH_REQUIRED and not db.check_password(body.password or "", stored):
         raise HTTPException(status_code=401, detail="Wrong password")
-    if local_mode() and stored and _verify_local_password(auth_user, body.password) is None:
-        raise HTTPException(status_code=401, detail="Wrong password")
     if AUTH_REQUIRED and user_id in ADMINS:
         raise HTTPException(status_code=409, detail="Remove your id from SCIEDU_ADMINS before deleting this account.")
     return {"status": "deleted", "removed": delete_user_everything(user_id)}
+
+def _local_delete_account(body: DeleteAccountRequest, request: Request, path_id: Optional[str]):
+    """Accounts on this computer: only the admin deletes accounts (decided 2026-11-13), any of them, confirmed by the
+    account's name and the admin's own password (if it has one). The admin deletes itself only after handing the role
+    to another account (transferTo), unless it is the last account. Everything is checked before the role moves; the
+    order is transfer, then delete (a failed delete leaves the new admin in place)."""
+    auth_rate_limit(request)
+    me = CURRENT_USER.get()
+    if path_id and body.userId and path_id != body.userId:
+        raise HTTPException(status_code=400, detail="The request names two different accounts.")
+    target_id = path_id or body.userId or me["id"]
+    if not is_admin():
+        raise not_admin("Only the admin of this computer can delete accounts. Ask them to delete this one.")
+    target = db.get_user(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    if not _names_match(body.confirmName, target["name"]):
+        raise HTTPException(status_code=422, detail="Type the account's name exactly as it appears to confirm.")
+    _require_admin_password(me, body.password)
+    if target_id == me["id"]:
+        others = {u["id"] for u in db.list_local_profiles()} - {me["id"]}
+        if others:
+            if body.transferTo not in others:
+                raise HTTPException(status_code=409, detail="Hand the admin role to another account before deleting yours.")
+            if not db.transfer_local_admin(me["id"], body.transferTo):
+                raise HTTPException(status_code=409, detail="You are no longer the admin of this computer.")
+    return {"status": "deleted", "removed": delete_user_everything(target_id)}
 
 def delete_user_everything(user_id: str) -> Dict[str, int]:
     """The deletion itself, after the caller confirmed who asks: files, rows, quiz log lines, jobs, events and the
@@ -7772,7 +7885,7 @@ MAX_INBOX_FILE_BYTES = 2_000_000
 @app.get("/api/agy/inbox")
 def get_agy_inbox():
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can read the agent inbox.")
+        raise not_admin("Only an administrator can read the agent inbox.")
     items = []
     if INBOX_FILE.exists():
         with open(INBOX_FILE, "r", encoding="utf-8") as f:
@@ -7786,7 +7899,7 @@ def get_agy_inbox():
 @app.post("/api/agy/inbox")
 def post_agy_inbox(item: Dict[str, Any]):
     if not is_admin():
-        raise HTTPException(status_code=403, detail="Only an administrator can write to the agent inbox.")
+        raise not_admin("Only an administrator can write to the agent inbox.")
     line = json.dumps({**item, "timestamp": time.time()})
     if len(line) > MAX_INBOX_BYTES:
         raise HTTPException(status_code=413, detail=f"Inbox items are limited to {MAX_INBOX_BYTES} bytes")
@@ -7813,8 +7926,11 @@ def get_status():
         "active_jobs": sum(1 for j in JOBS.values() if j["status"] in ("queued", "running")),
         "event_cursor": _event_seq,
         "auth_required": AUTH_REQUIRED,
+        "local_accounts": local_mode(),  # accounts on this computer: the sign-in screen shows account tiles
         "port": int(os.environ.get("SCIEDU_PORT", "8090")),
         "instance_id": os.environ.get("SCIEDU_INSTANCE_ID"),  # lets the desktop app tell its backend from another on the port
+        # the desktop app deletes the old computer-wide key file only once this is false (sciedu:removeLegacyKey)
+        "legacy_key_pending": legacy_key_pending(),
         "privacy_version": PRIVACY_VERSION,
         "features": [
             "courses", "sqlite_storage", "simspec_simulations", "background_jobs", "code_sandbox",

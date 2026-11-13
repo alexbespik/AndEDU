@@ -25,12 +25,14 @@ class LocalAccountsMixin:
     def setUp(self):
         self._account_flags = (server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS)
         self._key_state = (userkeys.SCRYPT_N, userkeys.DEVICE_KEY, dict(userkeys.UNLOCKED), dict(server._login_failures),
-                           userkeys.client_factory, dict(userkeys.HANDLES), dict(userkeys.KEY_STATE))
+                           userkeys.client_factory, dict(userkeys.HANDLES), dict(userkeys.KEY_STATE), userkeys.LEGACY_KEY)
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, True
-        userkeys.SCRYPT_N, userkeys.DEVICE_KEY = TEST_SCRYPT_N, os.urandom(32)
+        userkeys.SCRYPT_N, userkeys.DEVICE_KEY, userkeys.LEGACY_KEY = TEST_SCRYPT_N, os.urandom(32), None
         for held in (userkeys.UNLOCKED, userkeys.HANDLES, userkeys.KEY_STATE):
             held.clear()
         server._login_failures.clear()
+        self._legacy = dict(server._legacy)
+        server._legacy.update(busy=False, admin_wait_over=False)
         # check_key swallows network errors ("unverified"), so the offline guard alone would not catch a missed mock
         self._no_key_check = mock.patch.object(userkeys, "check_key", side_effect=AssertionError("mock userkeys.check_key"))
         self._no_key_check.start()
@@ -43,12 +45,15 @@ class LocalAccountsMixin:
         finally:
             self._no_key_check.stop()
             server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = self._account_flags
-            userkeys.SCRYPT_N, userkeys.DEVICE_KEY, unlocked, failures, userkeys.client_factory, handles, states = self._key_state
+            (userkeys.SCRYPT_N, userkeys.DEVICE_KEY, unlocked, failures, userkeys.client_factory, handles, states,
+             userkeys.LEGACY_KEY) = self._key_state
             for held, saved in ((userkeys.UNLOCKED, unlocked), (userkeys.HANDLES, handles), (userkeys.KEY_STATE, states)):
                 held.clear()
                 held.update(saved)
             server._login_failures.clear()
             server._login_failures.update(failures)
+            server._legacy.clear()
+            server._legacy.update(self._legacy)
 
 
 class BothFlagsMixin:

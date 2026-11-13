@@ -22,21 +22,29 @@ function authHeaders(extra) {
 }
 
 export async function api(path, { method = 'GET', body, signal } = {}) {
+  const sentToken = getToken();
   const res = await fetch(path, {
     method,
     signal,
     headers: authHeaders(body !== undefined ? { 'Content-Type': 'application/json' } : undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401 && !path.startsWith('/api/auth/')) {
-    window.dispatchEvent(new Event('andedu:signed-out'));  // expired or revoked session
-  }
   let data = null;
   try { data = await res.json(); } catch { /* empty body */ }
+  // expired or revoked session, or (accounts on this computer) a job's key that locked long ago: sign in again. Only
+  // when this request carried the session still in use: a poll from the sign-in screen (no token) or one sent before
+  // a new sign-in must not end the new session.
+  const current = sentToken && sentToken === getToken();
+  if (current && ((res.status === 401 && !path.startsWith('/api/auth/')) || data?.code === 'key_locked')) {
+    window.dispatchEvent(new CustomEvent('andedu:signed-out', { detail: { reason: data?.code || null } }));
+  }
+  // accounts on this computer: a request that needed the account's Gemini key and found none opens the key card
+  if (current && data?.code === 'gemini_key_missing') window.dispatchEvent(new Event('andedu:key-missing'));
   if (!res.ok) {
     const detail = data?.detail;
     const msg = Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : detail;
-    throw Object.assign(new Error(msg || `Request failed (HTTP ${res.status})`), { status: res.status });
+    // code: gemini_key_missing | key_locked (accounts on this computer)
+    throw Object.assign(new Error(msg || `Request failed (HTTP ${res.status})`), { status: res.status, code: data?.code });
   }
   return data;
 }
@@ -119,7 +127,8 @@ export function loadProfile() {
 
 export function saveProfile(user) {
   try {
-    if (user) localStorage.setItem(PROFILE_KEY, JSON.stringify({ id: user.id, name: user.name }));
+    // local: an account on this computer (its session ends with each launch; the sign-in screen resumes it)
+    if (user) localStorage.setItem(PROFILE_KEY, JSON.stringify({ id: user.id, name: user.name, ...(user.local ? { local: true } : {}) }));
     else localStorage.removeItem(PROFILE_KEY);
   } catch { /* storage blocked: profile lasts for this tab only */ }
 }

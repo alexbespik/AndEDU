@@ -35,7 +35,10 @@ SCRYPT_R, SCRYPT_P = 8, 1
 SCRYPT_MAXMEM = 2 ** 28  # n=2^17, r=8 needs 128 MiB; hashlib's default cap is 32 MiB
 _derivations = threading.BoundedSemaphore(2)  # at most two 128 MiB derivations at once
 
-DEVICE_KEY: Optional[bytes] = None  # set by the desktop app (phase 4); None: no device-mode secrets
+DEVICE_KEY: Optional[bytes] = None  # set by the desktop app (desktop_main.py); None: no device-mode secrets
+# The Gemini key an older desktop version saved for the whole computer (desktop_main.py), offered once to an account:
+# None once adopted or declined (the app then deletes its file).
+LEGACY_KEY: Optional[str] = None
 # user id -> {"key": Gemini key or None, "kek": bytes or None, "unlocked_at": float, "last_active": float}
 UNLOCKED: Dict[str, Dict[str, Any]] = {}
 

@@ -1,7 +1,10 @@
-"""Desktop app launch contract: SCIEDU_ENV_FILE, the stdin settings line (desktop_main.py), instance_id in /api/status."""
+"""Desktop app launch contract: SCIEDU_ENV_FILE, the stdin settings line (desktop_main.py), instance_id in /api/status,
+and the shell's own sources (desktop/main.cjs, preload.cjs, electron-builder.yml)."""
 from test_lab import LOCAL, TestClient, server  # noqa: F401  (sets up the temp content dir first)
 
+import base64
 import io
+import json
 import os
 import re
 import subprocess
@@ -12,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 import desktop_main
+import userkeys
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -43,17 +47,93 @@ class EnvFileTests(unittest.TestCase):
 
 
 class LaunchSettingsTests(unittest.TestCase):
-    def test_key_from_the_settings_line(self):
-        with mock.patch.dict(os.environ, {"api_KEY": "outside"}, clear=False):
-            desktop_main.read_launch_settings(io.StringIO('{"gemini_key": " abc123 "}\n'))
-            self.assertEqual(os.environ.get("GEMINI_API_KEY"), "abc123")
+    """The stdin line carries the device key and the old computer-wide key into userkeys, never into os.environ."""
+    DEVICE = bytes(range(32))
+
+    def setUp(self):
+        saved = (userkeys.DEVICE_KEY, userkeys.LEGACY_KEY)
+        self.addCleanup(lambda: (setattr(userkeys, "DEVICE_KEY", saved[0]), setattr(userkeys, "LEGACY_KEY", saved[1])))
+
+    def read(self, line):
+        before = dict(os.environ)
+        desktop_main.read_launch_settings(io.StringIO(line))
+        return before
+
+    def test_keys_from_the_settings_line_go_into_userkeys(self):
+        line = json.dumps({"device_key": base64.b64encode(self.DEVICE).decode(), "legacy_gemini_key": " AIza-old-key-1234 "})
+        with mock.patch.dict(os.environ, {"api_KEY": "outside", "GEMINI_API_KEY": "outside"}, clear=False):
+            before = self.read(line + "\n")
             self.assertNotIn("api_KEY", os.environ)
+            self.assertNotIn("GEMINI_API_KEY", os.environ)
+            self.assertEqual({k: v for k, v in before.items() if k not in ("api_KEY", "GEMINI_API_KEY")}, dict(os.environ))
+            self.assertNotIn("AIza-old-key-1234", "".join(os.environ.values()))
+        self.assertEqual(userkeys.DEVICE_KEY, self.DEVICE)
+        self.assertEqual(userkeys.LEGACY_KEY, "AIza-old-key-1234")
 
     def test_no_key_or_a_broken_line_means_no_key(self):
-        for line in ("{}\n", "not json\n", "", '["x"]\n', '{"gemini_key": 5}\n'):
+        good = base64.b64encode(self.DEVICE).decode()
+        for line in ("{}\n", "not json\n", "", '["x"]\n', '{"device_key": 5, "legacy_gemini_key": 5}\n',
+                     json.dumps({"device_key": base64.b64encode(b"short").decode()}) + "\n",
+                     json.dumps({"device_key": good[:-4] + "!!!!"}) + "\n",
+                     json.dumps({"legacy_gemini_key": "has spaces in it"}) + "\n",
+                     json.dumps({"legacy_gemini_key": "short"}) + "\n",
+                     '{"gemini_key": "AIza-the-old-contract-1234"}\n'):
+            userkeys.DEVICE_KEY, userkeys.LEGACY_KEY = b"stale", "stale"
             with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "stale"}, clear=False):
-                desktop_main.read_launch_settings(io.StringIO(line))
+                self.read(line)
                 self.assertNotIn("GEMINI_API_KEY", os.environ, line)
+            self.assertIsNone(userkeys.DEVICE_KEY, line)
+            self.assertIsNone(userkeys.LEGACY_KEY, line)
+
+    def test_server_run_by_desktop_main_sees_the_same_userkeys(self):
+        # desktop_main imports userkeys before runpy runs server.py, whose `import userkeys` then finds it in sys.modules
+        source = (ROOT / "desktop_main.py").read_text()
+        self.assertLess(source.index("read_launch_settings(sys.stdin)"), source.index("runpy.run_path"))
+        self.assertLess(source.index("sys.path.insert(0, str(HERE))"), source.index("read_launch_settings(sys.stdin)"))
+        self.assertIs(server.userkeys, userkeys)
+
+
+class ShellSourceTests(unittest.TestCase):
+    """desktop/main.cjs: accounts on, secrets on stdin only, and the old computer-wide key path is gone."""
+    MAIN = (ROOT / "desktop" / "main.cjs").read_text()
+    PRELOAD = (ROOT / "desktop" / "preload.cjs").read_text()
+
+    def test_local_accounts_on_and_the_old_key_ipc_gone(self):
+        self.assertIn("SCIEDU_LOCAL_ACCOUNTS: '1'", self.MAIN)
+        for gone in ("saveKey", "hasKey", "clearKey", "keycheck", "gemini_key:", "GEMINI_API_KEY", "api_KEY"):
+            self.assertNotIn(gone, self.MAIN, gone)
+            self.assertNotIn(gone, self.PRELOAD, gone)
+        self.assertFalse((ROOT / "desktop" / "keycheck.cjs").exists())
+        self.assertIn("removeLegacyKey: () => ipcRenderer.invoke('sciedu:removeLegacyKey')", self.PRELOAD)
+
+    def test_every_ipc_handler_checks_its_sender(self):
+        handlers = re.findall(r"ipcMain\.handle\('([\w:]+)', (?:async )?\(event\) => \{\n\s+if \(!fromBackend\(event\)\)", self.MAIN)
+        self.assertEqual(handlers, ["sciedu:removeLegacyKey"])
+        self.assertEqual(self.MAIN.count("ipcMain.handle("), 1)
+
+    def test_device_key_kept_with_safe_storage_and_sent_on_stdin(self):
+        self.assertIn("path.join(dataDir, 'secrets', 'device.key.enc')", self.MAIN)
+        self.assertIn("crypto.randomBytes(32)", self.MAIN)
+        self.assertIn("settings.device_key = deviceKey", self.MAIN)
+        self.assertIn("settings.legacy_gemini_key = legacyKey", self.MAIN)
+        self.assertIn("child.stdin.write(JSON.stringify(settings)", self.MAIN)
+        load = self.MAIN[self.MAIN.index("function loadDeviceKey"):self.MAIN.index("function loadLegacyKey")]
+        self.assertIn("if (!secureStoreOk()) return '';", load)  # no keyring (Linux basic_text): no device key
+        self.assertIn("if (err.code !== 'ENOENT') return '';", load)  # a file that does not open is never replaced
+        env = self.MAIN[self.MAIN.index("function backendEnv"):self.MAIN.index("async function startBackend")]
+        self.assertNotIn("Key", env)
+        self.assertNotIn("KEY", env)
+
+    def test_old_key_file_goes_only_when_the_backend_says_it_was_answered(self):
+        ipc = self.MAIN[self.MAIN.index("ipcMain.handle('sciedu:removeLegacyKey'"):]
+        ipc = ipc[:ipc.index("\n  });\n")]
+        self.assertIn("/api/status", ipc)
+        self.assertIn("st.instance_id !== b.instanceId || st.legacy_key_pending !== false) return { ok: false }", ipc)
+        self.assertLess(ipc.index("legacy_key_pending"), ipc.index("fs.rmSync(legacyKeyPath"))
+        self.assertIn("catch {\n      return { ok: false };", ipc)  # no answer from the backend: the file stays
+
+    def test_builder_does_not_package_the_key_check(self):
+        self.assertNotIn("keycheck", (ROOT / "electron-builder.yml").read_text())
 
 
 class StatusTests(unittest.TestCase):
@@ -64,7 +144,7 @@ class StatusTests(unittest.TestCase):
 
 
 class KeyStateTests(unittest.TestCase):
-    """A key Google rejects stops the model fallback and shows in /api/status. Bodies match desktop/keycheck.test.cjs."""
+    """A key Google rejects stops the model fallback and shows in /api/status. Bodies match tests/test_userkeys.py."""
 
     INVALID = {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.",
                          "status": "INVALID_ARGUMENT", "details": [{"reason": "API_KEY_INVALID"}]}}

@@ -1,11 +1,15 @@
 """Backend entry point for the desktop app (desktop/main.cjs spawns it with the bundled Python).
 
 Launch contract:
-- The first line on stdin is JSON, {"gemini_key": "..."} or {}. The key goes into this process's environment
-  only after start, so it is not in the startup environment other processes can read (ps -E).
+- The first line on stdin is JSON, {"device_key": "<base64 of 32 bytes>", "legacy_gemini_key": "..."} (either may be
+  missing). They go into userkeys (DEVICE_KEY seals the keys of accounts without a password; LEGACY_KEY is the key an
+  older version saved on this computer, offered once to an account), never into the environment, so they are not in
+  what other processes can read (ps -E) and server.py never builds an install-wide Gemini client from them.
 - Stdin stays open while the app runs; end of file means the app is gone, so the backend exits.
-- Everything else (port, data folder, SCIEDU_ENV_FILE=none, AGY_CLI=0) comes from the app's allowlisted env.
+- Everything else (port, data folder, SCIEDU_ENV_FILE=none, SCIEDU_LOCAL_ACCOUNTS=1, AGY_CLI=0) comes from the app's
+  allowlisted env.
 """
+import base64
 import json
 import os
 import runpy
@@ -18,18 +22,33 @@ HERE = Path(__file__).resolve().parent
 
 
 def read_launch_settings(stream):
-    """Applies the settings line from the app; a missing or broken line just means no key."""
+    """Applies the settings line from the app; a missing or broken line or field just means no key."""
+    import userkeys  # after the sys.path insert (python -I leaves out the script's folder); server.py gets this module
+
     line = stream.readline()
     try:
         settings = json.loads(line) if line.strip() else {}
     except ValueError:
         settings = {}
-    os.environ.pop("api_KEY", None)  # server.py prefers api_KEY: never let one in from outside
-    key = settings.get("gemini_key") if isinstance(settings, dict) else None
-    if isinstance(key, str) and key.strip():
-        os.environ["GEMINI_API_KEY"] = key.strip()
-    else:
-        os.environ.pop("GEMINI_API_KEY", None)
+    if not isinstance(settings, dict):
+        settings = {}
+    for name in ("api_KEY", "GEMINI_API_KEY"):  # one install-wide key from outside would bypass the accounts
+        os.environ.pop(name, None)
+    userkeys.DEVICE_KEY = _device_key(settings.get("device_key"))
+    legacy = settings.get("legacy_gemini_key")
+    legacy = legacy.strip() if isinstance(legacy, str) else ""
+    userkeys.LEGACY_KEY = legacy if 8 <= len(legacy) <= 200 and not any(ch.isspace() for ch in legacy) else None
+
+
+def _device_key(value):
+    """32 bytes from base64, else None (accounts without a password then cannot store a key)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        key = base64.b64decode(value, validate=True)
+    except ValueError:  # binascii.Error
+        return None
+    return key if len(key) == 32 else None
 
 
 def exit_when_parent_closes(stream):

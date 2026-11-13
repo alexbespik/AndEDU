@@ -41,6 +41,11 @@ Logged 2026-11-03.
   Not reached by delete: backups, `server.log`, shared library lessons, local mode's shared assistant history, and
   lesson snapshots of courses deleted earlier (they keep no owner id; decide whether to record one).
   In local mode anyone at the computer can export or delete any profile (no accounts).
+- Done 2026-11-13: accounts on this computer (the desktop app, `SCIEDU_LOCAL_ACCOUNTS=1`, ARCHITECTURE.md 5.5): each
+  account sees only its own courses and key; only the computer's admin account deletes accounts (any of them, with
+  the admin's password if it has one) and hands the admin role on before deleting its own. No password recovery:
+  a forgotten password means asking the admin to delete the account. Isolation is in the app only: the files are
+  readable by anyone signed in to the computer as the same OS user.
 - Still open: Retention. Decide how long uploads, materials text and chat logs are kept, then enforce it.
 - Done 2026-11-08: problem sprints (`mode: "problem_sprint"`) are deleted by default once every problem is done.
   Finishing the last part only hides the sprint (status `cleared`: out of My courses, its lessons out of the library
@@ -56,9 +61,12 @@ Logged 2026-11-03.
   `refs/pull/1/head` contains a `.env` file or a Gemini/ElevenLabs key pattern, and `.env` is in `.gitignore`.
   The keys from that time should still be rotated if they are still active.
 - Hosted: keys only in the server environment or a secret manager, never in the frontend or the repo.
-- Desktop app: the student's own key is encrypted with the macOS Keychain or, on Linux, the system keyring (`safeStorage`;
-  never its weak `basic_text` fallback) in `~/Library/Application Support/SciEdu Studio/secrets/` (`~/.config/SciEdu Studio/secrets/` on Linux), sent to the bundled server on stdin (not in its startup
-  environment, which other processes of the same user can read), and never returned to the page.
+- Desktop app: each account's own key is sealed (AES-256-GCM) in the app's database with a key derived from the
+  account's password, or, for accounts without one, with a device key kept by the macOS Keychain or, on Linux, the
+  system keyring (`safeStorage`; never its weak `basic_text` fallback) in `~/Library/Application Support/SciEdu Studio/secrets/`
+  (`~/.config/SciEdu Studio/secrets/` on Linux). The device key reaches the bundled server on stdin (not in its startup
+  environment, which other processes of the same user can read); keys are never returned to the page (only their last 4
+  characters) and other accounts can't use them.
 
 ### 5. Data files in the repository and in logs
 - Done 2026-11-03: `content/agy_messages.json` (assistant chat) and `content/quiz_results.json` (answers) are

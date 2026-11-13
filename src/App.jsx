@@ -6,7 +6,7 @@ import LoginPage from './components/LoginPage';
 import CoursesHome from './components/CoursesHome';
 import CourseView from './components/CourseView';
 import ReviewSession from './components/ReviewSession';
-import DesktopKeySetup, { KEY_NOTE } from './components/DesktopKeySetup';
+import DesktopKeySetup from './components/DesktopKeySetup';
 import RewardLayer, { StreakChip } from './components/Rewards';
 import { BookOpen, FlaskConical, Compass } from 'lucide-react';
 import { TuxIcon } from './components/PenguinShadow';
@@ -65,7 +65,12 @@ export const workspaceOf = (t) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(loadProfile);
+  // an account on this computer (profile.local) starts on the sign-in screen, which resumes it: its session ended with
+  // the last launch, so the app must not run on the stale token
+  const [user, setUser] = useState(() => { const p = loadProfile(); return p?.local ? null : p; });
+  const [resume, setResume] = useState(() => { const p = loadProfile(); return p?.local ? p : null; });
+  const [lockNotice, setLockNotice] = useState(null);
+  const [account, setAccount] = useState(null);  // accounts on this computer: /api/auth/me (keyState, hasPassword, autoLockMin, ...)
   const [mode, setMode] = useState('home'); // home | course | physics | code | math
   const [courseId, setCourseId] = useState(null);
   const [topics, setTopics] = useState([]);
@@ -84,8 +89,10 @@ export default function App() {
   const [workspaceTab, setWorkspaceTab] = useState(null);  // {tab, at} for History/Languages, sent by MCP tools
   const [mathPush, setMathPush] = useState(null);  // functions or a widget sent by the assistant / MCP tools
   const [pendingPrompt, setPendingPrompt] = useState(null);
-  const [desktopKey, setDesktopKey] = useState(null);  // desktop app: {reason: missing|rejected|manage, activeJobs} shows the key card
+  const [desktopKey, setDesktopKey] = useState(null);  // {reason: missing|rejected|locked|unreadable|manage|legacy} shows the key card
   const keyCardDismissed = useRef(false);  // "Later" on a rejected key: don't reopen it on every window focus
+  const legacyAsked = useRef(false);  // the computer-wide key is offered once per sign-in
+  const localUser = Boolean(user?.local);
 
   useEffect(() => {
     const onAgyAsk = (e) => {
@@ -99,13 +106,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    api('/api/status').then((st) => {
-      setAgyCli(Boolean(st.agy_cli_enabled));
-      if (window.sciedu?.isDesktop && (!st.gemini_configured || st.gemini_key_invalid)) {
-        setDesktopKey({ activeJobs: st.active_jobs || 0, reason: st.gemini_configured ? 'rejected' : 'missing' });
-      }
-    }).catch(() => {});
+    // the key card is for accounts on this computer (the desktop app turns them on): its state is in /api/auth/me
+    api('/api/status').then((st) => setAgyCli(Boolean(st.agy_cli_enabled))).catch(() => {});
   }, []);
+  // accounts on this computer: the account's key state, password and auto-lock (also after any change in its menu)
+  const refreshAccount = useCallback(() => {
+    if (!localUser) return Promise.resolve(null);
+    return api('/api/auth/me').then((me) => {
+      if (me.user && me.localAccounts) { setAccount(me); return me; }
+      return null;
+    }).catch(() => null);
+  }, [localUser]);
+  useEffect(() => {
+    if (!localUser) { setAccount(null); return; }
+    refreshAccount().then((me) => {
+      if (!me) return;
+      if (me.legacyKeyOffer && !legacyAsked.current) {
+        legacyAsked.current = true;
+        setDesktopKey({ reason: 'legacy' });
+      } else if (me.keyInvalid) setDesktopKey({ reason: 'rejected' });
+      else if (me.keyState === 'none') setDesktopKey({ reason: 'missing' });
+      else if (me.keyState === 'locked' || me.keyState === 'unreadable') setDesktopKey({ reason: me.keyState });
+    });
+  }, [localUser, user?.id, refreshAccount]);
   // fetch the lesson viewer's chunk once signed in, so the first lesson opens without a loading step
   useEffect(() => { if (user) import('./components/TopicViewer'); }, [user]);
   const versionRef = useRef(null);
@@ -347,34 +370,29 @@ export default function App() {
   });
 
   const openKeyCard = useCallback((reason) => {
-    if (!window.sciedu?.isDesktop) return;
-    api('/api/status')
-      .then((st) => setDesktopKey({ activeJobs: st.active_jobs || 0, reason }))
-      .catch(() => setDesktopKey({ activeJobs: 0, reason }));
-  }, []);
-  // desktop: the account menu opens the card to replace or remove the key; a key Google rejected while the
-  // window was in the background shows up when it comes back
+    if (!localUser) return;
+    refreshAccount();
+    setDesktopKey({ reason });
+  }, [localUser, refreshAccount]);
+  // the account menu opens the card to replace or remove the key; a request that needed a key and found none opens
+  // it to add one; a key Google rejected while the window was in the background shows up when it comes back
   useEffect(() => {
-    if (!window.sciedu?.isDesktop) return undefined;
+    if (!localUser) return undefined;
     const onManage = () => openKeyCard('manage');
+    const onMissing = () => openKeyCard('missing');
     const onVisible = () => {
       if (document.hidden || keyCardDismissed.current) return;
-      api('/api/status').then((st) => {
-        if (st.gemini_key_invalid) setDesktopKey((k) => k || { activeJobs: st.active_jobs || 0, reason: 'rejected' });
-      }).catch(() => {});
+      refreshAccount().then((me) => { if (me?.keyInvalid) setDesktopKey((k) => k || { reason: 'rejected' }); });
     };
     window.addEventListener('sciedu:key-setup', onManage);
+    window.addEventListener('andedu:key-missing', onMissing);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.removeEventListener('sciedu:key-setup', onManage);
+      window.removeEventListener('andedu:key-missing', onMissing);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [openKeyCard]);
-  useEffect(() => {
-    let note = null;
-    try { note = sessionStorage.getItem(KEY_NOTE); sessionStorage.removeItem(KEY_NOTE); } catch { /* no storage */ }
-    if (note) toast(note);
-  }, [toast]);
+  }, [openKeyCard, localUser, refreshAccount]);
   const loadProgress = useCallback(() => {
     if (!user?.id) return;
     api(`/api/engage/${user.id}`).then(setProgress).catch(() => {});
@@ -387,22 +405,77 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [loadProgress]);
 
-  const signIn = (u) => { saveProfile(u); setUser(u); setMode('home'); };
+  const signIn = (u) => {
+    saveProfile(u); setUser(u); setMode('home');
+    setResume(null); setLockNotice(null); legacyAsked.current = false; keyCardDismissed.current = false;
+  };
   const signOut = useCallback(() => {
     api('/api/auth/logout', { method: 'POST' }).catch(() => {});
     setToken(null);
     saveProfile(null); setUser(null); setCourseId(null); setProgress(null); setMode('home'); setPanelOpen(false);
+    setResume(null); setDesktopKey(null);
   }, []);
 
   useEffect(() => {
-    const onExpired = () => { setToken(null); saveProfile(null); setUser(null); setProgress(null); setMode('home'); };
+    const onExpired = (e) => {
+      const p = loadProfile();
+      setResume(p?.local ? p : null);  // accounts on this computer: open it again (a password account asks for it)
+      // a job's key locked long ago (accounts on this computer): say why the sign-in screen is back
+      setLockNotice(e?.detail?.reason === 'key_locked' ? 'Your session ended while you were away. Sign in again to continue.' : null);
+      setToken(null); if (!p?.local) saveProfile(null);  // kept so a reload still picks the account
+      setUser(null); setProgress(null); setMode('home'); setDesktopKey(null);
+    };
     window.addEventListener('andedu:signed-out', onExpired);
     return () => window.removeEventListener('andedu:signed-out', onExpired);
   }, []);
+
+  // Accounts on this computer: "Lock now" and the idle timer end the session and drop the key from memory; the
+  // sign-in screen then asks for this account's password (the profile is kept so it is picked again).
+  const lockNow = useCallback((noticeText) => {
+    const p = loadProfile();
+    api('/api/auth/lock', { method: 'POST' }).catch(() => {}).finally(() => {
+      setToken(null);
+      setResume(p?.local ? p : null); setLockNotice(noticeText || null);
+      setUser(null); setAccount(null); setCourseId(null); setProgress(null); setMode('home'); setPanelOpen(false); setDesktopKey(null);
+    });
+  }, []);
+  useEffect(() => {
+    const onLock = () => lockNow(null);
+    const onChanged = () => { refreshAccount(); };
+    window.addEventListener('andedu:lock', onLock);
+    window.addEventListener('andedu:account-changed', onChanged);
+    return () => {
+      window.removeEventListener('andedu:lock', onLock);
+      window.removeEventListener('andedu:account-changed', onChanged);
+    };
+  }, [lockNow, refreshAccount]);
+  // the idle timer: input only (the UI's own polls don't count); the server locks too, as a backstop
+  const idleMin = localUser && account?.hasPassword ? account.autoLockMin || 0 : 0;
+  useEffect(() => {
+    if (!idleMin) return undefined;
+    let last = Date.now();
+    const limit = idleMin * 60_000;
+    const check = () => {
+      if (Date.now() - last < limit) return false;
+      lockNow(`${user?.name || 'Your account'} locked after ${idleMin} min without activity. Enter the password to continue.`);
+      return true;
+    };
+    const bump = () => { last = Date.now(); };
+    const onVisible = () => { if (!check() && !document.hidden) bump(); };  // back after a long time away: lock first
+    const inputs = ['mousemove', 'keydown', 'pointerdown', 'scroll', 'wheel', 'touchstart'];
+    inputs.forEach((t) => window.addEventListener(t, bump, { capture: true, passive: true }));
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = setInterval(check, 15_000);
+    return () => {
+      inputs.forEach((t) => window.removeEventListener(t, bump, { capture: true }));
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(timer);
+    };
+  }, [idleMin, lockNow, user?.name]);
   const switchMode = (m) => { setMode(m); if (m === 'home') setCourseId(null); };
   const openCourse = (id) => { setCourseId(id); setMode('course'); };
 
-  if (!user) return <LoginPage onSignedIn={signIn} />;
+  if (!user) return <LoginPage key={resume?.id || 'signin'} onSignedIn={signIn} resume={resume} notice={lockNotice} />;
 
   // previous/next class for whichever course class is on screen
   const siblingsOf = (t) => (t?.source?.courseId
@@ -572,8 +645,9 @@ export default function App() {
       )}
       <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />
       {desktopKey && (
-        <DesktopKeySetup key={desktopKey.reason} reason={desktopKey.reason} activeJobs={desktopKey.activeJobs}
-          onClose={() => { keyCardDismissed.current = true; setDesktopKey(null); }} />
+        <DesktopKeySetup key={desktopKey.reason} reason={desktopKey.reason} account={account}
+          onClose={() => { keyCardDismissed.current = true; setDesktopKey(null); }}
+          onDone={(msg) => { setDesktopKey(null); if (msg) toast(msg); refreshAccount(); }} />
       )}
       <div className="toast-region" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}

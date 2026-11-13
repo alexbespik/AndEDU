@@ -645,15 +645,18 @@ def set_password(user_id: str, password: str):
 
 
 # ---- accounts on this computer (SCIEDU_LOCAL_ACCOUNTS; hashes and sealing in userkeys.py) ----
-def create_local_account(name: str, password_hash: Optional[str]) -> Dict[str, Any]:
+def create_local_account(name: str, password_hash: Optional[str], elect: bool = True) -> Dict[str, Any]:
     """A local account with an optional password (a scrypt2 hash, or None). The first account on this computer is
-    its admin; the check and the insert are one statement."""
+    its admin; the check and the insert are one statement. elect=False (the saved-key offer is waiting): an upgraded
+    database whose admin is not chosen yet keeps it open, so the new row gets is_admin NULL like the older ones."""
     now = time.time()
     uid = _new_id("u")
     c = conn()
-    _elect_admin_once(c)  # an upgraded database picks its admin before anyone new joins
-    c.execute("INSERT INTO users (id, name, created_at, last_seen, password_hash, is_admin) "
-              "VALUES (?, ?, ?, ?, ?, (SELECT CASE WHEN EXISTS (SELECT 1 FROM users) THEN 0 ELSE 1 END))",
+    if elect:
+        _elect_admin_once(c)  # an upgraded database picks its admin before anyone new joins
+    c.execute("INSERT INTO users (id, name, created_at, last_seen, password_hash, is_admin) VALUES (?, ?, ?, ?, ?, "
+              "(SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM users) THEN 1 "
+              "WHEN EXISTS (SELECT 1 FROM users WHERE is_admin IS NOT NULL) THEN 0 END))",
               (uid, name, now, now, password_hash))
     c.commit()
     return {"id": uid, "name": name}
@@ -684,27 +687,54 @@ def set_auto_lock(user_id: str, minutes: int):
     conn().commit()
 
 
-def _elect_admin_once(c: sqlite3.Connection):
-    """A database from before accounts: the oldest user becomes the admin and every other 0. Runs only while no row
-    has is_admin set (the NOT EXISTS keeps two first calls from both running it)."""
+def _elect_admin_once(c: sqlite3.Connection, preferred: Optional[str] = None):
+    """While no account is the admin (a database from before accounts, or one whose admin was deleted by an older
+    version): `preferred` (else the oldest user) becomes the admin and every other 0, since only the admin can delete
+    accounts or hand the role on. The NOT EXISTS keeps two calls from both running it."""
     with c:
-        c.execute("UPDATE users SET is_admin = CASE WHEN id = (SELECT id FROM users ORDER BY created_at, rowid LIMIT 1) "
-                  "THEN 1 ELSE 0 END WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin IS NOT NULL)")
+        c.execute("UPDATE users SET is_admin = CASE WHEN id = COALESCE((SELECT id FROM users WHERE id = ?), "
+                  "(SELECT id FROM users ORDER BY created_at, rowid LIMIT 1)) THEN 1 ELSE 0 END "
+                  "WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)", (preferred,))
 
 
-def is_local_admin(user_id: str) -> bool:
-    """Accounts on this computer: the admin is the account with is_admin = 1. On a database from before accounts
-    (no row has is_admin set yet) the oldest user becomes the admin and the rest 0, once: deleting the admin later
-    (forgot-delete needs no password) must not hand the role to whoever is next."""
+def elect_local_admin(user_id: str):
+    """On a database from before accounts whose admin is not chosen yet, this account becomes it (the one that adopts
+    the key an older version saved on this computer). Does nothing once an admin was chosen."""
+    _elect_admin_once(conn(), user_id)
+
+
+def is_local_admin(user_id: str, elect: bool = True) -> bool:
+    """Accounts on this computer: the admin is the account with is_admin = 1. While there is none (a database from
+    before accounts, or an admin deleted by an older version) the oldest user becomes it (_elect_admin_once). The role
+    only moves by transfer_local_admin, and the admin deletes itself only after a transfer (or as the last account).
+    elect=False only reads (nobody is the admin until it is chosen)."""
     c = conn()
     r = c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
     if r and r["is_admin"]:
         return True
-    if c.execute("SELECT 1 FROM users WHERE is_admin IS NOT NULL LIMIT 1").fetchone():
+    if not elect or c.execute("SELECT 1 FROM users WHERE is_admin = 1 LIMIT 1").fetchone():
         return False
     _elect_admin_once(c)
     r = c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
     return bool(r and r["is_admin"])
+
+
+def transfer_local_admin(from_id: str, to_id: str) -> bool:
+    """Hands the admin role from `from_id` to `to_id` in one statement: nothing changes unless `from_id` is still the
+    admin and `to_id` exists, and afterwards `to_id` is the only admin."""
+    c = conn()
+    with c:
+        cur = c.execute("UPDATE users SET is_admin = CASE WHEN id = ? THEN 1 ELSE 0 END "
+                        "WHERE ? != ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND is_admin = 1) "
+                        "AND EXISTS (SELECT 1 FROM users WHERE id = ?)", (to_id, from_id, to_id, from_id, to_id))
+    return cur.rowcount > 0
+
+
+def list_local_accounts() -> List[Dict[str, Any]]:
+    """The admin's list of accounts on this computer: id, name, whether it has a password, whether it is the admin."""
+    rows = conn().execute("SELECT id, name, password_hash IS NOT NULL AS locked, COALESCE(is_admin, 0) AS is_admin "
+                          "FROM users ORDER BY created_at, rowid").fetchall()
+    return [{"id": r["id"], "name": r["name"], "locked": bool(r["locked"]), "isAdmin": bool(r["is_admin"])} for r in rows]
 
 
 def get_secret(user_id: str, kind: str) -> Optional[Dict[str, Any]]:

@@ -1,7 +1,8 @@
 """Accounts on this computer (docs/plans/ACCOUNTS.md). Phase 1: SCIEDU_LOCAL_ACCOUNTS scopes every request to its
 signed-in user like SCIEDU_AUTH, keeps the server-only rules off, never hands out password hashes, and loses to
 SCIEDU_AUTH when both are set. Phase 2: sign-in with optional passwords, the admin account, each account's sealed
-Gemini key, lock, auto-lock, forgot-password delete and the pre-migration backup."""
+Gemini key, lock, auto-lock, forgot-password delete and the pre-migration backup. Phase 4: the key an older desktop
+version saved for the computer, offered once (adopt or decline; the adopter is an upgraded database's admin)."""
 from test_lab import LOCAL, TestClient, server, db, engage  # noqa: F401  (sets up the temp content dir first)
 
 import ast
@@ -325,7 +326,7 @@ class LocalSignIn(LocalAccountsCase):
 
     def test_public_paths_add_the_sign_in_screen_only_locally(self):
         self.assertEqual(server.public_paths(), {"/api/status", "/api/auth/login", "/api/auth/register",
-                                                 "/api/auth/profiles", "/api/auth/forgot-delete"})
+                                                 "/api/auth/profiles"})
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = True, True
         self.assertNotIn("/api/auth/profiles", server.public_paths())
         self.assertEqual(self.c.get("/api/auth/profiles").status_code, 401)
@@ -428,14 +429,99 @@ class LocalSignIn(LocalAccountsCase):
             self.assertFalse(db.is_local_admin(later["id"]))
             self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
 
-    def test_deleting_the_admin_hands_the_role_to_nobody(self):
+    def test_a_computer_without_an_admin_gets_its_oldest_account_back_as_admin(self):
+        with fresh_db():
+            _, first = self.register("Boss Bo", PASSWORD)
+            _, second = self.register("Next Ned")
+            _, third = self.register("Last Lu")
+            set_admin(first, False)  # an older version deleted the admin from the sign-in screen
+            db.conn().execute("DELETE FROM users WHERE id = ?", (first,))
+            db.conn().commit()
+            self.assertFalse(db.is_local_admin(third))  # the oldest left becomes it, once
+            self.assertTrue(db.is_local_admin(second))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_only_the_admin_deletes_accounts(self):
         with fresh_db():
             admin_headers, admin = self.register("Boss Bo", PASSWORD)
-            _, other = self.register("Next Ned")
-            self.assertTrue(db.is_local_admin(admin))
-            r = self.c.post("/api/auth/forgot-delete", json={"userId": admin, "confirmName": f"Boss Bo {self.tag}"})
+            other_headers, other = self.register("Plain Pat")
+            _, third = self.register("Third Tia", PASSWORD)
+            name = lambda who: f"{who} {self.tag}"  # noqa: E731
+            # a non-admin can delete nobody, itself included, by either route
+            for path, body in (("/api/auth/delete-account", {"confirmName": name("Plain Pat")}),
+                               ("/api/auth/delete-account", {"confirmName": name("Third Tia"), "userId": third}),
+                               (f"/api/users/{third}/delete", {"confirmName": name("Third Tia")}),
+                               (f"/api/users/{admin}/delete", {"confirmName": name("Boss Bo")})):
+                r = self.c.post(path, json=body, headers=other_headers)
+                self.assertEqual(r.status_code, 403, (path, r.text))
+                self.assertIn("admin", r.json()["detail"])
+            self.assertEqual(self.c.get("/api/auth/accounts", headers=other_headers).status_code, 403)
+            # the admin: the account's name and the admin's own password
+            body = {"userId": third, "confirmName": name("Third Tia")}
+            self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=admin_headers).status_code, 401)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "confirmName": "Tia"},
+                                         headers=admin_headers).status_code, 422)
+            self.assertEqual(self.c.post(f"/api/users/{other}/delete", json={**body, "password": PASSWORD},
+                                         headers=admin_headers).status_code, 400)  # two different accounts named
+            r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=admin_headers)
             self.assertEqual(r.status_code, 200, r.text)
-            self.assertFalse(db.is_local_admin(other))
+            self.assertIsNone(db.get_user(third))
+            listed = self.c.get("/api/auth/accounts", headers=admin_headers).json()
+            self.assertEqual([(a["id"], a["isAdmin"]) for a in listed], [(admin, True), (other, False)])
+            self.assertNotIn("password_hash", str(listed))
+
+    def test_the_admin_hands_the_role_on_before_deleting_itself(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Boss Bo", PASSWORD)
+            other_headers, other = self.register("Plain Pat")
+            body = {"confirmName": f"Boss Bo {self.tag}", "password": PASSWORD}
+            r = self.c.post("/api/auth/delete-account", json=body, headers=admin_headers)
+            self.assertEqual(r.status_code, 409, r.text)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "transferTo": "u-none"},
+                                         headers=admin_headers).status_code, 409)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "transferTo": other, "password": "wrong password"},
+                                         headers=admin_headers).status_code, 401)
+            self.assertTrue(db.is_local_admin(admin))  # nothing moved before every check passed
+            r = self.c.post("/api/auth/delete-account", json={**body, "transferTo": other}, headers=admin_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIsNone(db.get_user(admin))
+            self.assertTrue(db.is_local_admin(other))
+            self.assertTrue(self.c.get("/api/auth/me", headers=other_headers).json()["isAdmin"])
+            # the last account deletes itself without a transfer; the next account created is the admin
+            r = self.c.post("/api/auth/delete-account", json={"confirmName": f"Plain Pat {self.tag}"}, headers=other_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            _, fresh = self.register("New Nia")
+            self.assertTrue(db.is_local_admin(fresh))
+
+    def test_admin_transfer(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Boss Bo", PASSWORD)
+            other_headers, other = self.register("Plain Pat")
+            url = "/api/auth/admin/transfer"
+            self.assertEqual(self.c.post(url, json={"userId": admin}, headers=other_headers).status_code, 403)
+            self.assertEqual(self.c.post(url, json={"userId": admin, "password": PASSWORD}, headers=admin_headers).status_code, 400)
+            self.assertEqual(self.c.post(url, json={"userId": "u-none", "password": PASSWORD}, headers=admin_headers).status_code, 404)
+            self.assertEqual(self.c.post(url, json={"userId": other, "password": "wrong password"}, headers=admin_headers).status_code, 401)
+            r = self.c.post(url, json={"userId": other, "password": PASSWORD}, headers=admin_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertFalse(db.is_local_admin(admin))
+            self.assertTrue(db.is_local_admin(other))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+            self.assertFalse(db.transfer_local_admin(admin, other))  # no longer the admin: nothing changes
+            self.assertEqual(self.c.post(url, json={"userId": other, "password": PASSWORD}, headers=admin_headers).status_code, 403)
+
+    def test_nobody_can_delete_while_the_saved_key_offer_waits(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Old Ola {self.tag}")
+            db.conn().execute("UPDATE users SET is_admin = NULL")
+            db.conn().commit()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1212"
+            r = self.c.post("/api/auth/login", json={"name": f"Old Ola {self.tag}"})
+            headers = bearer(r.json()["token"])
+            r = self.c.post("/api/auth/delete-account", json={"confirmName": f"Old Ola {self.tag}"}, headers=headers)
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("offer", r.json()["detail"])
+            self.assertIsNotNone(db.get_user(old["id"]))
 
     def test_upgrade_elects_the_admin_before_a_new_account_joins(self):
         with fresh_db():
@@ -549,6 +635,7 @@ class LocalSignIn(LocalAccountsCase):
 
     def test_password_change_and_delete_share_the_backoff(self):
         headers, uid = self.register("Guess Gus", PASSWORD)
+        set_admin(uid, True)  # only the admin deletes accounts; the password is checked after that
         body = {"confirmName": f"Guess Gus {self.tag}", "password": "wrong password"}
         for _ in range(3):
             self.assertEqual(self.c.post("/api/auth/password", json={"current": "wrong password", "new": "x" * 9},
@@ -611,37 +698,246 @@ class LocalSignIn(LocalAccountsCase):
         self.assertNotIn(uid, userkeys.UNLOCKED)
         self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
 
-    def test_forgot_password_deletes_the_account_after_its_name_is_typed(self):
-        _, open_id = self.register("Forgot Open")
-        headers, uid = self.register("Forgot Fred", PASSWORD)
-        self.put_key(headers)
-        course = db.create_course(uid, "Fred course", "g", "", [])
-        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": "Fred"})
-        self.assertEqual(r.status_code, 422)
-        r = self.c.post("/api/auth/forgot-delete", json={"userId": open_id, "confirmName": f"Forgot Open {self.tag}"})
-        self.assertEqual(r.status_code, 409)  # an open account just signs in to delete itself
-        self.assertEqual(self.c.post("/api/auth/forgot-delete", json={"userId": "u-none", "confirmName": "x"}).status_code, 404)
-        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": f" forgot  FRED {self.tag}"})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json()["removed"]["user_secrets"], 1)
-        self.assertIsNone(db.get_user(uid))
-        self.assertIsNone(db.get_course(course["id"]))
-        self.assertIsNone(db.get_secret(uid, "gemini"))
-        self.assertNotIn(uid, userkeys.UNLOCKED)
-        self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
-        self.assertNotIn(uid, [p["id"] for p in self.c.get("/api/auth/profiles").json()])
+    # ---- phase 4: the key an older desktop version saved for the whole computer, offered once
+    def adopt(self, headers, verdict="ok"):
+        with mock.patch.object(userkeys, "check_key", return_value=verdict) as check:
+            r = self.c.put("/api/me/gemini-key", json={"adoptLegacy": True}, headers=headers)
+        return r, check
 
-    def test_deleting_a_password_account_needs_its_password(self):
-        headers, uid = self.register("Delete Dora", PASSWORD)
-        body = {"confirmName": f"Delete Dora {self.tag}"}
-        self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 401)
-        self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "password": "wrong password"}, headers=headers).status_code, 401)
-        r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=headers)
+    def test_legacy_key_is_offered_until_one_account_adopts_it(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-5555"
+        first, uid = self.register("Legacy Lea", PASSWORD)
+        second, other = self.register("Legacy Leo")
+        for headers in (first, second):
+            self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["legacyKeyOffer"])
+        r, check = self.adopt(first)
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertIsNone(db.get_user(uid))
-        open_headers, open_id = self.register("Delete Open")  # no password: the typed name is enough
-        r = self.c.post(f"/api/users/{open_id}/delete", json={"confirmName": f"Delete Open {self.tag}"}, headers=open_headers)
+        check.assert_called_once_with("AIza-legacy-key-5555")
+        self.assertEqual((r.json()["hint"], r.json()["keyState"]), ("5555", "ok"))
+        self.assertNotIn("AIza-legacy", r.text)
+        self.assertEqual(db.get_secret(uid, "gemini")["mode"], "password")
+        self.assertEqual(userkeys.UNLOCKED[uid]["key"], "AIza-legacy-key-5555")
+        self.assertIsNone(userkeys.LEGACY_KEY)
+        for headers in (first, second):
+            me = self.c.get("/api/auth/me", headers=headers)
+            self.assertFalse(me.json()["legacyKeyOffer"])
+            self.assertNotIn("AIza-legacy", me.text)
+        r, check = self.adopt(second)  # taken once: nobody else gets it
+        self.assertEqual(r.status_code, 409)
+        check.assert_not_called()
+        self.assertIsNone(db.get_secret(other, "gemini"))
+
+    def test_declined_legacy_key_is_forgotten(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-6666"
+        headers, uid = self.register("Decline Dee")
+        self.assertEqual(self.c.delete("/api/me/legacy-key", headers=headers).json(), {"status": "declined"})
+        self.assertIsNone(userkeys.LEGACY_KEY)
+        self.assertFalse(self.c.get("/api/auth/me", headers=headers).json()["legacyKeyOffer"])
+        self.assertEqual(self.adopt(headers)[0].status_code, 409)
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+        self.assertEqual(self.c.delete("/api/me/legacy-key", headers=headers).json(), {"status": "none"})
+        self.assertEqual(self.c.delete("/api/me/legacy-key").status_code, 401)  # signed in only
+
+    def test_legacy_key_google_rejects_is_not_offered_again(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-7777"
+        headers, uid = self.register("Reject Rex", PASSWORD)
+        r, _ = self.adopt(headers, verdict="invalid")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("rejected", r.json()["detail"])
+        self.assertIsNone(userkeys.LEGACY_KEY)
+        self.assertIsNone(db.get_secret(uid, "gemini"))
+
+    def test_legacy_key_stays_offered_when_this_account_cannot_store_it(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-8888"
+        userkeys.DEVICE_KEY = None  # no keyring: an account without a password cannot keep a key
+        headers, uid = self.register("Nokey Nia")
+        r, _ = self.adopt(headers, verdict="ok")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("Set a password", r.json()["detail"])
+        self.assertEqual(userkeys.LEGACY_KEY, "AIza-legacy-key-8888")  # set a password, then take it
+        self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["legacyKeyOffer"])
+
+    def test_upgrade_admin_is_the_account_that_adopts_the_legacy_key(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Oldest {self.tag}")
+            db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+            db.conn().commit()
+            old_headers = local_account(f"Oldest {self.tag}")[0]
+            new_headers, new = local_account(f"Adopter {self.tag}")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-9999"
+            # while the offer waits, nobody is the admin yet and nothing is elected
+            self.assertFalse(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertEqual(self.c.get("/api/agy/inbox", headers=old_headers).status_code, 403)
+            self.assertIsNone(db.conn().execute("SELECT 1 FROM users WHERE is_admin IS NOT NULL").fetchone())
+            r, _ = self.adopt(new_headers, verdict="unverified")
+            self.assertEqual((r.status_code, r.json()["verified"]), (200, False))
+            self.assertTrue(self.c.get("/api/auth/me", headers=new_headers).json()["isAdmin"])
+            self.assertFalse(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_upgrade_admin_is_the_oldest_user_when_the_legacy_key_is_declined(self):
+        with fresh_db():
+            old = db.get_or_create_user(f"Elder {self.tag}")
+            db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+            db.conn().commit()
+            old_headers = local_account(f"Elder {self.tag}")[0]
+            new_headers, new = local_account(f"Decliner {self.tag}")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1010"
+            self.assertFalse(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.c.delete("/api/me/legacy-key", headers=new_headers)
+            self.assertTrue(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertFalse(db.is_local_admin(new))
+
+    def test_adopting_does_not_move_an_admin_already_chosen(self):
+        with fresh_db():
+            admin_headers, admin = self.register("Chosen Cy")
+            headers, uid = self.register("Late Lu")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1111"
+            self.assertTrue(self.c.get("/api/auth/me", headers=admin_headers).json()["isAdmin"])
+            self.assertEqual(self.adopt(headers)[0].status_code, 200)
+            self.assertTrue(db.is_local_admin(admin))
+            self.assertFalse(db.is_local_admin(uid))
+
+    def upgraded_db_with_elder(self):
+        old = db.get_or_create_user(f"Elder {self.tag}")
+        db.conn().execute("UPDATE users SET created_at = created_at - 100 WHERE id = ?", (old["id"],))
+        db.conn().commit()
+        return local_account(f"Elder {self.tag}")[0], old["id"]
+
+    def test_account_registered_while_the_offer_waits_can_become_the_admin(self):
+        with fresh_db():
+            old_headers, old = self.upgraded_db_with_elder()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1313"
+            headers, uid = self.register("Joiner Jo")
+            # the election stays open: the new row is NULL like the older ones
+            self.assertIsNone(db.conn().execute("SELECT 1 FROM users WHERE is_admin IS NOT NULL").fetchone())
+            self.assertEqual(self.adopt(headers)[0].status_code, 200)
+            self.assertTrue(db.is_local_admin(uid))
+            self.assertFalse(db.is_local_admin(old))
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_account_registered_while_the_offer_waits_then_declined_leaves_the_oldest_admin(self):
+        with fresh_db():
+            old_headers, old = self.upgraded_db_with_elder()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1414"
+            headers, uid = self.register("Joiner Jay")
+            self.c.delete("/api/me/legacy-key", headers=headers)
+            self.assertFalse(self.c.get("/api/auth/me", headers=headers).json()["isAdmin"])
+            self.assertTrue(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertEqual(db.conn().execute("SELECT COUNT(*) FROM users WHERE is_admin = 1").fetchone()[0], 1)
+
+    def test_fresh_install_first_account_is_admin_even_with_a_pending_offer(self):
+        with fresh_db():
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1515"
+            headers, uid = self.register("Founder Fi")
+            _, other = self.register("Second Si")
+            self.assertTrue(self.c.get("/api/auth/me", headers=headers).json()["isAdmin"])
+            self.assertFalse(db.is_local_admin(other))
+            self.assertEqual(self.adopt(headers)[0].status_code, 200)
+            self.assertTrue(db.is_local_admin(uid))
+
+    def test_admin_refusals_name_the_offer_while_it_waits(self):
+        with fresh_db():
+            old_headers, _ = self.upgraded_db_with_elder()
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1616"
+            r = self.c.get("/api/agy/inbox", headers=old_headers)
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("Answer the offer of the key saved on this computer first", r.json()["detail"])
+            self.c.delete("/api/me/legacy-key", headers=old_headers)
+            self.assertEqual(self.c.get("/api/agy/inbox", headers=old_headers).status_code, 200)
+
+    def test_an_adopt_that_cannot_store_the_key_ends_the_admin_wait(self):
+        with fresh_db():
+            old_headers, old = self.upgraded_db_with_elder()
+            headers, uid = local_account(f"Open Ola {self.tag}")
+            userkeys.LEGACY_KEY = "AIza-legacy-key-1717"
+            userkeys.DEVICE_KEY = None
+            self.assertEqual(self.adopt(headers)[0].status_code, 409)
+            self.assertTrue(server.legacy_key_pending())  # still offered (set a password, then take it)
+            self.assertFalse(server.admin_election_waits())
+            self.assertTrue(self.c.get("/api/auth/me", headers=old_headers).json()["isAdmin"])
+            self.assertNotIn("Answer the offer", self.c.get("/api/agy/inbox", headers=headers).json()["detail"])
+
+    def test_the_check_with_google_runs_outside_the_lock_and_one_adopt_at_a_time(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-1818"
+        headers, uid = self.register("Busy Bea", PASSWORD)
+        seen = []
+
+        def check(key):
+            free = server._legacy_lock.acquire(blocking=False)
+            if free:
+                server._legacy_lock.release()
+            seen.append((free, server._legacy["busy"]))
+            # a second answer meanwhile is refused, not run twice
+            seen.append(self.c.delete("/api/me/legacy-key", headers=headers).status_code)
+            seen.append(self.c.put("/api/me/gemini-key", json={"adoptLegacy": True}, headers=headers).status_code)
+            return "ok"
+
+        with mock.patch.object(userkeys, "check_key", side_effect=check):
+            r = self.c.put("/api/me/gemini-key", json={"adoptLegacy": True}, headers=headers)
         self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(seen, [(True, True), 409, 409])
+        self.assertFalse(server._legacy["busy"])
+        self.assertIsNone(userkeys.LEGACY_KEY)
+
+    def test_status_says_whether_the_offer_waits(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-1919"
+        status = self.c.get("/api/status")
+        self.assertTrue(status.json()["legacy_key_pending"])
+        self.assertNotIn("AIza-legacy", status.text)
+        headers, _ = self.register("Status Sol")
+        self.c.delete("/api/me/legacy-key", headers=headers)
+        self.assertFalse(self.c.get("/api/status").json()["legacy_key_pending"])
+
+    def test_legacy_key_offer_only_with_local_accounts(self):
+        userkeys.LEGACY_KEY = "AIza-legacy-key-1212"
+        server.LOCAL_ACCOUNTS = False
+        self.assertNotIn("legacyKeyOffer", self.c.get("/api/auth/me").json())
+        self.assertEqual(self.c.delete("/api/me/legacy-key").status_code, 404)
+        self.assertFalse(server.legacy_key_pending())
+
+    def test_forgot_password_cannot_delete_from_the_sign_in_screen(self):
+        _, uid = self.register("Forgot Fred", PASSWORD)
+        r = self.c.post("/api/auth/forgot-delete", json={"userId": uid, "confirmName": f"Forgot Fred {self.tag}"})
+        self.assertIn(r.status_code, (401, 404, 405))
+        self.assertIsNotNone(db.get_user(uid))
+
+    def test_deleted_account_loses_its_key_and_sessions(self):
+        with fresh_db():
+            admin_headers, _ = self.register("Boss Bo")
+            headers, uid = self.register("Gone Gil", PASSWORD)
+            self.put_key(headers)
+            course = db.create_course(uid, "Gil course", "g", "", [])
+            r = self.c.post("/api/auth/delete-account", json={"userId": uid, "confirmName": f" gone  GIL {self.tag}"},
+                            headers=admin_headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json()["removed"]["user_secrets"], 1)
+            self.assertIsNone(db.get_user(uid))
+            self.assertIsNone(db.get_course(course["id"]))
+            self.assertIsNone(db.get_secret(uid, "gemini"))
+            self.assertNotIn(uid, userkeys.UNLOCKED)
+            self.assertEqual(self.c.get("/api/auth/me", headers=headers).status_code, 401)
+            self.assertNotIn(uid, [p["id"] for p in self.c.get("/api/auth/profiles").json()])
+
+    def test_an_admin_with_a_password_confirms_with_it(self):
+        with fresh_db():
+            headers, uid = self.register("Delete Dora", PASSWORD)
+            _, other = self.register("Next Ned")
+            body = {"confirmName": f"Delete Dora {self.tag}", "transferTo": other}
+            self.assertEqual(self.c.post("/api/auth/delete-account", json=body, headers=headers).status_code, 401)
+            self.assertEqual(self.c.post("/api/auth/delete-account", json={**body, "password": "wrong password"}, headers=headers).status_code, 401)
+            r = self.c.post("/api/auth/delete-account", json={**body, "password": PASSWORD}, headers=headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIsNone(db.get_user(uid))
+
+    def test_an_open_admin_confirms_with_the_name_alone(self):
+        with fresh_db():
+            headers, uid = self.register("Delete Open")
+            _, other = self.register("Other Oz", PASSWORD)
+            r = self.c.post(f"/api/users/{other}/delete", json={"confirmName": f"Other Oz {self.tag}"}, headers=headers)
+            self.assertEqual(r.status_code, 200, r.text)
+            r = self.c.post(f"/api/users/{uid}/delete", json={"confirmName": f"Delete Open {self.tag}"}, headers=headers)
+            self.assertEqual(r.status_code, 200, r.text)  # the last account: nobody to hand the role to
 
     def test_idle_password_account_locks_itself(self):
         headers, uid = self.register("Idle Ida", PASSWORD)
@@ -693,7 +989,7 @@ class LocalSignIn(LocalAccountsCase):
         headers, _ = self.register("Modes Max")
         server.AUTH_REQUIRED, server.LOCAL_ACCOUNTS = False, False
         for method, path in (("get", "/api/auth/profiles"), ("post", "/api/auth/lock"), ("post", "/api/auth/password"),
-                             ("post", "/api/auth/forgot-delete"), ("put", "/api/auth/prefs"), ("put", "/api/me/gemini-key"),
+                             ("get", "/api/auth/accounts"), ("post", "/api/auth/admin/transfer"), ("put", "/api/auth/prefs"), ("put", "/api/me/gemini-key"),
                              ("delete", "/api/me/gemini-key")):
             body = {"get": {}, "delete": {}}.get(method, {"json": {"userId": "u", "confirmName": "x", "autoLockMin": 1, "key": "k"}})
             self.assertEqual(getattr(self.c, method)(path, **body).status_code, 404, path)
