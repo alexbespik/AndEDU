@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import advisor
+from local_accounts import BothFlagsMixin, LocalAccountsMixin, local_account
 
 REAL_QUEUE = server.queue_course_generation  # some test_lab tests replace it for good; captured at import
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -130,6 +131,7 @@ class Export(AccountsCase):
         self.assertIn("# Lesson", data["notes"][tid])
         self.assertEqual([q["userId"] for q in data["quizLog"]], [self.a_id])
         self.assertTrue(data["consent"]["privacyVersion"])
+        self.assertTrue(data["user"]["privacy_version"])  # the user row keeps its consent fields, only secrets go
         for secret in ("password_hash", "token_hash", "scrypt$"):
             self.assertNotIn(secret, r.text)
         self.assertNotIn(self.b_id, r.text)
@@ -217,7 +219,8 @@ class LocalDelete(unittest.TestCase):
 
 class Guard(unittest.TestCase):
     def test_every_user_id_table_is_covered_by_export_and_delete(self):
-        known = set(db.USER_DATA_TABLES) | {"users", "courses", "classes", "lessons", "sessions"}
+        # user_secrets: delete_user removes it explicitly; exports must never carry the sealed keys
+        known = set(db.USER_DATA_TABLES) | {"users", "courses", "classes", "lessons", "sessions", "user_secrets"}
         missing = [t for t in user_id_tables() if t not in known]
         self.assertEqual(missing, [], "add these tables to db.USER_DATA_TABLES so export and delete cover them")
 
@@ -343,6 +346,26 @@ class CatalogUpsert(unittest.TestCase):
         self.assertEqual(c["description"], "Data protection.")
         self.assertEqual(c["prereqs"], "PRVY 110")
         self.assertIn("PRVY 110", json.dumps(c["prereq_codes"]))
+
+
+
+# The same isolation checks with accounts on this computer (SCIEDU_LOCAL_ACCOUNTS), and with both flags set (server
+# accounts win). Deleting a local account (password rules) comes with local sign-in.
+class ExportLocal(LocalAccountsMixin, Export):
+    def acct(self, name):
+        return (*local_account(name), name)
+
+
+class ExportBothFlags(BothFlagsMixin, Export):
+    pass
+
+
+class DeleteAccountBothFlags(BothFlagsMixin, DeleteAccount):
+    pass
+
+
+class ConsentBothFlags(BothFlagsMixin, Consent):
+    pass
 
 
 if __name__ == "__main__":

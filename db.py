@@ -108,6 +108,18 @@ CREATE TABLE IF NOT EXISTS student_notes (
     updated_at  REAL NOT NULL
 );
 
+-- accounts on this computer: secrets sealed with AES-256-GCM (userkeys.py); mode password | device
+CREATE TABLE IF NOT EXISTS user_secrets (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    mode        TEXT NOT NULL,
+    nonce       BLOB NOT NULL,
+    ciphertext  BLOB NOT NULL,
+    hint        TEXT,
+    updated_at  REAL NOT NULL,
+    PRIMARY KEY (user_id, kind)
+);
+
 """
 
 JSON_COLUMNS = {"filenames", "concepts", "diagnostic", "answers", "mastery", "objectives", "meta"}
@@ -199,11 +211,35 @@ MIGRATIONS = [
     ("courses", "weeks", "INTEGER"),               # semester length the student asked for
     ("courses", "auto_cleanup", "INTEGER NOT NULL DEFAULT 0"),  # problem sprint: cleared once every problem is done
     ("courses", "cleared_at", "REAL"),             # when it was cleared (status 'cleared'); purged after the retention days
+    ("users", "auto_lock_minutes", "INTEGER"),     # accounts on this computer: lock after this idle time (NULL = 30)
+    ("users", "is_admin", "INTEGER"),              # accounts on this computer: 1 = may change the shared library
 ]
+BACKUP_NAME = "edu_studio.pre-accounts.db"
+
+
+def _backup_before_accounts(c: sqlite3.Connection):
+    """Before the first migration to accounts (no user_secrets table yet, users present): one copy of the database in
+    backups/ beside it, through SQLite's backup API. An existing copy is never overwritten."""
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "user_secrets" in tables or "users" not in tables or not c.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+        return
+    target = DB_PATH.parent / "backups" / BACKUP_NAME
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.unlink(missing_ok=True)
+    dest = sqlite3.connect(tmp)
+    try:
+        c.backup(dest)
+    finally:
+        dest.close()
+    os.replace(tmp, target)
 
 
 def init_db():
     c = conn()
+    _backup_before_accounts(c)  # before any CREATE or ALTER
     c.executescript(SCHEMA)
     for table, column, definition in MIGRATIONS:
         cols = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
@@ -236,10 +272,15 @@ def _new_id(prefix: str) -> str:
 
 
 # ---- users ----
+# Columns a user dict may carry out of these helpers (they reach the browser); never password_hash.
+# Sign-in code reads the hash with get_user_by_name / get_user_auth.
+USER_COLUMNS = "id, name, created_at, last_seen"
+
+
 def get_or_create_user(name: str) -> Dict[str, Any]:
     now = time.time()
     c = conn()
-    row = c.execute("SELECT * FROM users WHERE name = ?", (name,)).fetchone()
+    row = c.execute(f"SELECT {USER_COLUMNS} FROM users WHERE name = ?", (name,)).fetchone()
     if row:
         c.execute("UPDATE users SET last_seen = ? WHERE id = ?", (now, row["id"]))
         c.commit()
@@ -251,12 +292,17 @@ def get_or_create_user(name: str) -> Dict[str, Any]:
 
 
 def get_user(user_id: str) -> Optional[Dict[str, Any]]:
+    return _row(conn().execute(f"SELECT {USER_COLUMNS} FROM users WHERE id = ?", (user_id,)).fetchone())
+
+
+def get_user_auth(user_id: str) -> Optional[Dict[str, Any]]:
+    """The user row with its password hash, for password checks only; never return it to a client."""
     return _row(conn().execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
 
 
 def list_users() -> List[Dict[str, Any]]:
     rows = conn().execute("""
-        SELECT u.*, COUNT(c.id) AS course_count FROM users u
+        SELECT u.id, u.name, u.created_at, u.last_seen, COUNT(c.id) AS course_count FROM users u
         LEFT JOIN courses c ON c.user_id = u.id GROUP BY u.id ORDER BY u.last_seen DESC
     """).fetchall()
     return [dict(r) for r in rows]
@@ -458,17 +504,34 @@ def reset_stuck_classes():
     conn().commit()
 
 
-def interrupted_planning() -> List[Dict[str, Any]]:
-    """Courses whose planning job died with the process; their materials are stored, so they can be re-planned."""
-    return [_row(r) for r in conn().execute("SELECT * FROM courses WHERE status = 'planning'").fetchall()]
+def interrupted_planning(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Courses whose planning job died with the process; their materials are stored, so they can be re-planned.
+    With user_id, only that user's (accounts on this computer resume each account once it signs in)."""
+    if user_id is None:
+        rows = conn().execute("SELECT * FROM courses WHERE status = 'planning'").fetchall()
+    else:
+        rows = conn().execute("SELECT * FROM courses WHERE status = 'planning' AND user_id = ?", (user_id,)).fetchall()
+    return [_row(r) for r in rows]
 
 
-def courses_with_pending_classes() -> List[str]:
-    rows = conn().execute("""
+def courses_with_pending_classes(user_id: Optional[str] = None) -> List[str]:
+    sql = """
         SELECT DISTINCT c.id FROM courses c JOIN classes k ON k.course_id = c.id
         WHERE c.status = 'generating' AND k.status = 'pending'
-    """).fetchall()
+    """
+    rows = conn().execute(sql, ()).fetchall() if user_id is None else conn().execute(sql + " AND c.user_id = ?", (user_id,)).fetchall()
     return [r["id"] for r in rows]
+
+
+def courses_failed_with(user_id: str, texts) -> List[Dict[str, Any]]:
+    """The user's courses in 'error' whose error message contains one of these texts."""
+    texts = list(texts)
+    if not texts:
+        return []
+    where = " OR ".join("instr(error, ?) > 0" for _ in texts)
+    rows = conn().execute(f"SELECT * FROM courses WHERE user_id = ? AND status = 'error' AND ({where})",
+                          (user_id, *texts)).fetchall()
+    return [_row(r) for r in rows]
 
 
 # ---- lessons & attempts ----
@@ -549,6 +612,10 @@ def hash_password(password: str) -> str:
 
 
 def check_password(password: str, stored: Optional[str]) -> bool:
+    """Accepts both schemes: scrypt$ (server accounts) and scrypt2$ (accounts on this computer, userkeys.py)."""
+    if (stored or "").startswith("scrypt2$"):
+        import userkeys  # only here: the rest of this module needs nothing beyond the standard library
+        return userkeys.verify_password(password, stored) is not None
     try:
         scheme, salt_hex, digest_hex = (stored or "").split("$")
     except ValueError:
@@ -574,6 +641,119 @@ def create_account(name: str, password: str) -> Dict[str, Any]:
 
 def set_password(user_id: str, password: str):
     conn().execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password), user_id))
+    conn().commit()
+
+
+# ---- accounts on this computer (SCIEDU_LOCAL_ACCOUNTS; hashes and sealing in userkeys.py) ----
+def create_local_account(name: str, password_hash: Optional[str]) -> Dict[str, Any]:
+    """A local account with an optional password (a scrypt2 hash, or None). The first account on this computer is
+    its admin; the check and the insert are one statement."""
+    now = time.time()
+    uid = _new_id("u")
+    c = conn()
+    _elect_admin_once(c)  # an upgraded database picks its admin before anyone new joins
+    c.execute("INSERT INTO users (id, name, created_at, last_seen, password_hash, is_admin) "
+              "VALUES (?, ?, ?, ?, ?, (SELECT CASE WHEN EXISTS (SELECT 1 FROM users) THEN 0 ELSE 1 END))",
+              (uid, name, now, now, password_hash))
+    c.commit()
+    return {"id": uid, "name": name}
+
+
+def set_password_hash(user_id: str, password_hash: Optional[str]):
+    """Stores a ready hash (None removes the password)."""
+    conn().execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    conn().commit()
+
+
+def list_local_profiles() -> List[Dict[str, Any]]:
+    """The sign-in tiles: id, name and whether the account has a password. Nothing else leaves here."""
+    rows = conn().execute("SELECT id, name, password_hash IS NOT NULL AS locked FROM users ORDER BY last_seen DESC").fetchall()
+    return [{"id": r["id"], "name": r["name"], "locked": bool(r["locked"])} for r in rows]
+
+
+def local_account_info(user_id: str) -> Optional[Dict[str, Any]]:
+    r = conn().execute("SELECT password_hash IS NOT NULL AS has_password, auto_lock_minutes, is_admin FROM users WHERE id = ?",
+                       (user_id,)).fetchone()
+    if not r:
+        return None
+    return {"has_password": bool(r["has_password"]), "auto_lock_minutes": r["auto_lock_minutes"], "is_admin": bool(r["is_admin"])}
+
+
+def set_auto_lock(user_id: str, minutes: int):
+    conn().execute("UPDATE users SET auto_lock_minutes = ? WHERE id = ?", (minutes, user_id))
+    conn().commit()
+
+
+def _elect_admin_once(c: sqlite3.Connection):
+    """A database from before accounts: the oldest user becomes the admin and every other 0. Runs only while no row
+    has is_admin set (the NOT EXISTS keeps two first calls from both running it)."""
+    with c:
+        c.execute("UPDATE users SET is_admin = CASE WHEN id = (SELECT id FROM users ORDER BY created_at, rowid LIMIT 1) "
+                  "THEN 1 ELSE 0 END WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin IS NOT NULL)")
+
+
+def is_local_admin(user_id: str) -> bool:
+    """Accounts on this computer: the admin is the account with is_admin = 1. On a database from before accounts
+    (no row has is_admin set yet) the oldest user becomes the admin and the rest 0, once: deleting the admin later
+    (forgot-delete needs no password) must not hand the role to whoever is next."""
+    c = conn()
+    r = c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    if r and r["is_admin"]:
+        return True
+    if c.execute("SELECT 1 FROM users WHERE is_admin IS NOT NULL LIMIT 1").fetchone():
+        return False
+    _elect_admin_once(c)
+    r = c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    return bool(r and r["is_admin"])
+
+
+def get_secret(user_id: str, kind: str) -> Optional[Dict[str, Any]]:
+    return _row(conn().execute("SELECT user_id, kind, mode, nonce, ciphertext, hint, updated_at FROM user_secrets "
+                               "WHERE user_id = ? AND kind = ?", (user_id, kind)).fetchone())
+
+
+def set_secret(user_id: str, kind: str, mode: str, nonce: bytes, ciphertext: bytes, hint: Optional[str]):
+    c = conn()
+    c.execute("INSERT INTO user_secrets (user_id, kind, mode, nonce, ciphertext, hint, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+              "ON CONFLICT(user_id, kind) DO UPDATE SET mode = excluded.mode, nonce = excluded.nonce, "
+              "ciphertext = excluded.ciphertext, hint = excluded.hint, updated_at = excluded.updated_at",
+              (user_id, kind, mode, nonce, ciphertext, hint, time.time()))
+    c.commit()
+
+
+def set_password_and_secret(user_id: str, password_hash: Optional[str], kind: str, sealed: Optional[tuple]):
+    """A password change in one commit: the new hash and the secret sealed under it (mode, nonce, ciphertext, hint),
+    or with sealed=None the secret dropped, so a failure never leaves a key sealed under the old password."""
+    c = conn()
+    with c:
+        c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        if sealed is None:
+            c.execute("DELETE FROM user_secrets WHERE user_id = ? AND kind = ?", (user_id, kind))
+        else:
+            mode, nonce, ciphertext, hint = sealed
+            c.execute("INSERT INTO user_secrets (user_id, kind, mode, nonce, ciphertext, hint, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                      "ON CONFLICT(user_id, kind) DO UPDATE SET mode = excluded.mode, nonce = excluded.nonce, "
+                      "ciphertext = excluded.ciphertext, hint = excluded.hint, updated_at = excluded.updated_at",
+                      (user_id, kind, mode, nonce, ciphertext, hint, time.time()))
+
+
+def delete_secret(user_id: str, kind: str) -> bool:
+    c = conn()
+    gone = c.execute("DELETE FROM user_secrets WHERE user_id = ? AND kind = ?", (user_id, kind)).rowcount
+    c.commit()
+    return bool(gone)
+
+
+def end_user_sessions(user_id: str, keep_token: Optional[str] = None):
+    """Ends the account's sessions; keep_token (the caller's own) stays signed in."""
+    conn().execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+                   (user_id, _token_hash(keep_token) if keep_token else ""))
+    conn().commit()
+
+
+def clear_sessions():
+    """Accounts on this computer: every launch starts signed out (the unlocked keys did not survive either)."""
+    conn().execute("DELETE FROM sessions")
     conn().commit()
 
 
@@ -706,7 +886,7 @@ def delete_lessons(topic_ids: List[str]) -> int:
 def export_user(user_id: str) -> Dict[str, Any]:
     """Everything stored about one user, for "Export my data". No password hash, tokens or sessions."""
     c = conn()
-    user = get_user(user_id)
+    user = get_user_auth(user_id)  # the whole row, consent fields included; secret columns are dropped below
     if user:
         user = {k: v for k, v in user.items() if not any(s in k.lower() for s in _SECRET_USER_COLUMNS)}
     courses = [_row(r) for r in c.execute("SELECT * FROM courses WHERE user_id = ? ORDER BY created_at", (user_id,))]
@@ -739,6 +919,7 @@ def delete_user(user_id: str) -> Dict[str, int]:
         for t in _existing_user_tables(c):
             counts[t] = c.execute(f"DELETE FROM {t} WHERE user_id = ?", (user_id,)).rowcount
         counts["sessions"] = c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,)).rowcount
+        counts["user_secrets"] = c.execute("DELETE FROM user_secrets WHERE user_id = ?", (user_id,)).rowcount
         counts["classes"] = (c.execute(f"DELETE FROM classes WHERE course_id IN ({_marks(course_ids)})", course_ids).rowcount
                              if course_ids else 0)
         counts["courses"] = c.execute("DELETE FROM courses WHERE user_id = ?", (user_id,)).rowcount

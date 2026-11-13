@@ -13,6 +13,8 @@ from unittest import mock
 
 from fastapi import HTTPException
 
+from local_accounts import BothFlagsMixin, LocalAccountsMixin, local_account
+
 
 def setUpModule():
     # test_lab's tearDownModule removes the shared temp dir; recreate what these tests need
@@ -316,6 +318,24 @@ class Normalizers(unittest.TestCase):
         for j in new:
             server.JOBS.pop(j, None)
         self.assertEqual(len(new), 2)
+
+
+
+# The isolation checks with accounts on this computer (SCIEDU_LOCAL_ACCOUNTS), and every accounts check with both
+# flags set (server accounts win).
+class PrivateLessonsLocal(LocalAccountsMixin, PrivateLessons):
+    acct = staticmethod(local_account)
+    # server-only rules (ACCOUNTS.md S rows): any signed-in local user is an admin; unknown questions are not a 404
+    test_inbox_needs_an_admin = None
+    test_quiz_question_must_exist_with_accounts = None
+
+
+class AdminsAndSignUpBothFlags(BothFlagsMixin, AdminsAndSignUp):
+    pass
+
+
+class PrivateLessonsBothFlags(BothFlagsMixin, PrivateLessons):
+    pass
 
 
 if __name__ == "__main__":

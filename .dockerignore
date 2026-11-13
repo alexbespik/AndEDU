@@ -12,6 +12,7 @@ tests
 docs
 # runtime and private data: only the seed lessons in content/topics go into the image
 content/edu_studio.db*
+content/backups/
 content/notes
 content/*.json
 content/*.jsonl

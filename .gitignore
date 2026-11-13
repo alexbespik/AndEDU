@@ -9,6 +9,7 @@ __pycache__
 
 # runtime data (profiles, courses, attempts)
 content/edu_studio.db*
+content/backups/
 content/quiz_results.jsonl
 # every runtime log in content/ (quiz results, agy inbox)
 content/*.jsonl

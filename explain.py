@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict
 
 import db
 import language_tts
+import userkeys
 
 VERSION = 1
 TOPIC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # same rule as server.TOPIC_ID_RE: the id is in the file name
@@ -242,6 +243,8 @@ def build_router(*, rate_limit: Callable[[str], None], current_user: Callable[[]
             try:
                 reply = await gemini_json(build_prompt(topic, anchors), role="lesson")
             except HTTPException:
+                raise
+            except userkeys.KEY_ERRORS:  # no key: the app's 409/401 with a `code`
                 raise
             except Exception as e:
                 print(f"[EXPLAIN] model call failed: {type(e).__name__}")
