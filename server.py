@@ -6170,7 +6170,8 @@ def effective_mastery(course: Dict[str, Any], classes: List[Dict[str, Any]]) -> 
 
 WORKSPACES = ("math", "code", "lab", "history", "language", "philosophy",
               "literature", "music", "art_history", "classics", "rhetoric", "polity")
-_CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure|javascript|typescript|\bjava\b|c\+\+|\brust\b|software|computer science|sql\b", re.I)
+_CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure|javascript|typescript|\bjava\b|c\+\+|\brust\b|software|computer science|sql\b|"
+                      r"assembly|risc-v|pipeline|cache|hardware|neural net|deep learning|gradient descent|attention", re.I)
 _PHIL_RE = re.compile(r"philosoph|epistemolog|ethics|ethical|moral|metaphysic|existential|utilitarian|\bstoic(?:ism|s)?\b|syllogism|fallac|argumentation|plato\b|aristotle|socrates|kant\b|nietzsche|descartes|hume\b|wittgenstein", re.I)
 _LIT_RE = re.compile(r"literat|poet|poem|sonnet|scansion|meter|rhyme|stanza|novel|fiction|drama|shakespeare|narrative|prose", re.I)
 _MUSIC_RE = re.compile(r"music|chord|satb|harmony|voice leading|cadence|tempo|melody|rhythm|scale|interval|figured bass|symphon|sonata|bach|beethoven|mozart", re.I)
@@ -6179,7 +6180,9 @@ _CLASSICS_RE = re.compile(r"classic|epigraph|inscription|archaeolog|harris matri
 _RHET_RE = re.compile(r"rhetoric|oratory|persuasion|speech|stasis|trope|chiasmus|enthymeme|dispositio|ethos|pathos|logos|quintilian", re.I)
 _POLITY_RE = re.compile(r"polity|political science|election|voting|proportional representation|d'hondt|dhondt|coalition|legislat|parliament|veto|veto player|congress|gerrymander|ballot|instant runoff|ranked choice", re.I)
 _MATH_RE = re.compile(r"math|calculus|algebra|geometry|trigonometr|statistic|probabilit|\blimits?\b|epsilon|delta|derivative|integra|proof|number theory|"
-                      r"differential equation|real analysis|topology|combinatoric|precalc|matri|vector space|sequence|series", re.I)
+                      r"differential equation|real analysis|topology|combinatoric|precalc|matri|vector space|sequence|series|"
+                      r"bayes|confidence interval|p-value|hypothesis|regression", re.I)
+_LAB_RE = re.compile(r"physics|chemistr|biolog|circuit|thevenin|bode|opamp|transcription|codon|enzyme|hardy-weinberg", re.I)
 
 _LANG_RE = re.compile(r"linguistic|language|ukrainian|polish|spanish|french|german|italian|chinese|mandarin|japanese|korean|arabic|russian|latin|greek|"
                       r"grammar|phonetic|phonolog|morpholog|semantics|vocabulary|conjugat|pronunciation", re.I)
@@ -6187,12 +6190,12 @@ _HIST_RE = re.compile(r"histor|civilization|\bwar\b|revolution|ancient|medieval|
 
 def guess_workspace(*texts: str) -> str:
     """Fallback when the planner gave none: code beats math (a 'Python for statistics' course is code),
-    then philosophy, literature, music, art history, classics, rhetoric, polity, math, languages, history;
+    then philosophy, literature, music, art history, classics, rhetoric, polity, lab, math, languages, history;
     everything else (physics, chemistry, biology...) is Lab."""
     blob = " ".join(t or "" for t in texts)
     for ws, rx in (("code", _CODE_RE), ("philosophy", _PHIL_RE), ("literature", _LIT_RE),
                    ("music", _MUSIC_RE), ("art_history", _ART_RE), ("classics", _CLASSICS_RE),
-                   ("rhetoric", _RHET_RE), ("polity", _POLITY_RE), ("math", _MATH_RE),
+                   ("rhetoric", _RHET_RE), ("polity", _POLITY_RE), ("lab", _LAB_RE), ("math", _MATH_RE),
                    ("language", _LANG_RE), ("history", _HIST_RE)):
         if rx.search(blob):
             return ws

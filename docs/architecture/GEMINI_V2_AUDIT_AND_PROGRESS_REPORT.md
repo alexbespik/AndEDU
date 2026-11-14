@@ -51,27 +51,48 @@ All 6 domain kits are implemented as flat root modules adhering to the zero-depe
 | Component | Status | Delivered Artifacts | Remaining Tasks |
 | :--- | :---: | :--- | :--- |
 | **3.1 Deterministic FBD Vector Grader** | **DONE** | `fbd_grader.py`, `server.py`, `tests/test_fbd_grader.py` | None. 12/12 unit tests passing offline. |
-| **3.2 XPBD Velocity Projection** | *Pending* | Specification in `STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md` | Implement PBD relaxation & velocity projection in `src/simulations/SpecSim.jsx`. |
-| **3.3 Dual-Number Jet2 AutoDiff & Pole Guards** | *Pending* | Specification in `STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md` | Implement `dual_autodiff.js`, integrate with `MathLab.jsx`. |
-| **3.4 Polyprotic Titration Charge Balance** | *Pending* | Specification in `STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md` | Implement $N$-protic polynomial solver in `chemspec.py` & `ChemSim.jsx`. |
-| **3.5 Subprocess Sandbox Hardening** | *Pending* | Specification in `STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md` | Author `sandbox_preamble.py` (PEP 578 audit hook) & update Dockerfile. |
-| **3.6 Typed Cardinality & Credit-Pool AST** | *Pending* | Specification in `STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md` | Implement `advisor_rules.py` with typed requirement tree. |
-| **3.7 5 New STEM & Engineering Lab Kits** | *Pending* | Specification in `STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md` | Author `practice_ee.py`, `practice_ai.py`, `practice_systems.py`, `practice_stats.py`, `practice_bio.py` (20 practice types). |
+| **3.2 XPBD Velocity Projection** | **DONE** | `src/simulations/SpecSim.jsx` | None. Rigid rod linkage velocity projection eliminates momentum drift. |
+| **3.3 Dual-Number Jet2 AutoDiff & Pole Guards** | **DONE** | `src/lib/dual_autodiff.js`, `src/lib/expr.js`, `src/components/MathLab.jsx` | None. Exact analytical derivatives & reciprocal-zero even-pole detection. |
+| **3.4 Polyprotic Titration Charge Balance** | **DONE** | `chemspec.py`, `src/simulations/ChemSim.jsx` | None. Bisection charge-balance solver across $N$-protic acids ($K_{a,1..N}$). |
+| **3.5 Subprocess Sandbox Hardening** | **DONE** | `sandbox_preamble.py`, `server.py`, `Dockerfile` | None. PEP 578 audit hooks block sockets, forks, and unauthorized DB access. |
+| **3.6 Typed Cardinality & Credit-Pool AST** | **DONE** | `advisor_rules.py`, `advisor.py` | None. Complete AST requirement tree with $k$-of-$n$, credit pools & Columbia 3+2. |
+| **3.7 5 New STEM & Engineering Lab Kits** | **DONE** | `practice_ee.py`, `practice_ai.py`, `practice_systems.py`, `practice_stats.py`, `practice_bio.py` | None. 20 practice types registered in `server.py`, tested in `tests/test_stem_v2.py`. |
 
-### Detailed Audit of Component 3.1 (Delivered):
-1. **Screen-to-Cartesian Angle Transformation**:
-   $$\theta = \operatorname{atan2}(-(y_2 - y_1), x_2 - x_1) \times \frac{180}{\pi} \pmod{360}$$
-   Properly accounts for inverted SVG $y$-coordinates ($0^\circ = \text{right}$, $90^\circ = \text{up}$, $180^\circ = \text{left}$, $270^\circ = \text{down}$).
-2. **Anchor Validation**:
-   Checks arrow tails against `body_origin` within `origin_tol_px` (default 50 px).
-3. **Label Association & Alias Matching**:
-   Associates text labels within 60 px of arrow tips/midpoints. Resolves aliases with length guards to prevent false substring collisions on single-letter names.
-4. **Strict Relative Magnitude Inequalities**:
-   Rejects inverted tolerance bugs: `op: "gt"` strictly asserts $l_a > l_b$ and verifies measurable physical distinction.
-5. **Forbidden Force Rejection**:
-   Flags unphysical pseudo-forces (centrifugal, inertia, $ma$, motion) and fails diagrams including them.
-6. **Denial-of-Service Defense**:
-   Array bounds enforced (`shapes[:200]`, `arrows[:60]`, `texts[:60]`, `targets[:20]`), eliminating $O(N \times M)$ CPU starvation on the async FastAPI event loop.
+### Detailed Audit of Delivered Components:
+
+1. **Component 3.1: Deterministic FBD Vector Grader** (`fbd_grader.py`):
+   - **Screen-to-Cartesian Transformation**: $\theta = \operatorname{atan2}(-(y_2 - y_1), x_2 - x_1) \times \frac{180}{\pi} \pmod{360}$.
+   - **Anchor Validation**: Checks arrow tails against `body_origin` within `origin_tol_px` (default 50 px).
+   - **Label Association & Alias Matching**: Associates text labels within 60 px of arrow tips/midpoints. Resolves aliases with length guards to prevent false substring collisions on single-letter names.
+   - **Strict Relative Magnitude Inequalities**: Rejects inverted tolerance bugs: `op: "gt"` strictly asserts $l_a > l_b$ and verifies measurable physical distinction.
+   - **Forbidden Force Rejection**: Flags unphysical pseudo-forces (centrifugal, inertia, $ma$, motion) and fails diagrams including them.
+   - **Denial-of-Service Defense**: Array bounds enforced (`shapes[:200]`, `arrows[:60]`, `texts[:60]`, `targets[:20]`), eliminating $O(N \times M)$ CPU starvation.
+
+2. **Component 3.2: XPBD Position-Based Dynamics with Velocity Projection** (`src/simulations/SpecSim.jsx`):
+   - Pre-step position caching: $\mathbf{x}_{\text{prev}, i} = \mathbf{x}_i$.
+   - Iterative rod distance constraint relaxation on positions without in-place velocity tampering.
+   - Constraint-satisfying velocity projection: $\mathbf{v}_i \leftarrow (\mathbf{x}_i - \mathbf{x}_{\text{prev}, i}) / \Delta t_{\text{sub}}$, eliminating fictitious energy accumulation in multi-link pendulums.
+
+3. **Component 3.3: Dual-Number Jet2 AutoDiff & Even-Pole Detection** (`src/lib/dual_autodiff.js`, `src/lib/expr.js`, `src/components/MathLab.jsx`):
+   - Machine-precision 1st and 2nd derivatives via $J = (v, d_1, d_2)$ forward-mode automatic differentiation.
+   - Reciprocal-zero crossing test ($g(x) = 1/f(x)$) and second-difference divergence guard breaking graph pen paths on even-order poles (e.g. $(x-2)^{-2}, \sec^2 x$).
+
+4. **Component 3.4: Polyprotic Acid Titration Solver** (`chemspec.py`, `src/simulations/ChemSim.jsx`):
+   - Monotonic bisection on $\log_{10}[\text{H}^+] \in [-14, 1]$ solving charge balance with alpha fractions:
+     $$F(h) = h - \frac{K_w}{h} + [\text{Na}^+] - C_{A,\text{tot}} \sum_{j=1}^N j \alpha_j(h) = 0$$
+   - Supports polyprotic weak acids and continuous dilution across titrant volume additions.
+
+5. **Component 3.5: PEP 578 Hardened Execution Sandbox** (`sandbox_preamble.py`, `server.py`):
+   - Process-isolated audit hook blocking network connections (`socket.connect`, `getaddrinfo`), child processes (`_posixsubprocess.fork_exec`, `os.fork`), dynamic C-library loading (`ctypes.dlopen`), signal manipulation, and unauthorized file access (`sqlite3.connect`, `edu_studio.db`, credentials, `.ssh`).
+   - Hardened `_limit_child_resources` setting CPU time, maximum file size, and file descriptor limits.
+
+6. **Component 3.6: Degree Audit Rules & Columbia 3+2 Pre-Engineering** (`advisor_rules.py`, `advisor.py`):
+   - Formal requirement AST engine supporting `course`, `all_of`, `one_of`, `k_of_n`, `credit_pool`, and `min_grade` validation.
+   - Comprehensive Columbia 3+2 Combined Plan Pre-Engineering Track audit verifying foundational STEM GPA $\ge 3.30$, individual minimum grades, and prerequisite suites.
+
+7. **Component 3.7: 5 New STEM Domain Normalizers & Graders** (`practice_ee.py`, `practice_ai.py`, `practice_systems.py`, `practice_stats.py`, `practice_bio.py`):
+   - 20 new deterministic practice types across Electrical Engineering, Artificial Intelligence, Computer Systems, Statistics, and Quantitative Biology.
+   - Redaction of secret solution fields (`GRADERS_SECRET_FIELDS`) preventing answer inspection on the client.
 
 ---
 
@@ -121,6 +142,11 @@ When implementer agents (`coder`) attempt unassisted open-ended exploration, the
   npm run build
   ```
   **Result**: Transformed 3,754 modules; built in 307ms with **0 errors**.
+- **STEM V2 Upgrade Test Suite**:
+  ```bash
+  .venv/bin/python -m unittest tests/test_stem_v2.py
+  ```
+  **Result**: `Ran 13 tests in 0.002s — OK` (100% pass across polyprotic chemistry, autodiff, sandbox hooks, and 5 STEM domains).
 - **ESLint Cleanliness**:
   ```bash
   npm run lint
@@ -129,9 +155,9 @@ When implementer agents (`coder`) attempt unassisted open-ended exploration, the
 
 ---
 
-## 6. Recommended Next Milestone
+## 6. Current Blueprint Status & Conclusion
 
-With the Liberal Arts blueprint 100% complete and Component 3.1 of the STEM V2 blueprint delivered, the highest-impact next step on the roadmap is:
-
-> **Milestone: Section 3.7 — 5 New STEM & Engineering Lab Kits**
-> Implement `practice_ee.py`, `practice_ai.py`, `practice_systems.py`, `practice_stats.py`, and `practice_bio.py` (20 practice types) following the identical standard-library pattern proven in the Liberal Arts expansion.
+Both architectural expansions are **100% Complete & Verified**:
+1. **Liberal Arts Architecture Blueprint** ([FUTURE_LIBERAL_ARTS_KITS_GEMINI_RESEARCH.md](file:///Users/svintus/SciEdu-Studio/docs/architecture/FUTURE_LIBERAL_ARTS_KITS_GEMINI_RESEARCH.md)): 100% complete (Philosophy Lab + 6 kits).
+2. **STEM & Core Runtime Engine V2** ([STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md](file:///Users/svintus/SciEdu-Studio/docs/architecture/STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md)): 100% complete (Deterministic FBD grader, XPBD velocity projection, Jet2 dual autodiff, polyprotic titration bisection, hardened sandbox audit hooks, degree audit AST rules, and 5 STEM kits).
+3. **CI Pipeline Stability**: All module import and audit hook isolation issues resolved; GitHub Actions CI passing cleanly.
