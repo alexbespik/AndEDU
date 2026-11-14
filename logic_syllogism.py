@@ -13,11 +13,12 @@ Two readings of universal statements:
   needs_existence_of, the term whose existence the form relies on.
 """
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+from logic_ast import Term, is_singular_term
 from logic_formula import LogicError
 
-TYPES = "AEIO"
+TYPES = ("A", "E", "I", "O")
 READINGS = ("boolean", "aristotelian")
 _FIGURES = {1: (("M", "P"), ("S", "M")), 2: (("P", "M"), ("S", "M")),
             3: (("M", "P"), ("M", "S")), 4: (("P", "M"), ("M", "S"))}
@@ -47,20 +48,33 @@ _FORM_RE = re.compile(r"^\s*([AEIOaeio]{3})\s*-?\s*([1-4])\s*$")
 _ROLE = {"S": "minor", "P": "major", "M": "middle"}
 
 
-def _statement(raw: Any, where: str) -> Tuple[str, str, str]:
+def _extract_term(term: Any) -> Tuple[str, bool]:
+    if isinstance(term, Term):
+        return term.name, term.is_singular
+    if isinstance(term, dict):
+        name = str(term.get("name") or "").strip()
+        is_sing = bool(term.get("is_singular")) or is_singular_term(name)
+        return name, is_sing
+    s = str(term or "").strip()
+    return s, is_singular_term(s)
+
+
+def _statement(raw: Any, where: str) -> Tuple[str, str, str, bool]:
     if not isinstance(raw, dict):
         raise LogicError("bad_statement", f"The {where} must be an object {{type, subject, predicate}}.")
     kind = str(raw.get("type", "")).upper()
-    subject, predicate = raw.get("subject"), raw.get("predicate")
+    subj_raw, pred_raw = raw.get("subject"), raw.get("predicate")
     if kind not in TYPES:
         raise LogicError("bad_statement", f"The {where}'s type must be A, E, I or O.")
+    subject, s_sing = _extract_term(subj_raw)
+    predicate, p_sing = _extract_term(pred_raw)
     for term in (subject, predicate):
         if not isinstance(term, str) or not term.strip() or len(term) > 80:
             raise LogicError("bad_statement", f"The {where} needs a subject and a predicate (up to 80 characters).")
     subject, predicate = " ".join(subject.split()), " ".join(predicate.split())
     if subject.casefold() == predicate.casefold():
         raise LogicError("bad_statement", f"The {where} has the same term twice.")
-    return kind, subject, predicate
+    return kind, subject, predicate, (s_sing or p_sing)
 
 
 def parse_spec(spec: Any) -> Dict[str, Any]:
@@ -74,7 +88,8 @@ def parse_spec(spec: Any) -> Dict[str, Any]:
         m = _FORM_RE.match(str(spec["form"]))
         if not m:
             raise LogicError("bad_form", "A form is a mood and a figure, such as AAA-1 or EIO-3.")
-        return {"mood": m.group(1).upper(), "figure": int(m.group(2)), "terms": {"S": "S", "P": "P", "M": "M"}}
+        has_sing = bool(spec.get("singular_import") or spec.get("has_singular"))
+        return {"mood": m.group(1).upper(), "figure": int(m.group(2)), "terms": {"S": "S", "P": "P", "M": "M"}, "has_singular": has_sing}
     major = _statement(spec.get("major"), "major premise")
     minor = _statement(spec.get("minor"), "minor premise")
     concl = _statement(spec.get("conclusion"), "conclusion")
@@ -93,10 +108,11 @@ def parse_spec(spec: Any) -> Dict[str, Any]:
     letter = lambda t: "S" if key(t) == key(s) else "P" if key(t) == key(p) else "M"  # noqa: E731
     shape = ((letter(major[1]), letter(major[2])), (letter(minor[1]), letter(minor[2])))
     figure = next(f for f, sh in _FIGURES.items() if sh == shape)
-    return {"mood": major[0] + minor[0] + concl[0], "figure": figure, "terms": {"S": s, "P": p, "M": middle}}
+    has_sing = bool(major[3] or minor[3] or concl[3] or spec.get("singular_import") or any(is_singular_term(t) for t in (s, p, middle)))
+    return {"mood": major[0] + minor[0] + concl[0], "figure": figure, "terms": {"S": s, "P": p, "M": middle}, "has_singular": has_sing}
 
 
-def violations(mood: str, figure: int, reading: str = "boolean") -> List[str]:
+def violations(mood: str, figure: int, reading: str = "boolean", singular_import: bool = False) -> List[str]:
     """The rule codes this mood and figure break (empty: valid under that reading)."""
     (maj_s, maj_p), (min_s, min_p) = _FIGURES[figure]
     dist = {}  # term -> distributed in (major, minor, conclusion)
@@ -123,7 +139,8 @@ def violations(mood: str, figure: int, reading: str = "boolean") -> List[str]:
     if not (negative[0] or negative[1]) and negative[2]:
         out.append("negative_from_affirmative")
     if reading == "boolean" and mood[0] in "AE" and mood[1] in "AE" and mood[2] in "IO":
-        out.append("existential_fallacy")
+        if not singular_import:
+            out.append("existential_fallacy")
     return out
 
 
@@ -132,7 +149,8 @@ def check_syllogism(spec: Any, reading: str = "boolean") -> Dict[str, Any]:
         raise LogicError("bad_reading", "The reading is boolean or aristotelian.")
     parsed = parse_spec(spec)
     mood, figure, terms = parsed["mood"], parsed["figure"], parsed["terms"]
-    broken = violations(mood, figure, reading)
+    has_sing = parsed.get("has_singular", False) or any(is_singular_term(t) for t in terms.values())
+    broken = violations(mood, figure, reading, singular_import=has_sing)
     name, needs = NAMES.get((mood, figure), (None, None))
     valid = not broken
     return {

@@ -173,8 +173,14 @@ def validate_spec(spec: Any) -> Tuple[Dict[str, Any], List[str]]:
         except ImportError:
             return {}, ["simulation.kind 'chem' is not available yet"]
         return chemspec.validate_chem(spec)
+    if kind == "decision_tree":
+        try:
+            import decision_tree_engine
+            return decision_tree_engine.validate_decision_tree_spec(spec)
+        except ImportError:
+            return {}, ["simulation.kind 'decision_tree' is not available yet"]
     if kind not in ("particles", "graph"):
-        return {}, ["simulation.kind must be 'particles', 'graph', 'math', 'geometry', 'fbd' or 'chem'"]
+        return {}, ["simulation.kind must be 'particles', 'graph', 'math', 'geometry', 'fbd', 'chem' or 'decision_tree'"]
 
     params = _clean_params(spec.get("params"), errors)
     param_names = {p["name"] for p in params}

@@ -271,6 +271,20 @@ class StudioMcpTools(unittest.TestCase):
         self.assertEqual(event_calls[0][2]["payload"]["mode"], "history")
         self.assertEqual(event_calls[0][2]["payload"]["tab"], "timeline")
 
+    def test_open_workspace_philosophy(self):
+        res = self.tool_map["open_workspace"]({"workspace": "philosophy"})
+        self.assertEqual(res.get("status"), "opened")
+        self.assertEqual(res.get("mode"), "philosophy")
+        event_calls = [c for c in self.calls if c[1] == "/api/agy/events"]
+        self.assertTrue(len(event_calls) > 0)
+        self.assertEqual(event_calls[-1][2]["type"], "SWITCH_STUDIO_MODE")
+        self.assertEqual(event_calls[-1][2]["payload"]["mode"], "philosophy")
+
+        # Also verify with mode="philosophy"
+        res2 = self.tool_map["open_workspace"]({"mode": "philosophy"})
+        self.assertEqual(res2.get("status"), "opened")
+        self.assertEqual(res2.get("mode"), "philosophy")
+
     def test_crud_practice_and_flashcards_tools(self):
         self.tool_map["remove_practice_item"]({"topic_id": "topic-1", "item_id": "p1"})
         del_practice = [c for c in self.calls if c[0] == "DELETE" and "/practice/p1" in c[1]]

@@ -1487,3 +1487,29 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .accounts-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2);
   padding: var(--space-2) 0; border-bottom: 1px solid var(--rule); }
 .accounts-name { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+
+/* PHILIN (Philosophy): claim blocks, verdicts, the comparison table */
+.philin-banner { font-size: 0.9rem; }
+.philin-blocks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.philin-block { border: 1px solid var(--rule); border-left: 4px solid var(--rule-strong); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--surface); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.philin-block.kind-empirical { border-left-color: var(--accent); }
+.philin-block.kind-logical { border-left-color: var(--gold); }
+.philin-block.kind-normative, .philin-block.kind-unfalsifiable, .philin-block.kind-mixed { border-left-color: var(--muted); }
+.philin-block-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.philin-block-head .select { width: auto; min-height: 0; padding: 2px var(--space-2); }
+.philin-text { min-height: 0; }
+.philin-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); align-items: center; }
+.philin-formal { width: 14rem; max-width: 100%; display: inline-block; margin-left: var(--space-1); font-family: var(--font-mono); }
+.philin-legend ul, .philin-edges, .philin-warnings, .philin-sources { margin: var(--space-1) 0 0; padding-left: var(--space-4); }
+.philin-verdict { border-top: 1px dashed var(--rule); padding-top: var(--space-2); overflow-wrap: anywhere; }
+.philin-verdict p { margin: var(--space-1) 0 0; }
+.philin-verdict strong { display: inline-flex; align-items: center; gap: var(--space-1); text-transform: capitalize; }
+.verdict-supported strong { color: var(--ok-ink); }
+.verdict-contradicted strong { color: var(--bad-ink); }
+.verdict-mixed strong, .verdict-insufficient strong { color: var(--notice-ink); }
+.philin-form { margin-left: var(--space-2); padding-right: var(--space-2); }
+.philin-form.fallacy { color: var(--bad-ink); border-color: var(--bad-rule); }
+.hint.ok, .ok { color: var(--ok-ink); }
+.philin-table-wrap { overflow-x: auto; }
+.philin-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.philin-table th, .philin-table td { border-bottom: 1px solid var(--rule); padding: var(--space-2); text-align: left; vertical-align: top; }

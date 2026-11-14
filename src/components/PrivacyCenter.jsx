@@ -18,6 +18,7 @@ export function PrivacyNotice({ elevenlabs = false, authRequired = false, local 
         <li>Images and scanned PDFs, to read the text in them (this includes transcript screenshots).</li>
         <li>Tutor, lesson and advisor chats; the advisor also sees your completed courses and grades.</li>
         <li>Drawings you send for checking, and quiz answers you ask to have explained.</li>
+        <li>Text you check with PHILIN (Philosophy), and the claims it fact-checks with Google Search.</li>
       </ul>
       <p>Depending on the Gemini plan this server uses, Google may keep and review what it receives.</p>
 

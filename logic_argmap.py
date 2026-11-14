@@ -60,6 +60,10 @@ def validate_map(raw: Any) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[s
             warnings.append(f"Claim '{cid}': unknown role '{role}' dropped.")
             role = None
         clean = {"id": cid, "text": text, **({"role": role} if role else {})}
+        if c.get("kind") is not None:
+            clean["kind"] = str(c["kind"])
+        if c.get("predicates") is not None and isinstance(c["predicates"], list):
+            clean["predicates"] = [str(p).strip() for p in c["predicates"] if str(p).strip()]
         if c.get("formal") not in (None, ""):
             try:
                 clean["formal"] = to_string(parse(c["formal"]))
@@ -145,6 +149,97 @@ def _cycles(nodes: List[str], succ: Dict[str, List[str]]) -> List[List[str]]:
     return sorted(out)
 
 
+_DEONTIC_TERMS = {
+    "ought", "should", "must", "right", "wrong", "good", "bad", "evil",
+    "permissible", "impermissible", "obligatory", "duty", "virtue", "vicious",
+    "just", "unjust", "fair", "unfair", "cruel", "courageous", "noble",
+    "blameworthy", "praiseworthy", "moral", "immoral", "ethical", "unethical"
+}
+
+
+def _get_predicates(claim: Dict[str, Any]) -> Set[str]:
+    preds = claim.get("predicates")
+    if isinstance(preds, (list, tuple, set)) and preds:
+        return {str(p).strip().lower() for p in preds if str(p).strip()}
+    text = str(claim.get("text") or "").lower()
+    words = set(re.findall(r"\b[a-z0-9_-]+\b", text))
+    stopwords = {"that", "this", "with", "from", "have", "been", "were", "what", "when", "where", "which", "there", "their", "they"}
+    return {w for w in words if (w in _DEONTIC_TERMS or len(w) > 3) and w not in stopwords}
+
+
+def check_humes_guillotine(claims: Any, edges: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Checks for is-ought gap violations:
+    Every normative conclusion C must share moral/deontic predicates with at least one
+    ancestral normative premise (c_terms & ancestor_norm_terms), blocking Prior's paradox
+    and irrelevant dummy normative premises.
+    Returns findings with code: "is_ought_gap" and "is_ought_unbridged_predicates".
+    """
+    if isinstance(claims, dict):
+        raw_edges = claims.get("edges", [])
+        main_id = claims.get("main")
+        claims_list = claims.get("claims", [])
+    else:
+        claims_list = list(claims) if isinstance(claims, list) else []
+        raw_edges = edges or []
+        main_id = None
+
+    claims_by_id = {c["id"]: c for c in claims_list if isinstance(c, dict) and "id" in c}
+    
+    parents: Dict[str, Set[str]] = {cid: set() for cid in claims_by_id}
+    for e in raw_edges:
+        if isinstance(e, dict) and e.get("type") == "supports":
+            dst = e.get("to")
+            srcs = e.get("from")
+            srcs = [srcs] if isinstance(srcs, str) else (srcs if isinstance(srcs, list) else [])
+            if dst in parents:
+                for s in srcs:
+                    if s in claims_by_id:
+                        parents[dst].add(s)
+
+    violations = []
+    for cid, c in claims_by_id.items():
+        is_normative = (c.get("kind") == "normative")
+        is_conclusion = c.get("role") == "conclusion" or cid == main_id or bool(parents[cid])
+        if not (is_normative and is_conclusion and parents[cid]):
+            continue
+
+        ancestors = set()
+        work = list(parents[cid])
+        while work:
+            curr = work.pop()
+            if curr not in ancestors:
+                ancestors.add(curr)
+                work.extend(parents.get(curr, set()))
+
+        norm_ancestors = [a for a in ancestors if claims_by_id[a].get("kind") == "normative"]
+        c_terms = _get_predicates(c)
+
+        if not norm_ancestors:
+            violations.append({
+                "code": "is_ought_gap",
+                "id": cid,
+                "ids": [cid],
+                "message": f"Normative conclusion '{cid}' derives from non-normative premises (is-ought gap).",
+                "is_ought_unbridged_predicates": sorted(list(c_terms)),
+            })
+        else:
+            ancestor_norm_terms = set()
+            for a in norm_ancestors:
+                ancestor_norm_terms.update(_get_predicates(claims_by_id[a]))
+            bridged = c_terms & ancestor_norm_terms
+            if not bridged:
+                unbridged = sorted(list(c_terms - ancestor_norm_terms)) or sorted(list(c_terms))
+                violations.append({
+                    "code": "is_ought_gap",
+                    "id": cid,
+                    "ids": [cid],
+                    "message": f"Normative conclusion '{cid}' does not share moral/deontic predicates with any ancestral normative premise.",
+                    "is_ought_unbridged_predicates": unbridged,
+                })
+
+    return violations
+
+
 def analyze(clean: Dict[str, Any]) -> Dict[str, Any]:
     claims = {c["id"]: c for c in clean["claims"]}
     order = [c["id"] for c in clean["claims"]]
@@ -194,6 +289,7 @@ def analyze(clean: Dict[str, Any]) -> Dict[str, Any]:
         if not verdict["valid"]:
             findings.append({"code": "invalid_inference", "ids": [cid] + sup, "counterexample": verdict["counterexample"],
                              "message": f"'{cid}' does not follow from {', '.join(sup)}: there is a row where they are true and it is false."})
+    findings.extend(check_humes_guillotine(clean))
     findings.sort(key=lambda f: (f["code"], f["ids"]))
     return {"findings": findings, "notes": notes}
 

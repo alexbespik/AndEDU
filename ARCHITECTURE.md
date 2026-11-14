@@ -113,7 +113,7 @@ Every lesson in &.edu is stored on disk as a single canonical JSON file:
     "courseTitle": "Course Title",
     "classSeq": 1,
     "classTotal": 5,
-    "workspace": "math | code | lab | history | language"
+    "workspace": "math | code | lab | history | language | philosophy"
   }
 }
 ```
@@ -127,10 +127,17 @@ Every lesson in &.edu is stored on disk as a single canonical JSON file:
   `speak {target, lang, ipa?, translation?}`. `lang` is a BCP-47 tag from `src/lib/speech.js` `LANGUAGES`.
   `speak` is ungraded when the browser has no SpeechRecognition (skippable, no XP, no heart lost).
 - One normalizer and one renderer per type, registered by type name: server `PRACTICE_NORMALIZERS` (server.py, also the
-  `PRACTICE_TYPES` set), client `src/practice/registry.js`, which merges each subject file's map (`src/practice/language.jsx`,
-  `src/practice/history.jsx`). Subject bodies take `{item, onResult(ok, given), retry}` (`ok === null` = skipped) so both
-  `PracticeDeck` and the Languages session can use them. MCP tools follow the same split: `mcp_tools_<subject>.py` exports
-  `tools(call, q, S, STR, OBJ, ARR)` and `mcp_server.py` merges them.
+  `PRACTICE_TYPES` set, populated from `practice_general.py`, `practice_history.py`, `practice_language_extra.py`, `practice_philosophy.py`,
+  and the 5 STEM kits: `practice_ee.py`, `practice_ai.py`, `practice_systems.py`, `practice_stats.py`, `practice_bio.py`), client `src/practice/registry.js`, which merges each subject file's map (`src/practice/language.jsx`,
+  `src/practice/history.jsx`, `src/practice/general.jsx`, `src/practice/language_extra.jsx`, `src/practice/philosophy.jsx`). Server-side `PRACTICE_GRADERS` evaluate student submissions deterministically where physical, mathematical, or algorithmic ground-truth exists. Subject bodies take `{item, onResult(ok, given), retry}` (`ok === null` = skipped) so both
+  `PracticeDeck` and subject practice views can use them. MCP tools follow the same split: `mcp_tools_<subject>.py` exports
+  `tools(call, q, S, STR, OBJ, ARR)` and `mcp_server.py` merges them. Philosophy types (`truth_table`, `validity`, `syllogism`, `proof_steps`, `argument_map`, `spot_parts`, `fallacy_id`) have AI answers stripped and evaluated deterministically against `logic_engine.py`.
+- STEM engineering types:
+  - `practice_ee.py` (4 types): `circuit_dc_analysis` (KCL/KVL branch currents/voltages), `thevenin_equivalent` ($V_{\text{th}}, R_{\text{th}}$), `bode_cutoff_calc` ($f_c$, filter type), `opamp_gain_calc` ($A_v$, inverting/non-inverting).
+  - `practice_ai.py` (4 types): `gradient_descent_step` ($w_{t+1} = w_t - \eta \nabla L$), `confusion_matrix_metrics` (Precision, Recall, $F_1$), `attention_score_calc` ($\text{softmax}(QK^T/\sqrt{d_k})$), `convolution_output_dim` ($\lfloor(W-K+2P)/S\rfloor+1$).
+  - `practice_systems.py` (4 types): `pipeline_hazard_spot` (RAW stalls, forwarding), `cache_address_decode` (Tag, Set, Offset), `assembly_step_trace` (register/memory trace), `virtual_memory_translate` (VPN, offset, PA).
+  - `practice_stats.py` (4 types): `p_value_decision` (critical rejection), `confidence_interval_calc` (margin of error), `bayes_posterior_calc` (Bayes rule), `regression_residual_audit` (residuals, leverage).
+  - `practice_bio.py` (4 types): `dna_transcription_translate` (transcription/codon translation), `hardy_weinberg_calc` ($p, q, p^2, 2pq, q^2$), `enzyme_michaelis_menten` ($v_0 = V_{\max}[S]/(K_m+[S])$), `genomic_gc_content` (GC%, $T_m$).
 - Languages session progress (word strength 0-4, crowns per unit, missed items) is per browser (localStorage keys
   `andedu_lang_*`); XP goes through the existing `practice_correct` source with ref `lang:<topicId>:<itemId>`.
 
@@ -179,8 +186,8 @@ Mathematical expressions across declarative simulations (`simspec.py`), the clie
 #### 3.2.1 MathLab Component & Tooling Architecture (`src/components/MathLab.jsx`)
 MathLab exposes Desmos-equivalent graphing and analysis tools with three modular components:
 1. **Interactive Graph Engine (`GraphTab`)**:
-   - Multi-curve renderer (color palette rotation from theme tokens) with vertical asymptote/discontinuity detection.
-   - Interactive numerical calculus: numerical derivative $f'(x)$, tangent line cursor tracking, definite integration $\int_a^b f(x)\,dx$ (Simpson's rule), root finding (bisection with pole filtering), and local extrema detection.
+   - Multi-curve renderer (color palette rotation from theme tokens) with vertical asymptote/discontinuity detection and **even-order pole detection**: detects vertical asymptotes where the curve sign does not flip (e.g. $f(x) = \frac{1}{(x-2)^2}$, $\sec^2 x$) via reciprocal-zero test ($g(x) = 1/f(x) \to 0$) and second-difference curvature divergence guards ($\Delta^2 y_k$), preventing spurious canvas-wide bridge lines.
+   - Interactive numerical calculus: exact machine-precision derivatives via **Dual-Number Jet2 Automatic Differentiation** (`src/lib/dual_autodiff.js`), computing $f(x)$, $f'(x)$, and $f''(x)$ on Pratt AST closures without finite-difference cancellation. Tangent line cursor tracking, definite integration $\int_a^b f(x)\,dx$ (Simpson's rule), root finding (bisection with pole filtering), and local extrema classification via $f''(x)$ sign.
    - Canvas View Controls Overlay: Quick Zoom In (`+`), Zoom Out (`-`), and Reset Home (`Crosshair`) floating buttons on the graph canvas.
 2. **Values Table Tool (`ValuesTable`)**:
    - Bidirectional $x \to y$ table generator for the active curve.
@@ -191,7 +198,17 @@ MathLab exposes Desmos-equivalent graphing and analysis tools with three modular
 
 
 ### 3.3 Course Advisor & Degree Audit Data Contracts
-- **Prerequisite CNF Tree (`prereq_tree`)**: Prerequisites are parsed into Conjunctive Normal Form (AND of OR-choice groups): `List[List[str]]` (e.g. `[["CSCI 141"], ["MATH 111", "MATH 131"]]`). Satisfaction requires at least one course in each inner OR-clause to have a passing grade (`PASSING`).
+- **Prerequisite AST & CNF Interop (`advisor_rules.py`)**: While basic course prerequisites maintain legacy Conjunctive Normal Form (AND of OR-choice groups: `List[List[str]]`), full degree audits evaluate typed AST requirement nodes:
+  - `course`: `{type: "course", code: str, min_grade: str}` (evaluates passing grade or minimum letter threshold).
+  - `all`: `{type: "all", children: List[ReqNode]}` (logical AND: all sub-requirements must be satisfied).
+  - `any`: `{type: "any", children: List[ReqNode]}` (logical OR: at least 1 sub-requirement must be satisfied).
+  - `k_of_n`: `{type: "k_of_n", k: int, children: List[ReqNode]}` (cardinality: at least $k$ sub-requirements satisfied).
+  - `credit_pool`: `{type: "credit_pool", min_credits: float, pool: List[str], dept: str, min_level: int}` (credit accumulation pool, e.g. 12 credits of 300+ CSCI electives).
+  - `min_grade`: `{type: "min_grade", code: str, min_grade: str}`.
+- **Degree Audit Templates**:
+  - `WM_CS_BS_TEMPLATE`: 120 credits total, COLL curriculum, Math core (`MATH 111, 112, 109/211`), CS core (`CSCI 141, 241, 243/MATH 214, 301, 303, 304, 312, 423, 400`), and 12 credits of upper-level CS electives.
+  - `WM_DATA_SCIENCE_BS_TEMPLATE`: 120 credits, COLL curriculum, DATA core (`DATA 101, 141, 201, 301, 400`), Math/Stats (`MATH 111, 112, 109/211, 351/451`), and 15 elective credits.
+  - `COLUMBIA_32_COMBINED_PLAN_TEMPLATE`: Foundational pre-engineering curriculum spanning Math (Calc I-III, Linear Algebra, ODEs), Physics (Mechanics + Lab, E&M + Lab), Chemistry (Gen Chem + Lab), CS (`CSCI 141`), Economics (`ECON 101/102`), and Writing (`COLL 150`), plus discipline-specific engineering track add-ons.
 - **Readiness Contract (`/api/advisor/{user_id}/readiness/{code}?crn=&term=`)**:
   ```json
   {
@@ -431,6 +448,14 @@ The geometry simulation kit provides a reactive 2D vector and apparatus engine f
   - `forces`: Force vectors `[{id, body?, origin: [x, y]|"center", angle, magnitude, label, color?, projections: bool}]`. Dynamic expressions evaluate live with parameter sliders. `projections: true` renders dashed orthogonal components ($F_\parallel$, $F_\perp$ or $F_x$, $F_y$).
   - `elements`: Geometric construction primitives: `line` (with optional arrow/dash), `angle_arc` (with angle label $\theta$), `right_angle` (perpendicular marker), `dimension` (measurement arrows), and `polygon`.
   - `axes`: Optional tilted or local coordinate axes `{x, y, angle, xLabel, yLabel}`.
+- **Deterministic FBD Vector Grader (`fbd_grader.py` & `/api/draw/check`)**:
+  - `POST /api/draw/check` accepts optional `shapes: List[Dict]` from `DrawingBoard.jsx` and `fbd_spec: Dict` (either in the payload or attached to the practice item).
+  - When arrow shapes are present and an `fbd_spec` is defined, `fbd_grader.grade_fbd(...)` grades the drawing deterministically in Python without invoking vision LLMs:
+    - Arrow tails verified against `body_origin` within `origin_tol_px` (default $40\text{ px}$).
+    - Vector Cartesian angles $\theta = \operatorname{atan2}(-(y_2-y_1), x_2-x_1) \pmod{360^\circ}$ verified within $\pm 5^\circ$.
+    - Text shapes within $50\text{ px}$ of the arrow tip or midpoint are deterministically associated as vector labels.
+    - Relative magnitude comparisons (e.g. $F_N = mg$, $F_{\text{friction}} < F_{\text{applied}}$) and forbidden forces (e.g. centrifugal force in inertial frames) verified.
+  - LLM vision grading (`acall_gemini`) is preserved strictly as an opt-in fallback when vector shapes or FBD physical specifications are absent.
 - **Embedded Notes Rendering**: `src/components/Md.jsx` intercepts fenced code blocks marked ````geometry` and ````fbd`, compiling them via `GeometrySim` directly inside student lesson notes.
 
 ### 3.8 KaTeX Vector Typography & Normalization Contract
@@ -487,33 +512,129 @@ All Gemini interactions via `server.py:call_gemini` and `acall_gemini` feature a
 - **Dynamic Reasoning**: `types.ThinkingConfig(thinking_budget=-1)` (or `SCIEDU_THINKING_BUDGET`) enables deep reasoning on complex academic requests.
 - **Web Search Grounding**: `types.Tool(google_search=types.GoogleSearch())` provides live web search.
 - **MIME & Tool Exclusions**: Grounding is strictly bypassed when `response_mime_type == "application/json"` or when `tool_config` specifies function calling `mode="ANY"`, preventing HTTP 400 API validation errors.
-- **Circuit Breaker**: Search quota exhaustion sets `GROUNDING_PAUSED_UNTIL = time.time() + 3600` and immediately retries the query without search, guaranteeing 100% operational uptime.
+- **Circuit Breaker**: per key (`grounding_paused_until` in the key's model state). Search added automatically by `call_gemini`: a quota or tool error (429, quota, search, tool, grounding, conflict) pauses search for 1800 s and retries the same call without it. `grounded_json(prompt, role="planner")` (answer checks, PHILIN): a quota or tool error (`_grounding_quota_error`) pauses search for 3600 s and the error passes through, with no ungrounded retry; a timeout, a 5xx, the daily budget (`BudgetExhausted`) or a rejected key (`KeyRejected`) does not pause it. While paused, it raises `GroundingPaused`; `grounding_paused()` asks without calling.
+
+### 3.12 PHILIN & Layer 2 Philosophy Engine (`philin.py`, `logic_engine.py`, `practice_philosophy.py`, `logic_ast.py`)
+- `POST /api/philin/transcribe {text ≤ 8000}`: structured extraction pipeline (planner model, temperature 0) converting input text into an argument graph with strict epistemic safeguards:
+  - **Verbatim Spans & Context Verification (`inspect_quote_context`)**: Extracts verbatim `quote` with character offsets `span: [start, end]` and speaker attribution (`attribution`: `author_assertion` | `quoted_target` | `supposition`). Replaces simple pre-span regex with bidirectional clause-bounded scanning (up to 80 chars left and 45 chars right, respecting clause delimiters `[.;!?\n]`). Accounts for German verb-final negation syntax (`nicht`, `keineswegs`, `nie`, `bestreitet`, `leugnet`) and preserves litotes double negation by evaluating token polarity parity (`count % 2 == 1` flags inverted/severed context; even count preserves affirmative polarity).
+  - **Three-Rule Epistemic Firewall for Thick Concepts**: Any sentence containing thick ethical-descriptive concepts (e.g. *exploitation*, *natural function*, *cruel*, *legitimate*, *tyrannical*, *fair*) is decomposed into distinct atomic blocks: an `empirical` block capturing verifiable behavior/state and a `normative` block capturing the value judgment. Each block explicitly extracts `predicates: List[str]`. Descriptive blocks are forbidden from carrying normative predicates; normative blocks are never classified as empirical or logical.
+  - **Atomic Claim Decomposition**: Compound sentences mixing empirical assertions and evaluative judgements are split into distinct atomic claim blocks: one `empirical` and one `normative`.
+  - **Strict Epistemic Neutrality**: Axioms and values across all moral and political philosophies (humanist, utilitarian, egalitarian, libertarian/property, socialist/labor, divine command/scriptural) are enforced as `normative` or `unfalsifiable`, never `empirical` or `logical`. `empirical` is strictly reserved for statements verifiable by sensory data, records, or scientific observation; `logical` is strictly reserved for tautologies and definitions.
+  - **Enthymeme & Bridge Premise Integrity**: The model is forbidden from silently inserting unstated charitable bridge premises into `formal`. If an argument is an enthymeme, stated premises carry only verbatim logical translations, while necessary unstated assumptions are explicitly isolated in `missing_premise`.
+- `POST /api/philin/check {argument, source?}`: purely deterministic Python evaluation combining `logic_argmap`, `logic_forms`, `logic_syllogism`, and `logic_ast`:
+  - **Unified Predicate-Syllogistic AST (`logic_ast.py`)**: Defines `Term(name, is_singular)` and `CategoricalNode(type, subject, predicate)`. Compiles categorical statements to Calgary First-Order Logic (FOL) via `to_calgary_fol()`. Recognizes individual proper names (e.g. "Sherlock", "Socrates") as carrying existential import ($\exists x (x = a)$), preventing false-positive `existential_fallacy` flags in Boolean syllogism evaluation (e.g. Darapti AAI-3 with singular middle terms).
+  - **Categorical Syllogisms**: Evaluates standard-form categorical syllogisms (e.g. AAA-1 Barbara, EAE-1 Celarent) natively in Python via `logic_syllogism.py` under boolean (default) or Aristotelian existential import, reporting rule violations (`undistributed_middle`, `illicit_major`, `illicit_minor`, etc.) without artificial propositional workarounds.
+  - **Propositional Forms & Fallacies**: Checks validity via truth-table evaluation; matches named inference rules (Modus Ponens, Disjunctive Syllogism) and formal fallacies (Affirming the Consequent, Denying the Antecedent).
+  - **Hume's Guillotine & Prior's Paradox Safeguard (`is_ought_gap`)**: Deterministically traces the directed support dependency graph. Guards against A.N. Prior's Paradox by requiring **Term-Bound Normative Grounding**: a normative conclusion not only requires at least one normative premise in its ancestral support chain, but the normative predicates in the conclusion must have a non-empty intersection with the normative predicates of its ancestral normative premises ($\text{predicates}(C) \cap \bigcup \text{predicates}(A) \neq \emptyset$). Disjoint leaps or vacuous normative premises are flagged with `is_ought_gap: true`.
+  - Returns `status` (`valid` | `invalid` | `unchecked`), `inferences`, `findings`, `undecidable`, `quote_problems`, and `context_severed`.
+- `POST /api/philin/factcheck {claims ≤ 6: [{id, text, kind}], regenerate?}`: empirical claims only (others return in `skipped`). Dual-pass independent Google Search grounding (planner and lesson roles); agreement combines verdicts at lower confidence; disagreement flags `mixed` or `insufficient`; search failure yields `insufficient` (`reason: search_unavailable`), never model hallucination.
+- `POST /api/philin/positions {question ≤ 500, context?}`: balanced position drafting with identical structure and length per side; stable shuffled labels A-D.
+- `POST /api/philin/rank {positions: [{label, summary, argument}]}`: fixed deterministic rule (`RANK_RULE`): logic status (valid > unchecked > invalid), then fewer contradicted empirical premises (confidence ≥ 0.6), then more supported premises. Value premises are listed per position and never ranked.
+- `POST /api/logic/grade {type, submission, item}` & `GET /api/logic/guide`: deterministic grading endpoint and schema guide powering interactive logic practice.
+- `POST /api/practice/grade {type, item, submission}`: deterministic grading endpoint for all practice kits, evaluating student answers against Python graders without model intervention.
+- **Client-Side Payload Redaction (`redact_for_client`)**: On `GET /api/topics/{id}` and `GET /api/topics`, practice items are scrubbed of secret grading keys (`expected`, `stress_pattern`, `solution`, `expected_order`, `expected_matrix`, `expected_pipeline`, `expected_winner`, `expected_vectors`, `expected_rhyme`, `expected_volta`) to eliminate client-side answer leakage in network payloads.
+- Cache: `content/philin_cache/<scope>/<sha256(PROMPT_VERSION|normalised claim)>.json` (verdicts and sources only; 7-day TTL).
+
+#### 3.12.1 Layer 2 Philosophy Practice Engine (`practice_philosophy.py`)
+Deterministic logic and argumentation practice types registered in `server.PRACTICE_NORMALIZERS`:
+1. `truth_table`: Truth table completion (≤4 variables). AI-supplied truth values are stripped; reference solutions are computed deterministically via `logic_formula.truth_table`.
+2. `validity`: Deductive argument validity and counterexample identification. Truth-table counterexamples generated by `logic_formula.check_validity`.
+3. `syllogism`: Categorical syllogism evaluation (mood, figure, validity, traditional names, rule violations) via `logic_syllogism.check_syllogism`.
+4. `proof_steps`: Step-by-step natural deduction Fitch proof completion verified line-by-line via `logic_proof.check_proof`.
+5. `argument_map`: Argument diagramming with graph diagnostics (cycles, missing links, Hume's is-ought gap, Prior's grounding check) via `logic_argmap.check_map`.
+6. `spot_parts`: Argument component identification (premises, conclusions, objections, rebuttals, normative vs empirical claims).
+7. `fallacy_id`: Identification of formal and informal fallacies, cross-validated against `logic_forms.identify`.
+Authoring tools in `mcp_tools_philosophy.py` validate all items through `logic_engine.check()` before storage. Rendering is implemented in `src/practice/philosophy.jsx` and registered in `src/practice/registry.js`.
+
+#### 3.12.2 Expanded Liberal Arts Practice Engines (6 Modules)
+Standard library only, flat modules in root registered in `server.PRACTICE_NORMALIZERS` and `server.PRACTICE_TYPES`:
+1. **Literature (`practice_literature.py`)**:
+   - `scansion`: Poetic meter analysis (syllables and stress values). Normalized without leaking answer patterns; graded by syllable count and stress array comparison.
+   - `volta_spot`: Sonnet thematic turn (volta) identification. Graded against targeted line position.
+   - `rhyme_scheme_audit`: Identification of stanzaic rhyme schemes (e.g., ABAB, CDCD). Graded via canonical rhyme equivalence matching.
+   - `chronology_unravel`: Reconstruction of chronological fabula from anachronic syuzhet narrative order. Graded via permutation distance.
+2. **Music (`practice_music.py`)**:
+   - `lint_satb_progression`: Voice-leading rule verification for 4-part SATB harmony (parallel fifths, parallel octaves, voice crossing).
+   - `roman_numeral_analysis`: Harmonic analysis of chord progressions in major and minor keys with inversion notation.
+   - `ear_interval_id`: Semitone interval distance identification and classification.
+   - `figured_bass_realize`: Realization of historical figured bass symbols (`5/3`, `6/3`, `6/4`, `7`) into constituent pitch classes.
+3. **Art History (`practice_art_history.py`)**:
+   - `composition_vector`: Visual structural vectors and compositional dynamics (golden ratio, pyramidal, diagonal tension).
+   - `label_architecture`: Architectural structural component identification on diagrams (clerestory, flying buttress, nave, pediment).
+   - `iconography_decode`: Associating classical/religious attributes with iconographic figures.
+   - `stylistic_taxonomy`: Taxonomic classification of period styles (Baroque, Rococo, Neoclassical, Impressionist) from visual characteristics.
+4. **Classics & Archaeology (`practice_classics.py`)**:
+   - `epigraphy_transcribe`: Ancient inscription transcription and lacuna restoration under Leiden conventions (`[text]`, `(text)`).
+   - `harris_matrix_build`: Stratigraphic archaeological sequence diagramming verified by topological sort and transitive reduction.
+   - `cursus_honorum_order`: Sequential progression of Roman magisterial offices under republican statutory constraints.
+   - `athenian_sortition_sim`: Deterministic simulation and validation of democratic lottery allotment (Kleroterion).
+5. **Rhetoric (`practice_rhetoric.py`)**:
+   - `stasis_classify`: Classification into Hermagoras' four stases: conjectural, definitional, qualitative, translative.
+   - `trope_hunter`: Identification of classical rhetorical figures and tropes (chiasmus, anaphora, zeugma, metonymy).
+   - `dispositio_sort`: Ordering classical 6-part oratorical discourse (exordium, narratio, partitio, confirmatio, refutatio, peroratio).
+   - `enthymeme_excavator`: Unearthing implicit bridge premises in informal rhetorical deductions.
+6. **Polity & Political Science (`practice_polity.py`)**:
+   - `compute_dhondt`: Deterministic highest-averages quotient seat allocation for proportional representation systems.
+   - `compute_shapley_shubik_pivotal`: Permutation-based voting power index measuring pivotal voter probabilities.
+   - `veto_pipeline`: Multi-cameral legislative threshold evaluation (veto gates, supermajorities, executive assent).
+   - `instant_runoff_tally`: Sequential elimination and preference redistribution for ranked-choice electoral tallies.
+
+#### 3.12.3 Declarative Decision Tree Engine (`decision_tree_engine.py`, `simspec.py`)
+- Declarative simulation format (`kind: "decision_tree"`, SimSpec v1 specification):
+  - `initial_node`: Root scenario identifier.
+  - `nodes`: Dictionary of dilemma/scenario nodes containing `prompt`, `stated_premises`, `choices`, and `fog_of_war_hidden_facts`.
+  - `choices`: Options with destination `next_node`, `reveals_facts`, and `axiomatic_weights` (e.g. `{"deontology": 1.0, "utilitarianism": -0.5}`).
+- **Strict Epistemic Neutrality**: No choice is assigned normative "correctness" or penalized morally. The engine deterministically tracks:
+  1. Accumulated axiomatic affinity vector.
+  2. Revealed factual state (clearing fog of war).
+  3. Dialectical consistency score: detects if subsequent choices contradict earlier affirmed `stated_premises`.
+- Validated via `simspec.validate_spec()` and executed via `decision_tree_engine.step_decision_tree()`.
+Authoring tools in `mcp_tools_philosophy.py` validate all items through `logic_engine.check()` before storage. Rendering is implemented in `src/practice/philosophy.jsx` and registered in `src/practice/registry.js`.
 
 ---
 
 ## 4. Workspaces & UI Presentation Architecture
 
-The user interface is structured as seven primary modes rendered through `src/App.jsx`:
+The user interface is structured as eight primary modes rendered through `src/App.jsx`:
 
 1. **My courses (`home`)**: Course setup wizard (materials upload/prompt), active course cards, streak status, daily review launch.
 2. **Lab (`physics`)**: Classical mechanics, physics simulations, chemistry kit (`ChemSim.jsx`), and topic library sidebar.
 3. **IDE (`code` / `class`)**: Code editing, algorithm challenges, browser WebAssembly execution (Pyodide), and Socratic code mentor.
 4. **Math (`math`)**: Class notes, interactive function graphing (interactive sliders for free variables), LaTeX scratchpad, practice problems, and 9-widget Math Sim kit.
-5. **History (`history`)**: Five interactive tools rendered via `src/components/HistoryLab.jsx`:
+5. **History (`history`)**: Nine interactive tools rendered via `src/components/HistoryLab.jsx`:
    - `class`: Current sequential class topic and adaptive lesson viewer.
    - `courses`: Subject syllabus progress, enrolled history courses, and historical eras.
    - `crisis`: Branching counterfactual Crisis Simulator ("What If?" decision dilemmas).
-   - `sources`: Primary Source Interrogator with document annotations and SHEG analytical framework.
-   - `timeline`: Interactive chronology with sorting, era filtering, and drag-and-drop event ordering challenge.
+   - `sources`: Primary Source Interrogator with document annotations and SHEG (Stanford History Education Group) analytical framework.
+   - `map`: Interactive offline maps (`public/maps/`) with pin spiderfication and default historical anchors.
+   - `figures`: Historical figures persona chat backed by `PERSONA_PROMPT`.
+   - `games`: Daily games mix (`who_am_i`, `date_guess`, `categorize`).
+   - `timeline`: Interactive chronology with century bands, era filtering, smooth zoom, and drag-and-drop event ordering challenge.
    - `cards`: Merged historical flashcard deck for people, treaties, and key terms.
-6. **Languages (`language`)**: Five interactive tools rendered via `src/components/LanguageLab.jsx`:
+6. **Languages (`language`)**: Ten interactive tools rendered via `src/components/LanguageLab.jsx`:
    - `class`: Current sequential language class with lesson text and activities.
+   - `path`: Pedagogical Learn path of CEFR units with crown mastery.
+   - `practice`: Practice Hub aggregating interactive drills (`translate`, `word_bank`, `listen_type`, `listen_choose`, `speak`, `minimal_pairs`, `dictation`).
+   - `roleplay`: AI conversational partner with real-time speech synthesis/recognition and instant grammar feedback.
+   - `words`: Word list with spaced-repetition decay strength meter (0-4 bars).
+   - `cards`: Spaced-repetition vocabulary flashcards read aloud via ElevenLabs/Web Speech.
+   - `pronounce`: Speech Lab & IPA reference chart (`PronounceTab.jsx`) with audio samples and voice-matching.
+   - `stories`, `alphabets`, `dialogues`, `grammar`: Cultural immersion stories, script drills, dialogues, and contextual grammar tips.
    - `courses`: Enrolled language courses, CEFR proficiency levels (A1 to C2), and syllabus outlines.
-   - `practice`: Practice Hub aggregating interactive drills (`translate`, `word_bank`, `listen_type`, `listen_choose`, `speak`).
-   - `roleplay`: AI conversational AI partner with real-time speech synthesis/recognition and instant grammar feedback.
-   - `cards`: Spaced-repetition vocabulary flashcards read aloud via native Web Speech synthesis.
-   - `speech`: Speech Lab & IPA reference chart (`PronounceTab.jsx`) with microphone voice-matching.
-7. **Advisor (`advisor`)**: Academic record tracking, prerequisite degree requirements, catalog search, and prerequisite readiness courses.
+7. **Philosophy (`philosophy`)**: Argument analysis, logic workbench, and thought experiment lab rendered via `src/components/PhilosophyLab.jsx` and `src/components/philosophy/`:
+   - `class` & `courses`: Current sequential philosophy class topic viewer, course syllabus, and conceptual progress tracking.
+   - `workbench`: Interactive Logic Workbench (`LogicWorkbench.jsx`):
+     - Interactive Truth Table simulator and row step-checker (`TruthTableDesk.jsx`) with tautology/contingency/equivalence classification.
+     - Calgary Natural Deduction Fitch step-checker (`NaturalDeductionDesk.jsx`) with line-by-line verification via `logic_proof.py`.
+     - Categorical Syllogism 3-circle SVG Venn/Euler diagram generator (`SyllogismVennDesk.jsx`) across all 256 forms (15 boolean / 24 aristotelian forms).
+   - `experiments`: Thought Experiments Lab (`ThoughtExperimentsLab.jsx`) with branching decision trees, moral dilemma simulations, and epistemic consequence tracking across 6 canonical dilemmas: Trolley Problem, Ship of Theseus, Chinese Room, Experience Machine, Brain in a Vat, and Veil of Ignorance.
+   - `fallacies`: Fallacy Diagnostic Lab (`FallacyLab.jsx`): formal structural pattern matching (Affirming the Consequent, Denying the Antecedent, Syllogistic rules) vs informal heuristic flags (Ad Hominem, Straw Man, Slippery Slope, Circularity) with interactive argument repair.
+   - `dialogue`: Persona Dialogue (`PhilosopherDialogue.jsx`) with historical thinkers (Socrates, Aristotle, Kant, Mill, Hume, Nietzsche) grounded in verified public-domain quote banks (`content/quotes/*.json`).
+   - `analyze`: PHILIN text-to-argument block decomposition, Python validity checking, categorical syllogisms, and two-pass grounded fact-checks.
+   - `sides`: Balanced multi-position argument synthesis, objection mapping, and deterministic ranking under fixed evidence rules.
+   - `practice`: Layer 2 Philosophy interactive practice items (truth tables, validity, syllogisms, Fitch proofs, argument maps, fallacies).
+   - `cards`: Concept, argument, and philosopher flashcard deck with spaced review.
+8. **Advisor (`advisor`)**: Academic record tracking, prerequisite degree requirements, catalog search, and prerequisite readiness courses.
 
 ### Design System & Theme Engine
 - **Token Source of Truth**: `src/styles/lab.css` defines CSS custom properties for `:root` (light) and `@media (prefers-color-scheme: dark)` / `[data-theme="dark"]`.
@@ -559,7 +680,14 @@ The user interface is structured as seven primary modes rendered through `src/Ap
 ### 5.3 Docker Deployment Configuration
 - **Container Strategy**: Single multi-stage container.
   - Stage 1 (`node:22-alpine`): Compiles React 19 frontend into static production assets (`dist/`).
-  - Stage 2 (`python:3.12-slim`): Installs backend dependencies from pinned `requirements.txt`, seeds default topics into `/app/seed/topics`, and mounts `/app/dist` directly into FastAPI (`app.mount("/", StaticFiles(directory=DIST_DIR, html=True))`).
+  - Stage 2 (`python:3.14-slim`): Aligned to Python 3.14 runtime. Installs backend dependencies from pinned `requirements.txt`, seeds default topics into `/app/seed/topics`, and mounts `/app/dist` directly into FastAPI (`app.mount("/", StaticFiles(directory=DIST_DIR, html=True))`).
+- **Subprocess Sandbox Hardening (`sandbox_preamble.py`)**:
+  - Python code executed in the IDE sandbox (`POST /api/execute-code`) injects `sandbox_preamble.py` into child interpreter processes.
+  - Enforces CPython PEP 578 runtime audit hooks (`sys.addaudithook`):
+    - Blocks network sockets (`socket.*`).
+    - Blocks child subprocesses (`subprocess.Popen`, `os.system`, `os.posix_spawn`).
+    - Blocks SQLite database access (`sqlite3.*`), preventing local exfiltration of `content/edu_studio.db` or credentials.
+    - Restricts filesystem I/O (`open`, `os.remove`, etc.) strictly to the ephemeral scratchpad directory.
 - **Isolation**: Runs as unprivileged user `lab` (`uid: 10001`). Data volume `/app/content` preserves SQLite database and generated lessons.
 - **Process model (contract)**: exactly one uvicorn process, one worker. `JOBS`, `ui_events_queue`/`_event_seq`, rate buckets (`_rate_hits`) and the agy lock live in process memory, so `--workers N` or several replicas would split jobs and events between processes and multiply every limit by N. Scale up (threads, async) before scaling out; moving that state to SQLite is the prerequisite for more workers.
 - **Image contents**: only library lessons belong in the seed; `content/topics/course-*.json` are per-student lessons (git-ignored) and must stay out of the build context (`.dockerignore`).
@@ -595,7 +723,7 @@ Several people on one computer (one OS user), each with their own courses, progr
 | Guard | Default Value | Environment Variable | Enforcement Level |
 | :--- | :--- | :--- | :--- |
 | **Daily Gemini Model Budget** | 400 requests/day | `SCIEDU_DAILY_MODEL_CALLS` | Global hard ceiling across all model calls and retries (accounts on this computer: per account key, 5.5). Resets at midnight UTC. |
-| **Rate Scale Multiplier** | 1.0 (enabled) | `SCIEDU_RATE_SCALE` | Sliding hourly window per user / IP address: Course creation (10/hr), class generation (40/hr), agy assistant (60/hr), simulation generation (20/hr), uploads (30/hr), IDE (120/hr), chat (240/hr). |
+| **Rate Scale Multiplier** | 1.0 (enabled) | `SCIEDU_RATE_SCALE` | Sliding hourly window per user / IP address: Course creation (10/hr), class generation (40/hr), agy assistant (60/hr), simulation generation (20/hr), uploads (30/hr), IDE (120/hr), chat (240/hr), PHILIN transcribe/positions (20/hr) and fact-checked claims (30/hr, two grounded calls each). |
 | **Antigravity CLI Guard** | 15 runs/day | `AGY_DAILY_RUNS` | Single execution concurrency lock (`_agy_lock`), gated by daily counter. Disabled automatically when `SCIEDU_AUTH=1`. |
 | **Agent Sandbox Fence** | Read/write restricted | `AGY_DRAFTS_DIR` | Companion agent may only output to `content/agy_drafts/<id>.json`. Verified by read-only `page-guard` agent before ingestion. |
 | **Client-Reported XP Cap** | 60 events/day | `CLIENT_DAILY_CAP` (`engage.py`)| Limits client-originating XP claims (`sim_explored`, `lesson_read`, `ide_solved`) to prevent gamification farming. |
@@ -663,7 +791,7 @@ Several people on one computer (one OS user), each with their own courses, progr
 - `simulation_guide`: Expanded documentation covering `kind: "geometry"` schemas, bodies (`box`, `wedge`, `sphere`, `rod`, `wall`, `pulley`), forces, elements, and reactive slider parameters.
 
 #### Navigation & Screen Control
-- `open_workspace`: Route the browser UI to any subject workspace (`history`, `language`, `math`, `lab`, `code`, `advisor`) and specific sub-tab (`crisis`, `sources`, `roleplay`, `practice`, `timeline`, `speech`).
+- `open_workspace`: Route the browser UI to any subject workspace (`history`, `language`, `philosophy`, `math`, `lab`, `code`, `advisor`) and specific sub-tab (`analyze`, `sides`, `crisis`, `sources`, `roleplay`, `practice`, `timeline`, `speech`).
 
 ---
 
@@ -697,26 +825,59 @@ Detailed specification: `docs/architecture/PEDAGOGY_AND_LAB_ELEVATION.md`.
 
 ### 10.1 Chemistry Simulation Apparatus (`src/simulations/ChemSim.jsx`)
 ChemSpec v1 widgets match the visual fidelity and physical realism of the physics simulation kit:
-1. **Glassware Benchtop Apparatus**:
+1. **Glassware Benchtop Apparatus & Polyprotic Titration Solver**:
    - Retort stand with heavy base, chrome support rod, and dual-finger clamp.
    - Graduated burette with dynamic fluid meniscus, millimeter volume gradations, and rotating stopcock valve.
    - Gravitational droplet emitter with fluid splash ripples on liquid contact.
    - Erlenmeyer reaction flask with rising fluid volume, porcelain magnetic stirrer plate, rotating Teflon stir bar, and fluid vortex depression.
    - Benchtop digital pH meter with dip electrode probe and live 2-decimal digital readout.
    - Smooth continuous RGB colorimetric indicator gradient for phenolphthalein with fluid swirl eddies.
+   - **Polyprotic Charge-Balance Solver**: Implements exact polynomial charge balance $h - \frac{K_w}{h} + [\text{Na}^+] - C_{A,\text{tot}} \sum_{j=1}^N j \alpha_j(h) = 0$ supporting polyprotic acids with `ka_list` (e.g. $\text{H}_2\text{SO}_4$, $\text{H}_3\text{PO}_4$) and continuous dilution across added burette titrant volumes $V_b$. Solves equilibrium pH deterministically via monotonic bisection down to $\Delta \text{pH} < 10^{-6}$.
 2. **Molecular Kinetics & Gas Law Chamber**:
    - Maxwell-Boltzmann 2D velocity sampling for molecular gas particles ($v \propto \sqrt{T/m}$).
    - Particle-wall momentum impulse calculation with live analog dial pressure gauge.
    - Reactive collision engine: collisions exceeding activation energy $E_a$ trigger chemical transformation with optical emission flash.
 
-### 10.2 Math Simulation Kit & Vector Geometry (`MathSim.jsx`, `GeometrySim.jsx`)
-1. **Secant-Tangent Slope Triangle**: Interactive right triangle connecting $(a, f(a))$ and $(a+h, f(a+h))$ with legs $\Delta x = h$, $\Delta y = f(a+h) - f(a)$, right-angle symbol, and live derivative convergence limit $\lim_{h \to 0} \frac{\Delta y}{\Delta x} = f'(a)$.
-2. **Riemann Sum Darboux Visualizer**: Upper and Lower Darboux sums ($L_n \le \int_a^b f(x)\,dx \le U_n$) with shaded error residual fill between rectangles and the exact curve $f(x)$.
-3. **Direct Vector Drag Handles**: SVG pointer drag handles on force vector arrowheads and body centers, updating slider parameters and coordinate projections in real time.
+### 10.2 Math & Physics Simulation Kit (`SpecSim.jsx`, `MathSim.jsx`, `GeometrySim.jsx`)
+1. **XPBD Velocity Projection & Symplectic Integrator (`SpecSim.jsx`)**:
+   - In particle substepping integration loops ($240\text{ Hz}$), pre-step positions $(\mathbf{x}_{\text{prev}, i})$ are stored prior to explicit candidate advances.
+   - Distance constraints across rigid links/rods are resolved purely via position-based relaxation (PBD), with velocities left untouched during relaxation iterations.
+   - Post-relaxation velocities are projected directly from constrained displacements: $\mathbf{v}_i = (\mathbf{x}_i - \mathbf{x}_{\text{prev}, i}) / \Delta t_{\text{sub}}$, completely eliminating phantom energy creation and stabilizing double pendulums and multi-link chains with $<0.5\%$ Hamiltonian drift.
+2. **Secant-Tangent Slope Triangle**: Interactive right triangle connecting $(a, f(a))$ and $(a+h, f(a+h))$ with legs $\Delta x = h$, $\Delta y = f(a+h) - f(a)$, right-angle symbol, and live derivative convergence limit $\lim_{h \to 0} \frac{\Delta y}{\Delta x} = f'(a)$.
+3. **Riemann Sum Darboux Visualizer**: Upper and Lower Darboux sums ($L_n \le \int_a^b f(x)\,dx \le U_n$) with shaded error residual fill between rectangles and the exact curve $f(x)$.
+4. **Direct Vector Drag Handles**: SVG pointer drag handles on force vector arrowheads and body centers, updating slider parameters and coordinate projections in real time.
 
 ### 10.3 Code Studio Memory Inspector & Socratic Diagnostics (`src/components/EduStudioIDE.jsx`)
 1. **In-Browser Memory & Variable Inspector**: Lightweight Pyodide post-execution introspection capturing local/global variables, types, sequence lengths, and array memory grid cells.
 2. **Socratic Error Diagnostic Engine**: Translates assertion errors and Python tracebacks into process-level Socratic hints (missing return, off-by-one loop boundaries, boundary conditions, index errors, type mismatches).
+
+### 10.4 Advanced STEM & Engineering Practice Kits (20 Deterministic Practice Types)
+Five flat root modules (standard library only) providing normalizers and deterministic graders for upper-division engineering and science:
+1. **Electrical Engineering (`practice_ee.py`)**:
+   - `circuit_dc_analysis`: Branch current and node voltage verification via Ohm's law and Kirchhoff's Current/Voltage Laws.
+   - `thevenin_equivalent`: Open-circuit voltage $V_{\text{th}}$ and Thevenin resistance $R_{\text{th}}$ calculation.
+   - `bode_cutoff_calc`: 3dB corner frequency $f_c$ and filter topology classification (low-pass, high-pass, band-pass).
+   - `opamp_gain_calc`: Closed-loop operational amplifier voltage gain $A_v$ for inverting and non-inverting configurations.
+2. **Artificial Intelligence & Machine Learning (`practice_ai.py`)**:
+   - `gradient_descent_step`: Trace single weight update $w_{t+1} = w_t - \eta \frac{\partial L}{\partial w}$.
+   - `confusion_matrix_metrics`: Exact precision, recall, $F_1$, and specificity calculation from confusion matrix counts.
+   - `attention_score_calc`: Scaled dot-product attention calculation $\operatorname{softmax}(QK^T / \sqrt{d_k})$.
+   - `convolution_output_dim`: Spatial output dimension $\lfloor (W - K + 2P)/S \rfloor + 1$.
+3. **Computer Systems & Architecture (`practice_systems.py`)**:
+   - `pipeline_hazard_spot`: Data hazard (RAW) identification, load-use stalls, and branch delay slot flush penalties.
+   - `cache_address_decode`: Decomposition of memory address into Tag, Set Index, and Offset bit ranges.
+   - `assembly_step_trace`: Tracing RISC-V register file ($t0, t1, s0$) and memory contents after instruction execution.
+   - `virtual_memory_translate`: Virtual Page Number (VPN), Page Offset, page table lookup, and physical address calculation.
+4. **Statistics & Data Science (`practice_stats.py`)**:
+   - `p_value_decision`: Exact $p$-value computation and hypothesis test rejection decision.
+   - `confidence_interval_calc`: Sample mean margin of error $E = z^* \frac{\sigma}{\sqrt{n}}$ and two-sided confidence interval.
+   - `bayes_posterior_calc`: Exact Bayesian posterior probability $P(H|E)$.
+   - `regression_residual_audit`: Residual computation $e_i = y_i - \hat{y}_i$ and leverage/outlier classification.
+5. **Quantitative Biology & Bioinformatics (`practice_bio.py`)**:
+   - `dna_transcription_translate`: $5' \to 3'$ DNA transcription to mRNA and codon translation into peptide sequence.
+   - `hardy_weinberg_calc`: Allele frequencies $p, q$ and genotype frequencies $p^2, 2pq, q^2$.
+   - `enzyme_michaelis_menten`: Initial velocity $v_0 = \frac{V_{\max}[S]}{K_m + [S]}$ and Lineweaver-Burk parameters.
+   - `genomic_gc_content`: GC-content percentage and primer melting temperature $T_m$ calculation.
 
 
 
