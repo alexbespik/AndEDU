@@ -45,11 +45,11 @@ CHEM_DEFAULTS = {
 }
 
 
-def solve_titration_ph(pKa: float, Va: float, Ca: float, Cb: float, Vb: float, is_strong: bool = False) -> float:
+def solve_titration_ph(pKa: Any, Va: float, Ca: float, Cb: float, Vb: float, is_strong: bool = False) -> float:
     """
     Solves aqueous titration pH using rigorous charge balance at 25 °C (Kw = 1.0e-14):
-      [H+] + [Na+] = [OH-] + [A-]
-    At equivalence for a strong acid, [Na+] = [A-], yielding pH = 7.00.
+      [H+] + [Na+] = [OH-] + [A-] (monoprotic)
+      [H+] + [Na+] = [OH-] + [HA-] + 2[A2-] + ... (polyprotic)
     """
     Kw = 1.0e-14
     V_tot = Va + Vb
@@ -57,12 +57,39 @@ def solve_titration_ph(pKa: float, Va: float, Ca: float, Cb: float, Vb: float, i
         return 7.0
     c_na = (Cb * Vb) / V_tot
     c_a_tot = (Ca * Va) / V_tot
-    Ka = 10.0 ** (-pKa) if not is_strong else 1e9
+
+    pkas: List[float] = []
+    if isinstance(pKa, (list, tuple)):
+        pkas = [float(x) for x in pKa]
+    elif isinstance(pKa, (int, float)):
+        pkas = [float(pKa)]
+    else:
+        try:
+            pkas = [float(pKa)]
+        except (ValueError, TypeError):
+            pkas = [4.75]
 
     def f(log_h: float) -> float:
         h = 10.0 ** log_h
-        a_minus = c_a_tot if is_strong else c_a_tot * Ka / (h + Ka)
-        return h - (Kw / h) + c_na - a_minus
+        oh = Kw / h
+        if is_strong:
+            a_charge = c_a_tot * len(pkas)
+        else:
+            n = len(pkas)
+            Kas = [10.0 ** (-pk) for pk in pkas]
+            terms = [1.0] * (n + 1)
+            prod_ka = 1.0
+            for k in range(1, n + 1):
+                prod_ka *= Kas[k - 1]
+                terms[k] = (h ** (n - k)) * prod_ka
+            terms[0] = h ** n
+            d = sum(terms)
+            if d <= 0:
+                a_charge = 0.0
+            else:
+                a_charge = c_a_tot * sum(k * terms[k] for k in range(1, n + 1)) / d
+
+        return h - oh + c_na - a_charge
 
     lo, hi = -14.0, 1.0
     for _ in range(80):

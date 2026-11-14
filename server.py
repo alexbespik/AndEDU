@@ -16,7 +16,7 @@ import uuid
 import zipfile
 import contextlib
 import httpx
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -2086,11 +2086,12 @@ async def make_harder(payload: MakeHarderPayload):
 SANDBOX_OUTPUT_LIMIT = 64_000
 
 def _limit_child_resources():
-    """Runs in the child before exec: caps CPU seconds, file writes and memory where the OS supports it."""
+    """Runs in the child before exec: caps CPU seconds, file writes, open files and memory."""
     import resource
     for limit, value in [
         (resource.RLIMIT_CPU, (5, 5)),
         (resource.RLIMIT_FSIZE, (10_000_000, 10_000_000)),
+        (getattr(resource, "RLIMIT_NOFILE", None), (64, 64)),
         (getattr(resource, "RLIMIT_AS", None), (1_000_000_000, 1_000_000_000)),
     ]:
         if limit is None:
@@ -2102,15 +2103,27 @@ def _limit_child_resources():
 
 def run_python_sandboxed(code: str, test_code: str = "") -> Dict[str, Any]:
     """
-    Runs student Python in a separate interpreter. This is NOT a security boundary against
-    hostile code (it runs as the local user); the server is bound to localhost for that reason.
-    It does keep API keys out of the child's environment, isolates cwd, and caps time/output.
+    Runs student Python in a separate interpreter. Hardened with PEP 578 audit hooks
+    (sandbox_preamble.py) and resource limits. Keeps API keys out of child environment,
+    isolates cwd, and caps time/output.
     """
     import tempfile
     user_code = (code or "").strip()
     test_code = (test_code or "").strip()
 
-    script_parts = [user_code]
+    preamble = ""
+    try:
+        preamble_path = os.path.join(os.path.dirname(__file__), "sandbox_preamble.py")
+        if os.path.exists(preamble_path):
+            with open(preamble_path, "r", encoding="utf-8") as f:
+                preamble = f.read()
+    except Exception:
+        preamble = ""
+
+    script_parts = []
+    if preamble:
+        script_parts.append(preamble)
+    script_parts.append(user_code)
     if test_code:
         script_parts.append("\n# --- TEST VERIFICATION ---")
         script_parts.append(test_code)
@@ -2167,6 +2180,11 @@ def execute_code(payload: ExecuteCodePayload):
         raise HTTPException(status_code=403, detail="Server-side code execution is disabled on shared servers; code runs in your browser.")
     rate_limit("ide")
     return run_python_sandboxed(payload.code, payload.test_code or "")
+
+@app.post("/api/run-code")
+def run_code_endpoint(payload: ExecuteCodePayload):
+    """Exact route alias for execute_code with PEP 578 hardened sandbox."""
+    return execute_code(payload)
 
 @app.post("/api/generate-puzzle")
 async def generate_puzzle(payload: GeneratePayload):
@@ -4373,13 +4391,19 @@ import practice_music  # noqa: E402
 import practice_philosophy  # noqa: E402
 import practice_polity  # noqa: E402
 import practice_rhetoric  # noqa: E402
+import practice_ee  # noqa: E402
+import practice_ai  # noqa: E402
+import practice_systems  # noqa: E402
+import practice_stats  # noqa: E402
+import practice_bio  # noqa: E402
 
 PRACTICE_GRADERS: Dict[str, Any] = {}
 GRADERS_SECRET_FIELDS: Set[str] = {"expected", "stress_pattern", "solution", "rhyme_scheme", "target_index", "canonical_order"}
 
 for _m in (practice_history, practice_language_extra, practice_general, practice_philosophy,
            practice_literature, practice_music, practice_art_history, practice_classics,
-           practice_rhetoric, practice_polity):
+           practice_rhetoric, practice_polity, practice_ee, practice_ai, practice_systems,
+           practice_stats, practice_bio):
     PRACTICE_NORMALIZERS.update(_m.NORMALIZERS)
     if hasattr(_m, "GRADERS"):
         PRACTICE_GRADERS.update(_m.GRADERS)

@@ -3,7 +3,8 @@ import {
   LineChart, NotebookPen, Sigma, Plus, X, Loader2, Crosshair, BookOpen,
   GraduationCap, Shapes, ZoomIn, ZoomOut, Keyboard,
 } from 'lucide-react';
-import { tryCompile, CONSTS, FUNCS, RESERVED_NAMES } from '../lib/expr';
+import { tryCompile, CONSTS, FUNCS, RESERVED_NAMES, Jet2 } from '../lib/expr';
+import { isVerticalAsymptote } from '../lib/dual_autodiff';
 import { canvasPalette } from '../theme';
 import { api } from '../lib/api';
 import { reportXp } from '../lib/engage';
@@ -54,8 +55,24 @@ export function freeVariables(src) {
   return [...names];
 }
 
-// ---- numeric analysis on a compiled f(x) ----
-const dfdx = (f, x) => { const h = 1e-5 * Math.max(1, Math.abs(x)); return (f(x + h) - f(x - h)) / (2 * h); };
+// ---- exact autodiff analysis on f(x) via Jet2 with adaptive fallback ----
+const dfdx = (f, x) => {
+  try {
+    const res = f(Jet2.variable(x));
+    if (res instanceof Jet2 && Number.isFinite(res.d1)) return res.d1;
+  } catch {}
+  const h = 1e-7 * Math.max(1, Math.abs(x));
+  return (f(x + h) - f(x - h)) / (2 * h);
+};
+
+const d2fdx2 = (f, x) => {
+  try {
+    const res = f(Jet2.variable(x));
+    if (res instanceof Jet2 && Number.isFinite(res.d2)) return res.d2;
+  } catch {}
+  const h = 1e-4 * Math.max(1, Math.abs(x));
+  return (f(x + h) - 2 * f(x) + f(x - h)) / (h * h);
+};
 
 function bisect(g, a, b) {
   let ga = g(a);
@@ -91,7 +108,7 @@ export function analyze(f, x0, x1) {
   const roots = signChanges(f, x0, x1, (r) => Math.abs(f(r)) < 1e-6 * (1 + span));
   const d = (x) => dfdx(f, x);
   const extrema = signChanges(d, x0, x1, (r) => Number.isFinite(f(r)) && Math.abs(d(r)) < 1e-3 * (1 + Math.abs(f(r))))
-    .map((x) => ({ x, y: f(x), kind: dfdx(d, x) > 0 ? 'min' : 'max' }));
+    .map((x) => ({ x, y: f(x), kind: d2fdx2(f, x) > 0 ? 'min' : 'max' }));
   return { roots, extrema, y0: f(0) };
 }
 
@@ -370,9 +387,16 @@ function GraphTab({ userId, incoming }) {
       ctx.beginPath();
       let pen = false, lastY = null;
       for (let px = 0; px <= W; px += 1) {
-        const y = c.fn({ ...scopeBase, x: fromX(px) });
+        const xVal = fromX(px);
+        const y = c.fn({ ...scopeBase, x: xVal });
         const py = toY(y);
-        if (!Number.isFinite(y) || (lastY !== null && Math.abs(py - lastY) > H * 2)) { pen = false; lastY = Number.isFinite(y) ? py : null; continue; }
+        const stepX = Math.abs(fromX(px) - fromX(px - 1)) || 1e-4;
+        const pole = isVerticalAsymptote((xv) => c.fn({ ...scopeBase, x: xv }), xVal, stepX);
+        if (pole || !Number.isFinite(y) || (lastY !== null && Math.abs(py - lastY) > H * 2)) {
+          pen = false;
+          lastY = Number.isFinite(y) ? py : null;
+          continue;
+        }
         if (pen) ctx.lineTo(px, py); else { ctx.moveTo(px, py); pen = true; }
         lastY = py;
       }

@@ -6,6 +6,10 @@
 //   comparisons < <= > >= == !=, parentheses, function calls.
 // ---------------------------------------------------------------------------
 
+import { Jet2 } from './dual_autodiff.js';
+
+export { Jet2 };
+
 export const CONSTS = {
   pi: Math.PI, PI: Math.PI,
   tau: 2 * Math.PI, TAU: 2 * Math.PI,
@@ -16,8 +20,12 @@ export const CONSTS = {
 
 export const FUNCS = {
   // Trigonometric & reciprocal/arc
-  sin: Math.sin, cos: Math.cos, tan: Math.tan,
-  csc: (x) => 1 / Math.sin(x), sec: (x) => 1 / Math.cos(x), cot: (x) => 1 / Math.tan(x),
+  sin: (x) => (x instanceof Jet2 ? x.sin() : Math.sin(x)),
+  cos: (x) => (x instanceof Jet2 ? x.cos() : Math.cos(x)),
+  tan: (x) => (x instanceof Jet2 ? x.tan() : Math.tan(x)),
+  csc: (x) => (x instanceof Jet2 ? Jet2.constant(1).div(x.sin()) : 1 / Math.sin(x)),
+  sec: (x) => (x instanceof Jet2 ? Jet2.constant(1).div(x.cos()) : 1 / Math.cos(x)),
+  cot: (x) => (x instanceof Jet2 ? Jet2.constant(1).div(x.tan()) : 1 / Math.tan(x)),
   asin: Math.asin, arcsin: Math.asin, acos: Math.acos, arccos: Math.acos, atan: Math.atan, arctan: Math.atan, atan2: Math.atan2,
   acsc: (x) => Math.asin(1 / x), arccsc: (x) => Math.asin(1 / x),
   asec: (x) => Math.acos(1 / x), arcsec: (x) => Math.acos(1 / x),
@@ -32,21 +40,25 @@ export const FUNCS = {
   acoth: (x) => Math.atanh(1 / x), arccoth: (x) => Math.atanh(1 / x),
 
   // Roots, powers, exponentials
-  sqrt: Math.sqrt, cbrt: Math.cbrt,
+  sqrt: (x) => (x instanceof Jet2 ? x.sqrt() : Math.sqrt(x)),
+  cbrt: Math.cbrt,
   nthroot: (x, n = 2) => {
     if (x >= 0) return Math.pow(x, 1 / n);
     const rn = Math.round(n);
     if (Math.abs(n - rn) < 1e-9 && rn % 2 !== 0) return -Math.pow(-x, 1 / n);
     return NaN;
   },
-  exp: Math.exp, pow: Math.pow,
+  exp: (x) => (x instanceof Jet2 ? x.exp() : Math.exp(x)),
+  pow: (x, p) => (x instanceof Jet2 ? x.pow(p) : Math.pow(x, p)),
 
   // Logarithms
-  ln: Math.log, log2: Math.log2, log10: Math.log10,
-  log: (x, b) => (b !== undefined ? Math.log(x) / Math.log(b) : Math.log(x)),
+  ln: (x) => (x instanceof Jet2 ? x.ln() : Math.log(x)),
+  log2: Math.log2, log10: Math.log10,
+  log: (x, b) => (x instanceof Jet2 ? (b !== undefined ? x.ln().div(Jet2.constant(Math.log(b))) : x.ln()) : (b !== undefined ? Math.log(x) / Math.log(b) : Math.log(x))),
 
   // Rounding, clamping, number theory
-  abs: Math.abs, sign: Math.sign, sgn: Math.sign,
+  abs: (x) => (x instanceof Jet2 ? x.abs() : Math.abs(x)),
+  sign: Math.sign, sgn: Math.sign,
   floor: Math.floor, ceil: Math.ceil,
   round: (x, p = 0) => { const f = 10 ** p; return Math.round(x * f) / f; },
   trunc: Math.trunc, clamp: (v, lo, hi) => Math.min(Math.max(v, lo), hi), hypot: Math.hypot,
@@ -140,9 +152,12 @@ function tokenize(src) {
 const BINARY = {
   '<': [1, (a, b) => +(a < b)], '<=': [1, (a, b) => +(a <= b)], '>': [1, (a, b) => +(a > b)],
   '>=': [1, (a, b) => +(a >= b)], '==': [1, (a, b) => +(a === b)], '!=': [1, (a, b) => +(a !== b)],
-  '+': [2, (a, b) => a + b], '-': [2, (a, b) => a - b],
-  '*': [3, (a, b) => a * b], '/': [3, (a, b) => a / b], '%': [3, (a, b) => a % b],
-  '^': [5, Math.pow],
+  '+': [2, (a, b) => (a instanceof Jet2 ? a.add(b) : (b instanceof Jet2 ? b.add(a) : a + b))],
+  '-': [2, (a, b) => (a instanceof Jet2 ? a.sub(b) : (b instanceof Jet2 ? Jet2.constant(a).sub(b) : a - b))],
+  '*': [3, (a, b) => (a instanceof Jet2 ? a.mul(b) : (b instanceof Jet2 ? b.mul(a) : a * b))],
+  '/': [3, (a, b) => (a instanceof Jet2 ? a.div(b) : (b instanceof Jet2 ? Jet2.constant(a).div(b) : a / b))],
+  '%': [3, (a, b) => (a instanceof Jet2 || b instanceof Jet2 ? NaN : a % b)],
+  '^': [5, (a, b) => (a instanceof Jet2 ? a.pow(b) : (b instanceof Jet2 ? Jet2.constant(a).pow(b) : Math.pow(a, b)))],
 };
 
 function parse(tokens, src) {
@@ -174,7 +189,10 @@ function parse(tokens, src) {
     if (tok && tok.t === 'op' && (tok.v === '-' || tok.v === '+')) {
       i++;
       const operand = expression(4); // below ^, above * /
-      return tok.v === '-' ? (s) => -operand(s) : operand;
+      return tok.v === '-' ? (s) => {
+        const v = operand(s);
+        return v instanceof Jet2 ? v.neg() : -v;
+      } : operand;
     }
     return primary();
   }
@@ -226,12 +244,12 @@ function nameLookup(name) {
     return (s) => {
       const target = s != null && Object.hasOwn(s, obj) ? s[obj] : undefined;
       const v = target && Object.hasOwn(target, field) ? target[field] : undefined;
-      return typeof v === 'number' ? v : NaN;
+      return typeof v === 'number' || v instanceof Jet2 ? v : NaN;
     };
   }
   return (s) => {
     const v = s != null && Object.hasOwn(s, name) ? s[name] : undefined;
-    if (typeof v === 'number') return v;
+    if (typeof v === 'number' || v instanceof Jet2) return v;
     return Object.hasOwn(CONSTS, name) ? CONSTS[name] : NaN;
   };
 }

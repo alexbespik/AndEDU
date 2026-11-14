@@ -442,7 +442,13 @@ function SpecSimPlayer({ spec }) {
               return T;
             });
 
-            // 2. Semi-implicit Euler integration
+            // 2. Integration step
+            const prevPos = {};
+            for (const id in state.bodies) {
+              const b = state.bodies[id];
+              prevPos[id] = { x: b.x, y: b.y };
+            }
+
             let exploded = false;
             for (const id in state.bodies) {
               const b = state.bodies[id];
@@ -467,8 +473,14 @@ function SpecSimPlayer({ spec }) {
               break;
             }
 
-            // 3. Distance constraints (links: rod)
-            for (let iter = 0; iter < 6; iter++) {
+            // 3. XPBD Distance constraints (links: rod)
+            const rodBodies = new Set();
+            for (const l of compiledSpec.links) {
+              rodBodies.add(l.a);
+              rodBodies.add(l.b);
+            }
+
+            for (let iter = 0; iter < 8; iter++) {
               for (const l of compiledSpec.links) {
                 const bA = state.bodies[l.a];
                 const bB = state.bodies[l.b];
@@ -479,20 +491,12 @@ function SpecSimPlayer({ spec }) {
                 const dist = Math.hypot(dx, dy);
                 if (dist > 1e-6) {
                   const diff = (dist - targetLen) / dist;
-                  const nx = dx / dist;
-                  const ny = dy / dist;
                   if (bA.fixed && !bB.fixed) {
                     bB.x -= dx * diff;
                     bB.y -= dy * diff;
-                    const vRad = bB.vx * nx + bB.vy * ny;
-                    bB.vx -= vRad * nx;
-                    bB.vy -= vRad * ny;
                   } else if (bB.fixed && !bA.fixed) {
                     bA.x += dx * diff;
                     bA.y += dy * diff;
-                    const vRad = bA.vx * nx + bA.vy * ny;
-                    bA.vx -= vRad * nx;
-                    bA.vy -= vRad * ny;
                   } else if (!bA.fixed && !bB.fixed) {
                     const invA = 1 / bA.m;
                     const invB = 1 / bB.m;
@@ -501,13 +505,18 @@ function SpecSimPlayer({ spec }) {
                     bA.y += dy * diff * (invA / sumInv);
                     bB.x -= dx * diff * (invB / sumInv);
                     bB.y -= dy * diff * (invB / sumInv);
-                    const relVRad = (bB.vx - bA.vx) * nx + (bB.vy - bA.vy) * ny;
-                    bA.vx += relVRad * nx * (invA / sumInv);
-                    bA.vy += relVRad * ny * (invA / sumInv);
-                    bB.vx -= relVRad * nx * (invB / sumInv);
-                    bB.vy -= relVRad * ny * (invB / sumInv);
                   }
                 }
+              }
+            }
+
+            // XPBD Velocity Projection: Update velocity from post-relaxation displacement
+            // v = (x - x_prev) / dt (eliminates phantom momentum & energy drift in linkages)
+            for (const id of rodBodies) {
+              const b = state.bodies[id];
+              if (b && !b.fixed && prevPos[id]) {
+                b.vx = (b.x - prevPos[id].x) / subDt;
+                b.vy = (b.y - prevPos[id].y) / subDt;
               }
             }
 
