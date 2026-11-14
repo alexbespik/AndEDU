@@ -15,7 +15,7 @@ Argument maps (logic engine): a debate as claims and support/attack edges, check
 Turning free text into a map is a separate step (a model may draft it; the student edits it before this runs).
 """
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from logic_formula import LogicError, check_validity, parse, to_string
 
