@@ -399,45 +399,6 @@ WM_PROGRAMS: List[Dict[str, Any]] = [
         "tracks": [],
         "differences": "Minor = four required DATA courses plus two approved quantitative electives from many departments; no track, no capstone.",
     },
-    {
-        "id": "columbia_3_2", "dept": "ENGR", "name": "Columbia University 3+2 Combined Plan Pre-Engineering Track",
-        "source": "https://www.wm.edu/as/appliedscience/undergraduate/combined-plan/index.php",
-        "credits": "Foundational STEM core (MATH, PHYS, CHEM, CSCI, ECON, Writing) + major requirements before transfer (GPA >= 3.30, B or better in math/science)",
-        "requirements": [
-            "MATH 111, MATH 112 (Calculus I & II), MATH 212 or 213 (Multivariable Calculus)",
-            "MATH 211 (Linear Algebra), MATH 302 (Differential Equations)",
-            "PHYS 101/101L, PHYS 102/102L (General Physics I & II with Labs)",
-            "CHEM 103/103L (General Chemistry I with Lab)",
-            "CSCI 141 (Computational Problem Solving / Intro to Python)",
-            "ECON 101 or ECON 102 (Microeconomics or Macroeconomics)",
-            "COLL 150 or WRIT 101 (College Writing / First-Year Seminar)",
-            "Overall cumulative GPA >= 3.30 and Pre-Engineering Math/Science GPA >= 3.30 with B (3.0) or higher on first attempt in all foundational courses",
-        ],
-        "tracks": [
-            {
-                "name": "Computer Engineering",
-                "lines": [
-                    "Requires CSCI 241 (Data Structures) and CSCI 243 (Discrete Structures in CS)",
-                    "Recommended: PHYS 251 (Electronics / Experimental Atomic Physics)",
-                ],
-            },
-            {
-                "name": "Electrical Engineering",
-                "lines": [
-                    "Requires PHYS 251 (Electronics) or approved circuits coursework",
-                    "Recommended: CSCI 241 (Data Structures)",
-                ],
-            },
-            {
-                "name": "Mechanical / Civil Engineering",
-                "lines": [
-                    "Requires CHEM 103/103L and PHYS 101/102",
-                    "Recommended: Multivariable Calculus (MATH 212) and Differential Equations (MATH 302)",
-                ],
-            },
-        ],
-        "differences": "Dual-degree articulation: 3 years at William & Mary completing COLL curriculum and foundational STEM courses, followed by 2 years at Columbia University Fu Foundation School of Engineering and Applied Science (SEAS), earning a B.A./B.S. from W&M and a B.S. from Columbia.",
-    },
 ]
 
 # Registrar's undergraduate calendar (dates "subject to change"); one entry per term code.

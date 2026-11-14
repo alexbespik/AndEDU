@@ -36,8 +36,13 @@ def _audit_hook(event, args):
     if event in ("os.remove", "os.unlink", "os.rmdir", "os.rename"):
         raise PermissionError(f"Filesystem modifications disabled in sandbox: {event}")
 
-# Register audit hook permanently in this process
-try:
-    sys.addaudithook(_audit_hook)
-except (AttributeError, RuntimeError):
-    pass
+def install_audit_hook():
+    try:
+        sys.addaudithook(_audit_hook)
+    except (AttributeError, RuntimeError):
+        pass
+
+# Register audit hook permanently when executed as the main script (e.g. child sandbox)
+if __name__ == "__main__":
+    install_audit_hook()
+
