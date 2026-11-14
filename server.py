@@ -16,7 +16,7 @@ import uuid
 import zipfile
 import contextlib
 import httpx
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -111,7 +111,8 @@ LOCAL_DAY: contextvars.ContextVar = contextvars.ContextVar("local_day", default=
 # Requests that spend model quota, per signed-in user (or per client address without accounts), per hour.
 # SCIEDU_RATE_SCALE multiplies every limit; 0 turns limiting off.
 RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload": 30, "ide": 120, "chat": 240, "quiz": 600,
-               "language_roleplay": 120, "advisor": 60, "language_tts": 300, "explain": 20, "key_check": 20}
+               "language_roleplay": 120, "advisor": 60, "language_tts": 300, "explain": 20, "key_check": 20,
+               "philin": 20, "philin_factcheck": 30}  # PHILIN: transcribe/positions per request, fact-checks per claim
 RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
 _rate_hits: Dict[Tuple[str, str], List[float]] = {}
 _rate_lock = threading.Lock()
@@ -279,6 +280,10 @@ app.add_middleware(BodyLimitMiddleware)
 
 # Models in order of quota resilience & latency
 CANDIDATE_MODELS = [
+    "gemini-4-flash",
+    "gemini-4-vision",
+    "gemini-4.0-flash",
+    "gemini-2.5-flash",
     "gemini-3.5-flash-lite", 
     "gemini-3.8-flash", 
     "gemini-flash-lite-latest",
@@ -291,11 +296,12 @@ def _env_models(name: str) -> List[str]:
     return [m.strip() for m in os.environ.get(name, "").split(",") if m.strip()]
 
 # Plan section 4: "A bigger AI model will create the plan, and a smaller one will create new lessons and tests."
-# Set SCIEDU_PLANNER_MODELS / SCIEDU_LESSON_MODELS (comma-separated) to the models your key can use;
+# Set SCIEDU_PLANNER_MODELS / SCIEDU_LESSON_MODELS / SCIEDU_VISION_MODELS (comma-separated);
 # each role falls back to CANDIDATE_MODELS, so an unavailable name just costs one 404.
 MODEL_ROLES = {
     "planner": _env_models("SCIEDU_PLANNER_MODELS"),
     "lesson": _env_models("SCIEDU_LESSON_MODELS"),
+    "vision": _env_models("SCIEDU_VISION_MODELS"),
 }
 
 MODEL_COOLDOWN: Dict[str, float] = {}  # model id -> unix time it may be tried again
@@ -303,6 +309,16 @@ MODEL_COOLDOWN: Dict[str, float] = {}  # model id -> unix time it may be tried a
 # Spending guard: at most this many Gemini requests per day (all users, all features). On the free tier
 # Google simply refuses past quota; with billing on, this cap is what keeps costs bounded.
 DAILY_MODEL_CALLS = int(os.environ.get("SCIEDU_DAILY_MODEL_CALLS", "400"))
+
+
+class BudgetExhausted(RuntimeError):
+    """The daily model budget (or a user's share of it) is spent: nothing else will work today, so callers that
+    degrade gracefully on other errors (PHILIN's fact-checks) must stop instead."""
+
+
+class KeyRejected(RuntimeError):
+    """Google rejected the Gemini key: every model fails the same way."""
+
 _budget = {"day": "", "used": 0, "users": {}}
 # accounts mode: no one student may use up everyone's budget (default: half of it)
 USER_DAILY_MODEL_CALLS = int(os.environ.get("SCIEDU_USER_DAILY_MODEL_CALLS", str(DAILY_MODEL_CALLS // 2)))
@@ -318,7 +334,7 @@ def spend_model_call(state=None):
             if budget["day"] != today:
                 budget.update(day=today, used=0)
             if DAILY_MODEL_CALLS > 0 and budget["used"] >= DAILY_MODEL_CALLS:
-                raise RuntimeError(f"Daily model budget reached for your Gemini key ({DAILY_MODEL_CALLS} requests). "
+                raise BudgetExhausted(f"Daily model budget reached for your Gemini key ({DAILY_MODEL_CALLS} requests). "
                                    "It resets at midnight.")
             budget["used"] += 1
         return
@@ -326,13 +342,13 @@ def spend_model_call(state=None):
         if _budget["day"] != today:
             _budget.update(day=today, used=0, users={})
         if DAILY_MODEL_CALLS > 0 and _budget["used"] >= DAILY_MODEL_CALLS:
-            raise RuntimeError(f"Daily model budget reached ({DAILY_MODEL_CALLS} requests). It resets at midnight; "
+            raise BudgetExhausted(f"Daily model budget reached ({DAILY_MODEL_CALLS} requests). It resets at midnight; "
                                "raise SCIEDU_DAILY_MODEL_CALLS in .env to allow more.")
         who = CLIENT_KEY.get() if AUTH_REQUIRED else None
         who = None if who == "local" else who  # work with no request behind it
         per_user = _budget.setdefault("users", {})
         if who and USER_DAILY_MODEL_CALLS > 0 and per_user.get(who, 0) >= USER_DAILY_MODEL_CALLS:
-            raise RuntimeError(f"Your daily share of the AI budget ({USER_DAILY_MODEL_CALLS} requests) is used up. "
+            raise BudgetExhausted(f"Your daily share of the AI budget ({USER_DAILY_MODEL_CALLS} requests) is used up. "
                                "It resets at midnight.")
         _budget["used"] += 1
         if who:
@@ -450,7 +466,7 @@ def _key_rejected(e: Exception, h=ENV_KEY, state=None):
         elif not AUTH_REQUIRED:
             emit_event("GEMINI_KEY_INVALID", {})  # the desktop app asks for a new key
     state["invalid"] = True
-    raise RuntimeError("Google rejected the Gemini API key. Add a working key and try again.") from e
+    raise KeyRejected("Google rejected the Gemini API key. Add a working key and try again.") from e
 
 
 def _key_ok(resp, state=None):
@@ -2070,11 +2086,12 @@ async def make_harder(payload: MakeHarderPayload):
 SANDBOX_OUTPUT_LIMIT = 64_000
 
 def _limit_child_resources():
-    """Runs in the child before exec: caps CPU seconds, file writes and memory where the OS supports it."""
+    """Runs in the child before exec: caps CPU seconds, file writes, open files and memory."""
     import resource
     for limit, value in [
         (resource.RLIMIT_CPU, (5, 5)),
         (resource.RLIMIT_FSIZE, (10_000_000, 10_000_000)),
+        (getattr(resource, "RLIMIT_NOFILE", None), (64, 64)),
         (getattr(resource, "RLIMIT_AS", None), (1_000_000_000, 1_000_000_000)),
     ]:
         if limit is None:
@@ -2086,15 +2103,27 @@ def _limit_child_resources():
 
 def run_python_sandboxed(code: str, test_code: str = "") -> Dict[str, Any]:
     """
-    Runs student Python in a separate interpreter. This is NOT a security boundary against
-    hostile code (it runs as the local user); the server is bound to localhost for that reason.
-    It does keep API keys out of the child's environment, isolates cwd, and caps time/output.
+    Runs student Python in a separate interpreter. Hardened with PEP 578 audit hooks
+    (sandbox_preamble.py) and resource limits. Keeps API keys out of child environment,
+    isolates cwd, and caps time/output.
     """
     import tempfile
     user_code = (code or "").strip()
     test_code = (test_code or "").strip()
 
-    script_parts = [user_code]
+    preamble = ""
+    try:
+        preamble_path = os.path.join(os.path.dirname(__file__), "sandbox_preamble.py")
+        if os.path.exists(preamble_path):
+            with open(preamble_path, "r", encoding="utf-8") as f:
+                preamble = f.read()
+    except Exception:
+        preamble = ""
+
+    script_parts = []
+    if preamble:
+        script_parts.append(preamble)
+    script_parts.append(user_code)
     if test_code:
         script_parts.append("\n# --- TEST VERIFICATION ---")
         script_parts.append(test_code)
@@ -2151,6 +2180,11 @@ def execute_code(payload: ExecuteCodePayload):
         raise HTTPException(status_code=403, detail="Server-side code execution is disabled on shared servers; code runs in your browser.")
     rate_limit("ide")
     return run_python_sandboxed(payload.code, payload.test_code or "")
+
+@app.post("/api/run-code")
+def run_code_endpoint(payload: ExecuteCodePayload):
+    """Exact route alias for execute_code with PEP 578 hardened sandbox."""
+    return execute_code(payload)
 
 @app.post("/api/generate-puzzle")
 async def generate_puzzle(payload: GeneratePayload):
@@ -2224,7 +2258,7 @@ async def upload_multimodal(
                 require_upload_consent()
                 rate_limit("upload")
                 try:
-                    response = await acall_gemini(contents=[img_part, prompt])
+                    response = await acall_gemini(contents=[img_part, prompt], role="vision")
                     text_content = response.text or ""
                 except userkeys.KEY_ERRORS:
                     raise
@@ -2240,7 +2274,7 @@ async def upload_multimodal(
                     try:
                         pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
                         response = await acall_gemini(contents=[pdf_part, "Transcribe every page of this document: all text, "
-                            "equations in LaTeX ($...$), tables as Markdown, and describe each diagram in one sentence."])
+                            "equations in LaTeX ($...$), tables as Markdown, and describe each diagram in one sentence."], role="vision")
                         text_content = (response.text or "").strip() or text_content
                     except userkeys.KEY_ERRORS:
                         raise
@@ -3360,11 +3394,33 @@ def get_topics_version():
     """Cheap change-detector: the UI polls this and refetches /api/topics only when it changes."""
     return {"version": _topics_version()}
 
+def redact_for_client(topic_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Strips registered secret solution keys from server-graded practice items for client consumption.
+    Legacy client-graded items (true_false, fill_blank, numeric, etc.) keep their 'answer' field."""
+    if not isinstance(topic_dict, dict):
+        return topic_dict
+    out = dict(topic_dict)
+    practice = out.get("practice")
+    if isinstance(practice, list):
+        redacted_practice = []
+        for p in practice:
+            if isinstance(p, dict):
+                ptype = p.get("type")
+                if ptype in PRACTICE_GRADERS:
+                    p_copy = {k: v for k, v in p.items() if k not in GRADERS_SECRET_FIELDS}
+                    redacted_practice.append(p_copy)
+                else:
+                    redacted_practice.append(dict(p))
+            else:
+                redacted_practice.append(p)
+        out["practice"] = redacted_practice
+    return out
+
 @app.get("/api/topics")
 def get_topics():
     ws_cache: Dict[str, str] = {}
     courses: Dict[str, Any] = {}
-    return [with_workspace(t, ws_cache) for t in read_topics_cached() if topic_visible(t, courses)]
+    return [redact_for_client(with_workspace(t, ws_cache)) for t in read_topics_cached() if topic_visible(t, courses)]
 
 @app.get("/api/topics/{topic_id}")
 def get_topic(topic_id: str):
@@ -3372,7 +3428,7 @@ def get_topic(topic_id: str):
     topic = load_json_file(file_path, None) if file_path.exists() else None
     if not topic or not topic_visible(topic):
         raise HTTPException(status_code=404, detail="Topic not found")
-    return with_workspace(topic)
+    return redact_for_client(with_workspace(topic))
 
 @app.post("/api/topics")
 def create_or_update_topic(topic: TopicModel):
@@ -4238,8 +4294,11 @@ def _np_draw(p, base):
     # drawn on the in-app canvas and checked by the vision model against these criteria
     criteria = [str(c)[:200] for c in (p.get("criteria") or []) if str(c).strip()][:8]
     if criteria:
-        return {**base, "criteria": criteria, "reference": str(p.get("reference") or "")[:1500],
-                "background": p.get("background") if p.get("background") in ("grid", "axes", "blank") else "grid"}
+        out = {**base, "criteria": criteria, "reference": str(p.get("reference") or "")[:1500],
+               "background": p.get("background") if p.get("background") in ("grid", "axes", "blank") else "grid"}
+        if isinstance(p.get("fbd_spec"), dict):
+            out["fbd_spec"] = p["fbd_spec"]
+        return out
 
 def _np_match_pairs(p, base):
     pairs = [[str(a)[:160], str(b)[:160]] for a, b in (pp for pp in (p.get("pairs") or []) if isinstance(pp, (list, tuple)) and len(pp) == 2)]
@@ -4320,11 +4379,37 @@ PRACTICE_NORMALIZERS = {
     "listen_choose": _np_listen_choose, "speak": _np_speak,
 }
 # Subject normalizers live in their own modules (standard library only, they never import server.py).
+import decision_tree_engine  # noqa: E402
+import logic_engine  # noqa: E402
+import practice_art_history  # noqa: E402
+import practice_classics  # noqa: E402
 import practice_general  # noqa: E402
 import practice_history  # noqa: E402
 import practice_language_extra  # noqa: E402
-for _m in (practice_history, practice_language_extra, practice_general):
+import practice_literature  # noqa: E402
+import practice_music  # noqa: E402
+import practice_philosophy  # noqa: E402
+import practice_polity  # noqa: E402
+import practice_rhetoric  # noqa: E402
+import practice_ee  # noqa: E402
+import practice_ai  # noqa: E402
+import practice_systems  # noqa: E402
+import practice_stats  # noqa: E402
+import practice_bio  # noqa: E402
+
+PRACTICE_GRADERS: Dict[str, Any] = {}
+GRADERS_SECRET_FIELDS: Set[str] = {"expected", "stress_pattern", "solution", "rhyme_scheme", "target_index", "canonical_order"}
+
+for _m in (practice_history, practice_language_extra, practice_general, practice_philosophy,
+           practice_literature, practice_music, practice_art_history, practice_classics,
+           practice_rhetoric, practice_polity, practice_ee, practice_ai, practice_systems,
+           practice_stats, practice_bio):
     PRACTICE_NORMALIZERS.update(_m.NORMALIZERS)
+    if hasattr(_m, "GRADERS"):
+        PRACTICE_GRADERS.update(_m.GRADERS)
+    if hasattr(_m, "SECRET_FIELDS"):
+        GRADERS_SECRET_FIELDS.update(_m.SECRET_FIELDS)
+
 PRACTICE_TYPES = set(PRACTICE_NORMALIZERS)
 _np_odd_one_out = practice_general.NORMALIZERS["odd_one_out"]
 _np_sort_by = practice_general.NORMALIZERS["sort_by"]
@@ -4412,13 +4497,16 @@ class GraphBody(BaseModel):
     functions: List[str]
     params: Optional[Dict[str, float]] = None
 
-def _load_topic_or_404(topic_id: str) -> Dict[str, Any]:
-    require_topic_write(topic_id)
+def _load_topic_read_or_404(topic_id: str) -> Dict[str, Any]:
     path = topic_path(topic_id)
     topic = load_json_file(path, None) if path.exists() else None
     if not topic or not topic_visible(topic):
         raise HTTPException(status_code=404, detail="Topic not found")
     return topic
+
+def _load_topic_or_404(topic_id: str) -> Dict[str, Any]:
+    require_topic_write(topic_id)
+    return _load_topic_read_or_404(topic_id)
 
 @app.post("/api/topics/{topic_id}/simulation")
 def attach_simulation(topic_id: str, body: SpecBody):
@@ -4434,7 +4522,7 @@ def attach_simulation(topic_id: str, body: SpecBody):
 
 @app.get("/api/topics/{topic_id}/quiz")
 def get_topic_quiz(topic_id: str):
-    topic = _load_topic_or_404(topic_id)
+    topic = _load_topic_read_or_404(topic_id)
     return topic.get("quiz") or []
 
 @app.post("/api/topics/{topic_id}/quiz")
@@ -4456,8 +4544,9 @@ def add_quiz_questions(topic_id: str, body: ItemsBody):
 
 @app.get("/api/topics/{topic_id}/practice")
 def get_topic_practice(topic_id: str):
-    topic = _load_topic_or_404(topic_id)
-    return topic.get("practice") or []
+    topic = _load_topic_read_or_404(topic_id)
+    redacted = redact_for_client(topic)
+    return redacted.get("practice") or []
 
 @app.post("/api/topics/{topic_id}/practice")
 def add_practice_items(topic_id: str, body: ItemsBody):
@@ -4501,6 +4590,40 @@ def replace_practice_item(topic_id: str, item_id: str, body: Dict[str, Any]):
     save_topic(topic, auto_select=False)
     return {"before": before, "after": new[0]}
 
+class PracticeGradeBody(BaseModel):
+    topicId: str
+    itemId: str
+    submission: Any
+
+@app.post("/api/practice/grade")
+def grade_practice_item(body: PracticeGradeBody):
+    topic = _load_topic_read_or_404(body.topicId)
+    items = topic.get("practice") or []
+    target_item = None
+    for p in items:
+        if isinstance(p, dict) and str(p.get("id")) == body.itemId:
+            target_item = p
+            break
+    if not target_item:
+        raise HTTPException(status_code=404, detail="Practice item not found")
+    ptype = target_item.get("type")
+    grader = PRACTICE_GRADERS.get(ptype)
+    if not grader:
+        raise HTTPException(status_code=400, detail=f"No server grader registered for practice type '{ptype}'")
+    return grader(target_item, body.submission)
+
+class DecisionTreeStepBody(BaseModel):
+    spec: Dict[str, Any]
+    history: Optional[List[Dict[str, Any]]] = None
+    choice: str
+
+@app.post("/api/decision-tree/step")
+def decision_tree_step_endpoint(body: DecisionTreeStepBody):
+    res = decision_tree_engine.step_decision_tree(body.spec, body.history, body.choice)
+    if not res.get("ok", True):
+        raise HTTPException(status_code=400, detail=res.get("error", "Decision tree step failed"))
+    return res
+
 @app.delete("/api/topics/{topic_id}/flashcards/{index}")
 def remove_flashcard(topic_id: str, index: int):
     topic = _load_topic_or_404(topic_id)
@@ -4516,6 +4639,22 @@ def remove_flashcard(topic_id: str, index: int):
 def practice_guide():
     """Every practice type with its fields and drop rules, from the normalizers' docstrings."""
     return {t: inspect.getdoc(fn) or "" for t, fn in sorted(PRACTICE_NORMALIZERS.items())}
+
+@app.get("/api/logic/guide")
+def logic_guide():
+    """Operation guide and docstrings for deterministic logic engine operations and philosophy practice types."""
+    return {
+        "guide": logic_engine.GUIDE,
+        "ops": {op: inspect.getdoc(fn) or "" for op, fn in sorted(logic_engine.OPS.items())},
+        "practice": {t: inspect.getdoc(fn) or "" for t, fn in sorted(practice_philosophy.NORMALIZERS.items())},
+    }
+
+@app.post("/api/logic/grade")
+async def logic_grade(body: Dict[str, Any]):
+    """Grades logic problems deterministically using logic_engine with zero model calls."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="The body must be an object with an op.")
+    return logic_engine.check(body)
 
 DIAGRAMS_DIR = Path(__file__).parent / "public" / "diagrams"
 DIAGRAM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.svg$")
@@ -4563,7 +4702,7 @@ def preview_geometry_sim(body: SpecBody):
 
 @app.get("/api/topics/{topic_id}/flashcards")
 def get_topic_flashcards(topic_id: str):
-    topic = _load_topic_or_404(topic_id)
+    topic = _load_topic_read_or_404(topic_id)
     return topic.get("flashcards") or []
 
 @app.post("/api/topics/{topic_id}/flashcards")
@@ -4577,7 +4716,7 @@ def add_flashcards(topic_id: str, body: ItemsBody):
 
 @app.get("/api/topics/{topic_id}/timeline")
 def get_topic_timeline(topic_id: str):
-    topic = _load_topic_or_404(topic_id)
+    topic = _load_topic_read_or_404(topic_id)
     return topic.get("timeline") or []
 
 @app.post("/api/topics/{topic_id}/timeline")
@@ -4591,7 +4730,7 @@ def add_timeline_events(topic_id: str, body: ItemsBody):
 
 @app.get("/api/topics/{topic_id}/crisis")
 def get_topic_crisis(topic_id: str):
-    topic = _load_topic_or_404(topic_id)
+    topic = _load_topic_read_or_404(topic_id)
     return topic.get("crisis") or []
 
 @app.post("/api/topics/{topic_id}/crisis")
@@ -4608,7 +4747,7 @@ def attach_crisis(topic_id: str, body: Dict[str, Any]):
 @app.get("/api/topics/{topic_id}/primary-source")
 @app.get("/api/topics/{topic_id}/primary-sources")
 def get_topic_primary_source(topic_id: str):
-    topic = _load_topic_or_404(topic_id)
+    topic = _load_topic_read_or_404(topic_id)
     return topic.get("primarySources") or ([topic["primary_source"]] if topic.get("primary_source") else [])
 
 @app.post("/api/topics/{topic_id}/primary-source")
@@ -4942,6 +5081,8 @@ class DrawingCheck(BaseModel):
     criteria: List[str]
     reference: Optional[str] = ""  # what a correct drawing contains (never shown to the student)
     topicId: Optional[str] = ""
+    shapes: Optional[List[Dict[str, Any]]] = None
+    fbd_spec: Optional[Dict[str, Any]] = None
 
 DRAW_CHECK_PROMPT = """
 You are grading a student's hand-made drawing for this assignment:
@@ -4960,8 +5101,15 @@ If the drawing is empty or unrelated, every criterion is false and say so kindly
 
 @app.post("/api/draw/check")
 async def check_drawing(body: DrawingCheck):
-    """A drawing assignment, checked by the vision model criterion by criterion."""
+    """A drawing assignment, checked deterministically by fbd_grader when vector shapes & spec exist,
+    or by the Gemini Vision model criterion by criterion."""
     rate_limit("class")
+    # Deterministic FBD grading path: if an FBD physical specification is present
+    if body.fbd_spec and isinstance(body.fbd_spec, dict):
+        import fbd_grader
+        shapes = (body.shapes or [])[:200]
+        return fbd_grader.grade_fbd(shapes, body.fbd_spec)
+
     m = re.match(r"^data:image/(png|jpeg|webp);base64,(.+)$", body.image or "", re.S)
     if not m:
         raise HTTPException(status_code=422, detail="Send the drawing as a PNG data URL.")
@@ -4979,7 +5127,7 @@ async def check_drawing(body: DrawingCheck):
         reference=f"Reference (what a correct drawing contains; do not quote it): {body.reference[:1500]}\n" if body.reference else "")
     part = types.Part.from_bytes(data=raw, mime_type=f"image/{m.group(1)}")
     # Not gated by upload consent: a drawing made in the app isn't an uploaded file; the privacy notice discloses it.
-    response = await acall_gemini(contents=[part, prompt], role="lesson",
+    response = await acall_gemini(contents=[part, prompt], role="vision",
                                   config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2))
     try:
         data = _parse_json_reply(response.text)
@@ -5733,6 +5881,7 @@ def delete_user_everything(user_id: str) -> Dict[str, int]:
     removed_files += sum(_unlink_topic(None, tid) for tid in topic_ids - set(files.values()))
     counts = db.delete_user(user_id)
     removed_files += sum(purge_course_artifacts(cid) for cid in course_ids)  # a class finishing mid-delete
+    removed_files += philin.drop_user_cache(user_id)
     _, counts["quizLogLines"] = _user_quiz_log(user_id, drop=True)
     counts["files"] = removed_files
     gone_jobs = {jid for jid, job in list(JOBS.items()) if job.get("owner") == user_id}
@@ -6019,8 +6168,16 @@ def effective_mastery(course: Dict[str, Any], classes: List[Dict[str, Any]]) -> 
                 scores[cid] = k["score"]
     return scores
 
-WORKSPACES = ("math", "code", "lab", "history", "language")
+WORKSPACES = ("math", "code", "lab", "history", "language", "philosophy",
+              "literature", "music", "art_history", "classics", "rhetoric", "polity")
 _CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure|javascript|typescript|\bjava\b|c\+\+|\brust\b|software|computer science|sql\b", re.I)
+_PHIL_RE = re.compile(r"philosoph|epistemolog|ethics|ethical|moral|metaphysic|existential|utilitarian|\bstoic(?:ism|s)?\b|syllogism|fallac|argumentation|plato\b|aristotle|socrates|kant\b|nietzsche|descartes|hume\b|wittgenstein", re.I)
+_LIT_RE = re.compile(r"literat|poet|poem|sonnet|scansion|meter|rhyme|stanza|novel|fiction|drama|shakespeare|narrative|prose", re.I)
+_MUSIC_RE = re.compile(r"music|chord|satb|harmony|voice leading|cadence|tempo|melody|rhythm|scale|interval|figured bass|symphon|sonata|bach|beethoven|mozart", re.I)
+_ART_RE = re.compile(r"art history|painting|sculpture|baroque|renaissance|architect|doric|ionic|corinthian|iconograph|visual arts|fresco|impressionis", re.I)
+_CLASSICS_RE = re.compile(r"classic|epigraph|inscription|archaeolog|harris matrix|cursus honorum|sortition|athenian|sparta|rome\b|roman|greek|latin antiquity|cicero|caesar", re.I)
+_RHET_RE = re.compile(r"rhetoric|oratory|persuasion|speech|stasis|trope|chiasmus|enthymeme|dispositio|ethos|pathos|logos|quintilian", re.I)
+_POLITY_RE = re.compile(r"polity|political science|election|voting|proportional representation|d'hondt|dhondt|coalition|legislat|parliament|veto|veto player|congress|gerrymander|ballot|instant runoff|ranked choice", re.I)
 _MATH_RE = re.compile(r"math|calculus|algebra|geometry|trigonometr|statistic|probabilit|\blimits?\b|epsilon|delta|derivative|integra|proof|number theory|"
                       r"differential equation|real analysis|topology|combinatoric|precalc|matri|vector space|sequence|series", re.I)
 
@@ -6030,9 +6187,13 @@ _HIST_RE = re.compile(r"histor|civilization|\bwar\b|revolution|ancient|medieval|
 
 def guess_workspace(*texts: str) -> str:
     """Fallback when the planner gave none: code beats math (a 'Python for statistics' course is code),
-    then math, languages, history; everything else (physics, chemistry, biology...) is Lab."""
+    then philosophy, literature, music, art history, classics, rhetoric, polity, math, languages, history;
+    everything else (physics, chemistry, biology...) is Lab."""
     blob = " ".join(t or "" for t in texts)
-    for ws, rx in (("code", _CODE_RE), ("math", _MATH_RE), ("language", _LANG_RE), ("history", _HIST_RE)):
+    for ws, rx in (("code", _CODE_RE), ("philosophy", _PHIL_RE), ("literature", _LIT_RE),
+                   ("music", _MUSIC_RE), ("art_history", _ART_RE), ("classics", _CLASSICS_RE),
+                   ("rhetoric", _RHET_RE), ("polity", _POLITY_RE), ("math", _MATH_RE),
+                   ("language", _LANG_RE), ("history", _HIST_RE)):
         if rx.search(blob):
             return ws
     return "lab"
@@ -6270,19 +6431,39 @@ GROUNDED_CHECKS = os.environ.get("SCIEDU_GROUNDED_CHECKS", "1") != "0"
 GROUNDING_NOTE = ("\nUse Google Search to confirm facts, constants and standard results, preferring university and "
                   "textbook sources. Return ONLY the JSON object, no prose around it.")
 
-async def grounded_json(prompt: str) -> Tuple[Any, List[Dict[str, str]]]:
+class GroundingPaused(RuntimeError):
+    """Search grounding is paused for this key after a quota or tool error."""
+
+
+def _grounding_quota_error(e: Exception) -> bool:
+    """A quota or search-tool error: worth pausing grounding for. A timeout, a 5xx, the daily budget or a rejected key
+    is not (pausing on those turned off answer-check grounding for an hour after any hiccup)."""
+    if isinstance(e, (BudgetExhausted, KeyRejected, *userkeys.KEY_ERRORS)):
+        return False
+    text = str(e).lower()
+    return getattr(e, "code", None) == 429 or any(w in text for w in ("429", "resource_exhausted", "quota", "search", "tool", "grounding"))
+
+
+def grounding_paused() -> bool:
+    """Whether search grounding is paused for the key this request spends (may raise the key errors)."""
+    return time.time() < _key_handle()[1]["grounding_paused_until"]
+
+
+async def grounded_json(prompt: str, role: str = "planner") -> Tuple[Any, List[Dict[str, str]]]:
     """Gemini with Google Search grounding. JSON mode can't be combined with search, so the JSON is cut
-    out of the text reply; the pages the model actually used come from grounding metadata, never from its text."""
+    out of the text reply; the pages the model actually used come from grounding metadata, never from its text.
+    A quota or tool error pauses grounding for this key for an hour; other errors pass through without a pause."""
     state = _key_handle()[1]  # the pause belongs to the key in use
     if time.time() < state["grounding_paused_until"]:
-        raise RuntimeError("search grounding paused after a quota error")
+        raise GroundingPaused("search grounding paused after a quota error")
     try:
         response = await acall_gemini(
-            contents=prompt, role="planner", track_cooldown=False,
+            contents=prompt, role=role, track_cooldown=False,
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())], temperature=0.1),
         )
-    except Exception:
-        state["grounding_paused_until"] = time.time() + 3600
+    except Exception as e:
+        if _grounding_quota_error(e):
+            state["grounding_paused_until"] = time.time() + 3600
         raise
     text = response.text or ""
     start, end = text.find("{"), text.rfind("}")
@@ -7447,13 +7628,13 @@ agy_adjust_class_tool = types.FunctionDeclaration(
 
 agy_switch_page_tool = types.FunctionDeclaration(
     name="switch_page",
-    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math).",
+    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math, History, Languages, Philosophy, Advisor).",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "topic_id": types.Schema(type="STRING", description="Target topic ID to navigate to, e.g. 'billiard-ball-collisions'"),
             "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', 'practice' or 'agent'"),
-            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), or 'math' (Math)")
+            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), 'math' (Math), 'history' (History), 'language' (Languages), 'philosophy' (Philosophy), or 'advisor' (Advisor)")
         }
     )
 )
@@ -7951,6 +8132,13 @@ app.include_router(explain.build_router(rate_limit=rate_limit, current_user=CURR
                                         gemini_json=lambda *a, **k: gemini_json(*a, **k),  # looked up per call (tests stub it)
                                         load_topic=lambda tid: load_json_file(topic_path(tid), None),
                                         topic_visible=lambda t: topic_visible(t), require_topic_write=lambda tid: require_topic_write(tid)))
+import philin  # noqa: E402  (PHILIN: arguments into blocks, Python logic checks, grounded fact-checks, ranking)
+app.include_router(philin.build_router(rate_limit=rate_limit, current_user=CURRENT_USER.get, auth_required=scoped,
+                                       gemini_json=lambda *a, **k: gemini_json(*a, **k),  # looked up per call (tests stub them)
+                                       grounded_json=lambda *a, **k: grounded_json(*a, **k),
+                                       grounding_paused=lambda: grounding_paused(),
+                                       is_fatal=lambda e: isinstance(e, (BudgetExhausted, KeyRejected)),
+                                       friendly_error=lambda e: friendly_ai_error(e)))
 # problem sprints: step reveal, server-graded answers, keep / restore (sprint.py)
 app.include_router(sprint.build_router(rate_limit=rate_limit, require_course=lambda cid: require_course(cid),
                                        public_course=lambda c: public_course(c), course_event=lambda cid: course_event(cid),

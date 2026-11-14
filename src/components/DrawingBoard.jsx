@@ -63,6 +63,7 @@ const DrawingBoard = forwardRef(function DrawingBoard({ background = 'grid', onC
 
   useImperativeHandle(ref, () => ({
     isEmpty: () => shapes.length === 0,
+    getShapes: () => shapes,
     toPNG: () => new Promise((resolve, reject) => {
       const svg = svgRef.current.cloneNode(true);
       svg.querySelectorAll('[data-ui]').forEach((n) => n.remove());

@@ -21,6 +21,7 @@ const EduStudioIDE = lazy(() => import('./components/EduStudioIDE'));
 const MathLab = lazy(() => import('./components/MathLab'));
 const SubjectWorkspace = lazy(() => import('./components/SubjectWorkspace'));
 const AdvisorPage = lazy(() => import('./components/AdvisorPage'));
+const PhilosophyLab = lazy(() => import('./components/PhilosophyLab'));
 
 // Its own boundary at every use site, so a first chunk load never suspends (and unmounts) MathLab or a workspace
 const QUOTES_ON = { quotes: true };
@@ -545,6 +546,11 @@ export default function App() {
           {mode === 'advisor' && (
             <Suspense fallback={<LoadingPanel page />}>
               <AdvisorPage user={user} onOpenCourse={openCourse} />
+            </Suspense>
+          )}
+          {mode === 'philosophy' && (
+            <Suspense fallback={<LoadingPanel page />}>
+              <PhilosophyLab requestedTab={workspaceTab} />
             </Suspense>
           )}
           {mode === 'review' && <ReviewSession userId={user.id} onDone={() => switchMode('home')} />}

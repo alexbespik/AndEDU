@@ -1084,6 +1084,13 @@ def degree_audit(user_id: str, school: str = "wm") -> Dict[str, Any]:
     all_coll_met = all(req["met"] for req in coll.values())
     all_prof_met = all(p["met"] for p in prof.values())
 
+    columbia_audit = None
+    try:
+        from advisor_rules import audit_columbia_3_2
+        columbia_audit = audit_columbia_3_2(passed)
+    except Exception:
+        pass
+
     return {
         "user_id": user_id,
         "total_credits": round(total_credits, 1),
@@ -1092,6 +1099,7 @@ def degree_audit(user_id: str, school: str = "wm") -> Dict[str, Any]:
         "completed_count": len(done_records),
         "all_coll_met": all_coll_met,
         "overall_met": all_coll_met and all_prof_met,
+        "columbia_3_2": columbia_audit,
     }
 
 

@@ -240,8 +240,9 @@ import mcp_tools_language  # noqa: E402
 import mcp_tools_language_extra  # noqa: E402
 import mcp_tools_general  # noqa: E402
 import mcp_tools_studio  # noqa: E402
+import mcp_tools_philosophy  # noqa: E402
 
-for _mod in (mcp_tools_language, mcp_tools_history, mcp_tools_language_extra, mcp_tools_general, mcp_tools_studio):
+for _mod in (mcp_tools_language, mcp_tools_history, mcp_tools_language_extra, mcp_tools_general, mcp_tools_studio, mcp_tools_philosophy):
     TOOLS += _mod.tools(call, q, S, STR, OBJ, ARR)
 BY_NAME = {name: (desc, schema, fn) for name, desc, schema, fn in TOOLS}
 

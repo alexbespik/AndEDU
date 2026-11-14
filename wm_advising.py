@@ -470,7 +470,7 @@ def term_context(today: Optional[date] = None, code: str = "") -> str:
 
 PROGRAM_TRIGGERS = re.compile(
     r"\b(cs|csci|computer|computing|programming|data|tracks?|concentrations?|"
-    r"cyber\w*|ai|ml|machine learning|algorithms?|spatial|gis)\b", re.I)
+    r"cyber\w*|ai|ml|machine learning|algorithms?|spatial|gis|engineer\w*|columbia|3\+2|combined plan)\b", re.I)
 PROGRAMS_MAX = 12000
 
 

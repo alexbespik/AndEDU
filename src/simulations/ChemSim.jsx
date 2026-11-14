@@ -14,12 +14,38 @@ function solvePh(pKa, Va, Ca, Cb, Vb, isStrong = false) {
   if (Vtot <= 0) return 7.0;
   const cNa = (Cb * Vb) / Vtot;
   const cATot = (Ca * Va) / Vtot;
-  const Ka = isStrong ? 1e9 : Math.pow(10, -pKa);
+
+  let pkas = [];
+  if (Array.isArray(pKa)) {
+    pkas = pKa.map(Number);
+  } else if (typeof pKa === 'number') {
+    pkas = [pKa];
+  } else {
+    pkas = [Number(pKa) || 4.75];
+  }
 
   const f = (logH) => {
     const h = Math.pow(10, logH);
-    const aMinus = isStrong ? cATot : (cATot * Ka) / (h + Ka);
-    return h - (Kw / h) + cNa - aMinus;
+    const oh = Kw / h;
+    if (isStrong) {
+      return h - oh + cNa - cATot * pkas.length;
+    }
+    const n = pkas.length;
+    const Kas = pkas.map((pk) => Math.pow(10, -pk));
+    const terms = new Array(n + 1).fill(1.0);
+    let prodKa = 1.0;
+    for (let k = 1; k <= n; k++) {
+      prodKa *= Kas[k - 1];
+      terms[k] = Math.pow(h, n - k) * prodKa;
+    }
+    terms[0] = Math.pow(h, n);
+    const d = terms.reduce((acc, v) => acc + v, 0);
+    let sumCharge = 0;
+    for (let k = 1; k <= n; k++) {
+      sumCharge += k * terms[k];
+    }
+    const aCharge = d > 0 ? (cATot * sumCharge) / d : 0;
+    return h - oh + cNa - aCharge;
   };
 
   let lo = -14.0, hi = 1.0;

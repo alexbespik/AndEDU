@@ -248,7 +248,18 @@ function DrawExercise({ item }) {
     setBusy(true); setError(null);
     try {
       const image = await board.current.toPNG();
-      setResult(await api('/api/draw/check', { method: 'POST', body: { image, prompt: item.prompt, criteria: item.criteria, reference: item.reference || '' } }));
+      const shapes = board.current?.getShapes ? board.current.getShapes() : [];
+      setResult(await api('/api/draw/check', {
+        method: 'POST',
+        body: {
+          image,
+          prompt: item.prompt,
+          criteria: item.criteria,
+          reference: item.reference || '',
+          shapes,
+          fbd_spec: item.fbd_spec || null,
+        }
+      }));
       setDirty(false);
     } catch (e) { setError(e.message); }
     setBusy(false);

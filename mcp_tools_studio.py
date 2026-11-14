@@ -6,7 +6,7 @@ import random
 import re
 
 KINDS = ("practice", "flashcards", "timeline")
-WORKSPACES = ("home", "physics", "lab", "class", "code", "math", "history", "language", "advisor", "review")
+WORKSPACES = ("home", "physics", "lab", "class", "code", "math", "history", "language", "philosophy", "advisor", "review")
 _SEP = re.compile(r"\s+[-–—]\s+|\s*:\s+")
 _YEAR = re.compile(r"(?<![\d.])(\d{1,4})(?:\s*(BCE|BC|CE|AD|B\.C\.E?\.?|A\.D\.))?(?![\d])", re.I)
 
@@ -341,10 +341,10 @@ def tools(call, q, S, STR, OBJ, ARR):
          S(user_id=STR("profile id")), dashboard),
         ("review_queue", "Missed quiz questions due for spaced review today (up to 10).",
          S(user_id=STR("profile id")), lambda a: call("GET", f"/api/review/{q(a['user_id'])}/session")),
-        ("open_workspace", "Show a workspace on the student's screen, optionally one of its sub-tabs (e.g. history > timeline, language > words).",
+        ("open_workspace", "Show a workspace on the student's screen, optionally one of its sub-tabs (e.g. history > timeline, language > words, philosophy > sides).",
          S(mode=STR("workspace", enum=list(WORKSPACES)), tab=STR("sub-tab id", optional=True)),
-         lambda a: {"status": "opened", "mode": a["mode"], "tab": a.get("tab"),
-                    "event": event("SWITCH_STUDIO_MODE", {"mode": a["mode"], **({"tab": a["tab"]} if a.get("tab") else {})})}),
+         lambda a: (lambda m: {"status": "opened", "mode": m, "tab": a.get("tab"),
+                    "event": event("SWITCH_STUDIO_MODE", {"mode": m, **({"tab": a["tab"]} if a.get("tab") else {})})})(a.get("mode") or a.get("workspace") or "home")),
         ("daily_challenge", "Build a 10-item mix from a student's due review questions and weakest classes, and open the best place to start it.",
          S(user_id=STR("profile id")), challenge),
         ("remove_practice_item", "Delete one practice item from a lesson; returns the removed item.",

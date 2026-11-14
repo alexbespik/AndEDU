@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown } from 'lucide-react';
+import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale } from 'lucide-react';
 import AccountMenu from './AccountMenu';
 
 // Workspaces by mode id (ids and course.workspace values never change; only the navigation groups them)
@@ -9,6 +9,7 @@ const SUBJECTS = {
   math: { label: 'Math', icon: Sigma, title: 'Graphing, LaTeX notes and practice' },
   history: { label: 'History', icon: Landmark, title: 'Timelines, flashcards and history classes' },
   language: { label: 'Languages', icon: Languages, title: 'Languages and linguistics: flashcards read aloud, pronunciation, IPA' },
+  philosophy: { label: 'Philosophy', icon: Scale, title: 'PHILIN: test an argument\'s logic and check its facts' },
 };
 
 // Similar disciplines share one tab. A group with one subject is a plain tab; with more, it opens a menu.
@@ -18,7 +19,7 @@ const NAV = [
   { group: 'math', label: 'Math', icon: Sigma, members: ['math'] },
   { group: 'it', label: 'IT', icon: Code2, members: ['code'] },
   { group: 'lab', label: 'Lab', icon: FlaskConical, members: ['physics'] },
-  { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language'] },
+  { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language', 'philosophy'] },
   { mode: 'advisor', label: 'Advisor', icon: Compass, title: 'Course advisor: your record, the catalog, readiness checks' },
 ];
 
