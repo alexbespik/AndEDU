@@ -25,6 +25,9 @@ export default function HistoryLab({ classTopic, topics = [], onOpenTopic, rende
   }, [requestedTab?.at]); // eslint-disable-line react-hooks/exhaustive-deps
   const cards = useMemo(() => topics.flatMap((t) => (t.flashcards || []).map((c) => ({ ...c, _t: t.id }))), [topics]);
   const events = useMemo(() => topics.flatMap((t) => t.timeline || []).sort((a, b) => a.year - b.year), [topics]);
+  const courseId = classTopic?.source?.courseId;
+  const courseEvents = useMemo(() => (courseId == null ? null
+    : topics.filter((t) => t.source?.courseId === courseId).flatMap((t) => t.timeline || []).sort((a, b) => a.year - b.year)), [topics, courseId]);
   const tabs = [
     ...(classTopic ? [{ id: 'class', label: `Class ${classTopic.source?.classSeq ?? ''}`.trim(), icon: BookOpen }] : []),
     { id: 'courses', label: 'Courses', icon: GraduationCap },
@@ -62,7 +65,7 @@ export default function HistoryLab({ classTopic, topics = [], onOpenTopic, rende
       {current === 'cards' && <div style={{ marginTop: 'var(--space-4)' }}><FlashcardDeck key={cards.length} cards={cards} topicId="history-all" /></div>}
       {current === 'timeline' && (
         <div style={{ marginTop: 'var(--space-4)' }}>
-          <HistoryTimeline events={events} topicId="history-all" initialMode={requestedTab?.challenge ? 'challenge' : 'view'} />
+          <HistoryTimeline events={events} courseEvents={courseEvents} topicId="history-all" initialMode={requestedTab?.challenge ? 'challenge' : 'view'} />
         </div>
       )}
     </WorkspaceShell>

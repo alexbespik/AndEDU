@@ -1,12 +1,19 @@
 """
 Literature practice types: scansion, volta_spot, rhyme_scheme_audit, chronology_unravel.
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type).
 Standard library only.
 """
 import re
 from typing import Any, Dict, List, Optional, Set
 
-SECRET_FIELDS: Set[str] = {"stress_pattern", "target_index", "target_line", "rhyme_scheme", "canonical_order"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "scansion": {"stress_pattern", "pattern"},
+    "volta_spot": {"target_index", "target_line"},
+    "rhyme_scheme_audit": {"rhyme_scheme", "expected"},
+    "chronology_unravel": {"canonical_order", "solution"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {"scansion": set(), "volta_spot": {"lines"}, "rhyme_scheme_audit": set(),
+                                      "chronology_unravel": set()}
 
 
 def _s(v: Any, limit: int = 1000) -> str:
@@ -15,6 +22,9 @@ def _s(v: Any, limit: int = 1000) -> str:
 
 # ---- 1. scansion ----
 def _np_scansion(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """scansion: mark the stressed and unstressed syllables of one line.
+    Fields: line (text), meter (text, default "iambic pentameter"). Secret: stress_pattern, one 0/1 per syllable
+    (author may write u / or 0 1). Submit a string or list of 0/1 (or u and /) tokens, one per syllable."""
     line = _s(p.get("line") or p.get("text"), 500)
     if not line:
         return None
@@ -56,8 +66,8 @@ def _grade_scansion(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
         return {
             "ok": False,
             "score": 0.0,
-            "feedback": f"Expected {len(exp_tokens)} syllables but got {len(sub_tokens)}.",
-            "details": {"expected_length": len(exp_tokens), "submitted_length": len(sub_tokens)},
+            "feedback": "Not yet: give one stress mark for every syllable of the line, no more and no fewer.",
+            "details": {"submitted_length": len(sub_tokens)},
         }
 
     correct_count = sum(1 for e, s in zip(exp_tokens, sub_tokens) if e == s)
@@ -66,13 +76,16 @@ def _grade_scansion(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Correct metrical scansion!" if ok else f"Scansion matched {correct_count}/{len(exp_tokens)} syllables.",
+        "feedback": "Correct metrical scansion!" if ok else "Not yet: recheck the stresses on each syllable.",
         "details": {"submitted": " ".join(sub_tokens), "accuracy": score},
     }
 
 
 # ---- 2. volta_spot ----
 def _np_volta_spot(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """volta_spot: pick the line where the poem turns.
+    Fields: lines (2+ strings). Secret: target_index (0-based; the author may give target_line, 1-based).
+    Submit the 0-based index of the line (the first line is 0); only that index counts."""
     lines = [_s(x, 300) for x in p.get("lines", []) if _s(x, 300)]
     if len(lines) < 2:
         return None
@@ -105,8 +118,7 @@ def _grade_volta_spot(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
     except (ValueError, TypeError):
         return {"ok": False, "score": 0.0, "feedback": "Please submit a valid line number or index", "details": {}}
 
-    # Accept either 0-based or 1-based index
-    if sub == expected or sub == expected + 1:
+    if sub == expected:  # 0-based only: accepting two numbers would make two different lines count as right
         return {
             "ok": True,
             "score": 1.0,
@@ -123,6 +135,9 @@ def _grade_volta_spot(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
 
 # ---- 3. rhyme_scheme_audit ----
 def _np_rhyme_scheme_audit(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """rhyme_scheme_audit: label the end rhymes of a stanza.
+    Fields: lines (2+ strings). Secret: rhyme_scheme (letters per line, e.g. "ABAB"; alias expected).
+    Submit a string of letters or a list of letters, one per line."""
     lines = [_s(x, 300) for x in p.get("lines", []) if _s(x, 300)]
     if len(lines) < 2:
         return None
@@ -158,6 +173,9 @@ def _grade_rhyme_scheme_audit(item: Dict[str, Any], submission: Any) -> Dict[str
 
 # ---- 4. chronology_unravel ----
 def _np_chronology_unravel(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """chronology_unravel: put the events of a narrative in the order they happened (fabula).
+    Fields: events (2+ items [{id, text}] or plain strings, shown in telling order; the browser may shuffle).
+    Secret: canonical_order (event ids in story order; alias solution). Submit the list of event ids in order."""
     raw_events = p.get("events")
     if not isinstance(raw_events, list) or len(raw_events) < 2:
         return None
@@ -202,7 +220,7 @@ def _grade_chronology_unravel(item: Dict[str, Any], submission: Any) -> Dict[str
     return {
         "ok": False,
         "score": score,
-        "feedback": f"Partially correct: {matches}/{len(expected)} events in their proper chronological sequence.",
+        "feedback": "Not yet: recheck which event leads to which in the story's chronology.",
         "details": {"submitted": sub, "accuracy": score},
     }
 

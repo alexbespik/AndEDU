@@ -1,0 +1,72 @@
+/* Liberal-arts kit bodies (src/practice/liberal_arts.jsx). Only tokens from lab.css, so every theme works. */
+
+.kit-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.kit-verdict { font-weight: 700; margin-bottom: 4px; }
+.kit-sub { color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+.kit-mono { font-family: var(--font-mono); }
+.kit-grow { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.kit-lab { display: flex; flex-direction: column; gap: var(--space-1); font-weight: 600; font-size: 0.9rem; color: var(--ink); min-width: 0; }
+.kit-mini { width: 6.5rem; min-width: 0; }
+.kit-wide { width: min(16rem, 55%); min-width: 0; }
+.kit-n { min-width: 2ch; text-align: right; color: var(--muted); font: 600 0.85rem/1 var(--font-mono); }
+
+.kit-line { font-size: 1.15rem; line-height: 1.5; padding: var(--space-3) var(--space-4); border-left: 3px solid var(--gold-rule); background: var(--gold-tint); color: var(--ink); }
+.kit-quote { margin: 0; padding: var(--space-3) var(--space-4); border-left: 3px solid var(--rule-strong); background: var(--sunk); color: var(--ink); }
+.kit-inscription { margin: 0; padding: var(--space-3) var(--space-4); background: var(--code-bg); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  font: 1.05rem/1.6 var(--font-mono); letter-spacing: 0.05em; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.kit-syl { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--surface); }
+.kit-syl p { margin: 0; }
+.kit-bullets { margin: 0; padding-left: 1.2rem; }
+
+.kit-slots { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.kit-slot { width: 40px; height: 44px; font: 700 1.1rem/1 var(--font-mono); border: 1px solid var(--rule-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--muted); cursor: pointer; }
+.kit-slot[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.kit-slot:focus-visible, .kit-linebtn:focus-visible, .kit-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.kit-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.kit-rowline { display: flex; align-items: center; gap: var(--space-3); padding: 2px 0; }
+.kit-linebtn { display: flex; gap: var(--space-3); width: 100%; padding: 6px var(--space-3); text-align: left; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; }
+.kit-linebtn:hover { border-color: var(--rule-strong); background: var(--sunk); }
+.kit-linebtn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); }
+
+.kit-order { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.kit-order-row { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-3); border: 1px solid var(--rule);
+  border-radius: var(--radius-sm); background: var(--surface); }
+.kit-order-text { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+
+.kit-builder { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+.kit-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.kit-tag { display: inline-flex; align-items: center; gap: var(--space-2); padding: 3px 8px; font-size: 0.85rem; border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm); background: var(--accent-tint); color: var(--ink); }
+.kit-tag-plain { background: var(--sunk); }
+.kit-x { display: inline-flex; padding: 2px; border: 0; background: transparent; color: var(--ink-soft); cursor: pointer; border-radius: var(--radius-sm); }
+.kit-x:hover { background: var(--bad-tint); color: var(--bad-ink); }
+
+.kit-table { border-collapse: collapse; width: 100%; max-width: 560px; font-size: 0.92rem; color: var(--ink); }
+.kit-table th, .kit-table td { padding: 5px var(--space-3); border-bottom: 1px solid var(--rule); text-align: left; }
+.kit-table thead th { color: var(--muted); font-weight: 600; font-size: 0.8rem; }
+.kit-table td { font-family: var(--font-mono); }
+
+.kit-plate { position: relative; width: 100%; max-width: 560px; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }
+.kit-plate img { display: block; width: 100%; height: auto; user-select: none; }
+.kit-pick { cursor: crosshair; touch-action: manipulation; }
+.kit-blank { aspect-ratio: 4 / 3; background:
+  linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 10% 10%, linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 10% 10%, var(--sunk); }
+.kit-marker { position: absolute; width: 22px; height: 22px; transform: translate(-50%, -50%); border-radius: 50%;
+  border: 3px solid var(--accent); background: var(--accent-tint); box-shadow: 0 0 0 2px var(--surface); pointer-events: none; }
+
+.kit-tribe { border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); margin: 0; min-width: 0; }
+.kit-tribe legend { font-weight: 600; padding: 0 var(--space-2); color: var(--ink); }
+.kit-checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.kit-check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; color: var(--ink); }
+.kit-check input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+.kit-ballots { border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); background: var(--surface); max-width: 560px; }
+.kit-ballots summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.kit-ballots ul { max-height: 220px; overflow: auto; margin-top: var(--space-2); }
+.kit-tally { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); max-width: 560px; }
+.kit-tallyname { width: 7rem; flex: none; font-weight: 600; overflow-wrap: anywhere; }
+.kit-bar { flex: 1 1 0; height: 12px; background: var(--sunk); border-radius: var(--radius-sm); overflow: hidden; }
+.kit-bar span { display: block; height: 100%; background: var(--accent); }

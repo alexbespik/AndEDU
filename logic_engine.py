@@ -3,7 +3,7 @@ The deterministic logic engine for Philosophy: one JSON entry point over logic_f
 logic_syllogism, logic_proof and logic_argmap. No model, no network: the same request always gets the same answer.
 
 check(request) -> {"ok": true, "result": {...}} or {"ok": false, "error": {"code", "message", "pos"?}}; it never
-raises on bad input. Used by scripts/logic_check.py; the practice types and MCP tools come later.
+raises on bad input. Used by scripts/logic_check.py; PHILIN, the practice types and the MCP tools use it too.
 """
 from typing import Any, Callable, Dict
 

@@ -19,12 +19,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY server.py db.py simspec.py chemspec.py engage.py advisor.py advisor_chat.py advisor_cart.py advisor_risk.py advisor_classifier.py advisor_rules.py campus_events.py campus_events_import.py explain.py sprint.py userkeys.py philin.py logic_formula.py logic_forms.py logic_argmap.py logic_proof.py logic_syllogism.py logic_ast.py logic_engine.py decision_tree_engine.py wm_advising.py language_de.py language_tts.py practice_general.py practice_history.py practice_language_extra.py practice_philosophy.py practice_literature.py practice_music.py practice_art_history.py practice_classics.py practice_rhetoric.py practice_polity.py practice_ee.py practice_ai.py practice_systems.py practice_stats.py practice_bio.py mcp_server.py mcp_tools_history.py mcp_tools_language.py mcp_tools_language_extra.py mcp_tools_general.py mcp_tools_studio.py mcp_tools_philosophy.py mcp_tools_campus.py fbd_grader.py sandbox_preamble.py ./
+COPY server.py db.py simspec.py chemspec.py engage.py advisor.py advisor_chat.py advisor_cart.py advisor_risk.py advisor_classifier.py advisor_rules.py campus_events.py campus_events_import.py explain.py sprint.py userkeys.py philin.py philosophy_dialogue.py logic_formula.py logic_forms.py logic_argmap.py logic_proof.py logic_syllogism.py logic_ast.py logic_engine.py decision_tree_engine.py wm_advising.py language_de.py language_tts.py practice_general.py practice_history.py practice_language_extra.py practice_philosophy.py practice_literature.py practice_music.py practice_art_history.py practice_classics.py practice_rhetoric.py practice_polity.py practice_ee.py practice_ai.py practice_systems.py practice_stats.py practice_bio.py mcp_server.py mcp_tools_history.py mcp_tools_language.py mcp_tools_language_extra.py mcp_tools_general.py mcp_tools_studio.py mcp_tools_philosophy.py mcp_tools_campus.py mcp_tools_kits.py fbd_grader.py sandbox_preamble.py ./
 COPY scripts ./scripts
 COPY content/topics ./seed/topics
+COPY content/quotes ./seed/quotes
 COPY --from=web /web/dist ./dist
 # first start on an empty volume: copy the starter lessons in
-RUN printf '#!/bin/sh\nmkdir -p /app/content/topics\n[ -n "$(ls -A /app/content/topics 2>/dev/null)" ] || cp /app/seed/topics/*.json /app/content/topics/\nexec python server.py\n' > /app/entrypoint.sh \
+RUN printf '#!/bin/sh\nmkdir -p /app/content/topics\n[ -n "$(ls -A /app/content/topics 2>/dev/null)" ] || cp /app/seed/topics/*.json /app/content/topics/\nmkdir -p /app/content/quotes && cp /app/seed/quotes/*.json /app/content/quotes/\nexec python server.py\n' > /app/entrypoint.sh \
  && chmod +x /app/entrypoint.sh \
  && useradd --create-home --uid 10001 lab && mkdir -p /app/content && chown -R lab /app/content
 USER lab

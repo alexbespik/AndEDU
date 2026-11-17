@@ -5,12 +5,18 @@ Probability & Mathematical Statistics practice types:
 - mle_parameter_derivation: Analytical Maximum Likelihood Estimator calculation from sample data
 - markov_steady_state: Discrete-time Markov chain stationary distribution vector
 
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS. Standard library only.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type). Standard library only.
 """
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"expected", "solution", "statistic_expected", "reject_null_expected", "posterior_expected", "mle_expected", "steady_state_expected"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "hypothesis_test_two_sample": {"statistic_expected", "reject_null_expected"},
+    "bayes_posterior_update": {"posterior_expected"},
+    "mle_parameter_derivation": {"mle_expected"},
+    "markov_steady_state": {"steady_state_expected"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {t: set() for t in SECRET_FIELDS}
 
 
 def _s(v: Any, limit: int = 500) -> str:
@@ -31,6 +37,11 @@ def _num(v: Any) -> Optional[float]:
 # 1. hypothesis_test_two_sample
 # ---------------------------------------------------------------------------
 def _np_hypothesis_test_two_sample(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """hypothesis_test_two_sample: two-sample z test of a difference of means (known spreads, two-sided).
+    Fields: mean1, std1, n1, mean2, std2, n2 (numbers, n above 1), alpha (default 0.05; critical z is 1.96 for 0.05,
+    2.576 for 0.01, otherwise 1.645). The item states the method in public fields test ("z") and critical_value.
+    Secret: statistic_expected (z = (m1-m2)/sqrt(s1^2/n1 + s2^2/n2)), reject_null_expected (|z| > critical value).
+    Submit {test_statistic: number, reject_null: bool} (tolerance 0.08 on z)."""
     m1 = _num(p.get("mean1"))
     s1 = _num(p.get("std1"))
     n1 = int(_num(p.get("n1")) or 0)
@@ -55,6 +66,8 @@ def _np_hypothesis_test_two_sample(p: Dict[str, Any], base: Dict[str, Any]) -> O
         "mean1": m1, "std1": s1, "n1": n1,
         "mean2": m2, "std2": s2, "n2": n2,
         "alpha": alpha,
+        "test": "z",
+        "critical_value": crit_z,
         "statistic_expected": round(z_stat, 4),
         "reject_null_expected": reject_null,
     }
@@ -69,7 +82,7 @@ def _grade_hypothesis_test_two_sample(item: Dict[str, Any], submission: Any) -> 
     sub_z = _num(submission.get("test_statistic"))
     sub_rej = bool(submission.get("reject_null"))
 
-    z_ok = sub_z is not None and abs(sub_z - exp_z) <= 0.08
+    z_ok = sub_z is not None and exp_z is not None and abs(sub_z - exp_z) <= 0.08
     rej_ok = (sub_rej == exp_rej)
 
     score = (0.5 if z_ok else 0.0) + (0.5 if rej_ok else 0.0)
@@ -77,8 +90,8 @@ def _grade_hypothesis_test_two_sample(item: Dict[str, Any], submission: Any) -> 
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Hypothesis test verified!" if ok else f"Discrepancy (stat_match={z_ok}, decision_match={rej_ok}).",
-        "details": {"expected_z": exp_z, "expected_reject": exp_rej},
+        "feedback": "Hypothesis test verified!" if ok else "Not yet: recheck the test statistic and the decision against the critical value.",
+        "details": {},
     }
 
 
@@ -86,6 +99,9 @@ def _grade_hypothesis_test_two_sample(item: Dict[str, Any], submission: Any) -> 
 # 2. bayes_posterior_update
 # ---------------------------------------------------------------------------
 def _np_bayes_posterior_update(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """bayes_posterior_update: update a prior with one piece of evidence.
+    Fields: prior P(H), sensitivity P(E|H) (alias p_e_given_h), false_positive_rate P(E|not H) (alias p_e_given_not_h),
+    all probabilities. Secret: posterior_expected. Submit {posterior: number} or the number (tolerance 0.02)."""
     prior = _num(p.get("prior"))  # P(H)
     sensitivity = _num(p.get("sensitivity") or p.get("p_e_given_h"))  # P(E|H)
     fpr = _num(p.get("false_positive_rate") or p.get("p_e_given_not_h"))  # P(E|~H)
@@ -118,12 +134,12 @@ def _grade_bayes_posterior_update(item: Dict[str, Any], submission: Any) -> Dict
 
     diff = abs(user_val - expected)
     ok = (diff <= 0.02)
-    score = 1.0 if ok else max(0.0, round(1.0 - (diff / 0.1), 2))
+    score = 1.0 if ok else 0.0
     return {
         "ok": ok,
         "score": score,
-        "feedback": f"Bayesian posterior {round(user_val, 4)} confirmed!" if ok else f"Posterior calculation error (expected ~{expected}).",
-        "details": {"submitted": user_val, "expected": expected},
+        "feedback": f"Bayesian posterior {round(user_val, 4)} confirmed!" if ok else "Posterior calculation error. Recheck the normalizing term.",
+        "details": {"submitted": user_val} if ok else {},
     }
 
 
@@ -131,6 +147,9 @@ def _grade_bayes_posterior_update(item: Dict[str, Any], submission: Any) -> Dict
 # 3. mle_parameter_derivation
 # ---------------------------------------------------------------------------
 def _np_mle_parameter_derivation(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """mle_parameter_derivation: find the maximum-likelihood estimate from a sample.
+    Fields: distribution ("exponential" gives rate 1/mean; "bernoulli", "poisson" and "normal_mean" give the sample
+    mean), samples (list of numbers). Secret: mle_expected. Submit {estimate: number} or the number (tolerance 0.03)."""
     dist = _s(p.get("distribution") or "exponential", 50).lower()
     samples = p.get("samples")
     if not isinstance(samples, list) or not samples:
@@ -167,12 +186,12 @@ def _grade_mle_parameter_derivation(item: Dict[str, Any], submission: Any) -> Di
 
     diff = abs(user_val - expected)
     ok = (diff <= 0.03)
-    score = 1.0 if ok else max(0.0, round(1.0 - (diff / 0.2), 2))
+    score = 1.0 if ok else 0.0
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Maximum likelihood estimate verified!" if ok else f"Mismatch in MLE estimate (expected ~{expected}).",
-        "details": {"submitted": user_val, "expected": expected},
+        "feedback": "Maximum likelihood estimate verified!" if ok else "Mismatch in MLE estimate.",
+        "details": {"submitted": user_val} if ok else {},
     }
 
 
@@ -180,6 +199,9 @@ def _grade_mle_parameter_derivation(item: Dict[str, Any], submission: Any) -> Di
 # 4. markov_steady_state
 # ---------------------------------------------------------------------------
 def _np_markov_steady_state(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """markov_steady_state: find the stationary distribution of a two-state Markov chain.
+    Fields: alpha, beta (probabilities); the public transition_matrix is [[1-alpha, alpha], [beta, 1-beta]].
+    Secret: steady_state_expected. Submit {steady_state: [pi1, pi2]} or the list (tolerance 0.03)."""
     # 2x2 Markov transition matrix [[1-a, a], [b, 1-b]]
     # Stationary distribution: pi_1 = b / (a + b), pi_2 = a / (a + b)
     a = _num(p.get("alpha"))
@@ -207,12 +229,13 @@ def _grade_markov_steady_state(item: Dict[str, Any], submission: Any) -> Dict[st
     if not isinstance(user_vec, list) or len(user_vec) != len(expected):
         return {"ok": False, "score": 0.0, "feedback": "Must submit stationary distribution vector.", "details": {}}
 
-    ok = all(abs(float(user_vec[i]) - expected[i]) <= 0.03 for i in range(len(expected)))
+    vals = [_num(x) for x in user_vec]
+    ok = None not in vals and all(abs(vals[i] - expected[i]) <= 0.03 for i in range(len(expected)))
     return {
         "ok": ok,
         "score": 1.0 if ok else 0.0,
         "feedback": "Stationary distribution confirmed!" if ok else "Stationary vector does not satisfy pi * P = pi.",
-        "details": {"submitted": user_vec, "expected": expected},
+        "details": {"submitted": user_vec} if ok else {},
     }
 
 

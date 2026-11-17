@@ -202,14 +202,16 @@ class TestStemV2Upgrades(unittest.TestCase):
             (practice_stats, "Stats"),
             (practice_bio, "Bio"),
         ]:
+            # SECRET_FIELDS is per practice type now ({type: {fields}}): every type of the module lists its answer keys
             self.assertTrue(hasattr(mod, "SECRET_FIELDS"), f"{name} lacks SECRET_FIELDS")
-            self.assertGreater(len(mod.SECRET_FIELDS), 3, f"{name} SECRET_FIELDS too small")
-            self.assertIn("solution", mod.SECRET_FIELDS)
+            self.assertEqual(set(mod.SECRET_FIELDS), set(mod.GRADERS), f"{name}: one secret set per graded type")
+            for ptype, fields in mod.SECRET_FIELDS.items():
+                self.assertTrue(fields, f"{name}.{ptype} hides nothing")
 
-        self.assertIn("grad_expected", practice_ai.SECRET_FIELDS)
-        self.assertIn("merged_pair", practice_bio.SECRET_FIELDS)
-        self.assertIn("gain_expected", practice_ee.SECRET_FIELDS)
-        self.assertIn("is_safe", practice_systems.SECRET_FIELDS)
+        self.assertIn("grad_expected", practice_ai.SECRET_FIELDS["loss_gradient_verify"])
+        self.assertIn("merged_pair", practice_bio.SECRET_FIELDS["phylogenetic_upgma_step"])
+        self.assertIn("gain_expected", practice_ee.SECRET_FIELDS["opamp_gain_calc"])
+        self.assertIn("is_safe", practice_systems.SECRET_FIELDS["deadlock_bankers"])
 
     def test_sandbox_audit_hooks(self):
         import sandbox_preamble

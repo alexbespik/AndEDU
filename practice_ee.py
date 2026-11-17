@@ -5,12 +5,21 @@ Electrical Engineering & Circuit Analysis practice types:
 - boolean_gate_minimization: Karnaugh map & Boolean algebraic minimization
 - opamp_gain_calc: Ideal and rail-saturated operational amplifier circuits
 
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS. Standard library only.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type). Standard library only.
 """
 import math
+import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"expected", "solution", "minterms", "cutoff_rad_s", "gain_margin_db", "phase_margin_deg", "vout_expected", "gain_expected"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "circuit_kcl_kvl": {"solution"},
+    "bode_plot_analyzer": {"cutoff_rad_s", "gain_margin_db", "phase_margin_deg"},
+    "boolean_gate_minimization": {"solution"},  # the minterms are the givens of the exercise
+    "opamp_gain_calc": {"vout_expected", "gain_expected"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {"circuit_kcl_kvl": {"tolerance", "unit"}, "bode_plot_analyzer": {"tolerance", "ask"},
+                                      "boolean_gate_minimization": set(), "opamp_gain_calc": set()}
+BODE_METRICS = ("cutoff_rad_s", "gain_margin_db", "phase_margin_deg")
 
 
 def _s(v: Any, limit: int = 500) -> str:
@@ -31,6 +40,10 @@ def _num(v: Any) -> Optional[float]:
 # 1. circuit_kcl_kvl
 # ---------------------------------------------------------------------------
 def _np_circuit_kcl_kvl(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """circuit_kcl_kvl: solve one node voltage or branch current with Kirchhoff's laws.
+    Fields: circuit_diagram (SVG text or image path, optional), target_variable (default "V1"), unit (default "V"),
+    tolerance (default 0.05, absolute or relative), equations (optional list of given equations).
+    Secret: solution (number; alias expected). Submit {value: number} or the number."""
     nodes = p.get("nodes")
     target_variable = _s(p.get("target_variable") or p.get("target") or "V1", 50)
     solution = _num(p.get("solution") if p.get("solution") is not None else p.get("expected"))
@@ -63,12 +76,12 @@ def _grade_circuit_kcl_kvl(item: Dict[str, Any], submission: Any) -> Dict[str, A
     rel_err = diff / denom
 
     ok = (diff <= tol or rel_err <= tol)
-    score = 1.0 if ok else max(0.0, round(1.0 - (rel_err / (tol * 5.0)), 2))
+    score = 1.0 if ok else 0.0  # no partial credit: it would reveal how far off the answer is
     return {
         "ok": ok,
         "score": score,
-        "feedback": f"Correct! {user_val} {item.get('unit', '')} matches circuit equations." if ok else f"Off target. Expected ~{expected} {item.get('unit', '')} (error: {round(rel_err * 100, 2)}%).",
-        "details": {"submitted": user_val, "expected": expected, "relative_error": round(rel_err, 4)},
+        "feedback": f"Correct! {user_val} {item.get('unit', '')} matches circuit equations." if ok else "Off target. Recheck the equations and the signs.",
+        "details": {"submitted": user_val} if ok else {},
     }
 
 
@@ -76,6 +89,11 @@ def _grade_circuit_kcl_kvl(item: Dict[str, Any], submission: Any) -> Dict[str, A
 # 2. bode_plot_analyzer
 # ---------------------------------------------------------------------------
 def _np_bode_plot_analyzer(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """bode_plot_analyzer: read the key numbers off a transfer function's frequency response.
+    Fields: transfer_function (text), tolerance (relative, default 0.1), ask (derived: which of cutoff_rad_s,
+    gain_margin_db, phase_margin_deg are graded; the author gives at least one of them as the key).
+    Secret: cutoff_rad_s (alias wc), gain_margin_db (gm), phase_margin_deg (pm).
+    Submit {cutoff_rad_s?, gain_margin_db?, phase_margin_deg?} for the metrics listed in ask."""
     tf = _s(p.get("transfer_function") or p.get("tf"), 200)
     cutoff = _num(p.get("cutoff_rad_s") or p.get("wc"))
     gm = _num(p.get("gain_margin_db") or p.get("gm"))
@@ -86,6 +104,7 @@ def _np_bode_plot_analyzer(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[
     return {
         **base,
         "transfer_function": tf,
+        "ask": [k for k, v in zip(BODE_METRICS, (cutoff, gm, pm)) if v is not None],
         "cutoff_rad_s": cutoff,
         "gain_margin_db": gm,
         "phase_margin_deg": pm,
@@ -99,7 +118,8 @@ def _grade_bode_plot_analyzer(item: Dict[str, Any], submission: Any) -> Dict[str
 
     tol = _num(item.get("tolerance")) or 0.1
     checks = []
-    for key, name in [("cutoff_rad_s", "Cutoff frequency"), ("gain_margin_db", "Gain margin"), ("phase_margin_deg", "Phase margin")]:
+    asked = [k for k in (item.get("ask") or []) if k in BODE_METRICS]
+    for key in asked:
         exp = _num(item.get(key))
         if exp is not None:
             sub_val = _num(submission.get(key))
@@ -119,8 +139,8 @@ def _grade_bode_plot_analyzer(item: Dict[str, Any], submission: Any) -> Dict[str
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Bode metrics verified!" if ok else f"Some metrics mismatched ({passed}/{total} correct).",
-        "details": {"passed": passed, "total": total},
+        "feedback": "Bode metrics verified!" if ok else "Not yet: recheck the gain, corner frequency and phase readings.",
+        "details": {},
     }
 
 
@@ -128,6 +148,11 @@ def _grade_bode_plot_analyzer(item: Dict[str, Any], submission: Any) -> Dict[str
 # 3. boolean_gate_minimization
 # ---------------------------------------------------------------------------
 def _np_boolean_gate_minimization(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """boolean_gate_minimization: write the minimal sum-of-products expression of a function.
+    Fields: variables (list of single-letter names), minterms (the function's true rows as numbers; public, the
+    student needs them). Secret: solution (text such as "A'B + AB'"; alias expected).
+    Submit the expression as text ({expression} also works); primes (A') or ~A/!A mark negation, products may be
+    written in any letter order (BA' equals A'B), terms in any order."""
     variables = [_s(v, 10) for v in p.get("variables", []) if _s(v, 10)]
     minterms = p.get("minterms")
     solution = _s(p.get("solution") or p.get("expected"), 200)
@@ -149,6 +174,19 @@ def _np_boolean_gate_minimization(p: Dict[str, Any], base: Dict[str, Any]) -> Op
     }
 
 
+def _canonical_sop(expr: str) -> Optional[frozenset]:
+    """Set of product terms, each a frozenset of (letter, negated); None when the text is not a sum of products."""
+    terms = set()
+    for raw in expr.upper().replace(" ", "").split("+"):
+        if not raw:
+            return None
+        lits = re.findall(r"([~!]?)([A-Z])('?)", re.sub(r"[.*&\u00b7]", "", raw))
+        if "".join(a + b + c for a, b, c in lits) != re.sub(r"[.*&\u00b7]", "", raw):
+            return None
+        terms.add(frozenset((b, bool(a) != bool(c)) for a, b, c in lits))
+    return frozenset(terms)
+
+
 def _grade_boolean_gate_minimization(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
     sol = _s(item.get("solution")).replace(" ", "").upper()
     user_str = _s(submission.get("expression") if isinstance(submission, dict) else submission).replace(" ", "").upper()
@@ -156,17 +194,14 @@ def _grade_boolean_gate_minimization(item: Dict[str, Any], submission: Any) -> D
     if not user_str:
         return {"ok": False, "score": 0.0, "feedback": "Empty expression submitted.", "details": {}}
 
-    # Normalize canonical term order e.g. A'B + AB'
-    terms_sol = set(sol.split("+"))
-    terms_user = set(user_str.split("+"))
-
-    ok = (terms_sol == terms_user)
-    score = 1.0 if ok else (0.5 if len(terms_sol & terms_user) > 0 else 0.0)
+    # Compare as sets of product terms, so BA' equals A'B and term order does not matter
+    c_sol, c_user = _canonical_sop(sol), _canonical_sop(user_str)
+    ok = (c_sol == c_user) if (c_sol is not None and c_user is not None) else (set(sol.split("+")) == set(user_str.split("+")))
     return {
         "ok": ok,
-        "score": score,
-        "feedback": "Minimal Boolean expression correct!" if ok else f"Mismatch in minimized terms.",
-        "details": {"submitted": user_str, "expected": sol},
+        "score": 1.0 if ok else 0.0,
+        "feedback": "Minimal Boolean expression correct!" if ok else "Mismatch in minimized terms.",
+        "details": {"submitted": user_str},
     }
 
 
@@ -174,6 +209,10 @@ def _grade_boolean_gate_minimization(item: Dict[str, Any], submission: Any) -> D
 # 4. opamp_gain_calc
 # ---------------------------------------------------------------------------
 def _np_opamp_gain_calc(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """opamp_gain_calc: find the output voltage of an ideal op-amp stage, rails included.
+    Fields: topology ("inverting" default, or "non_inverting"), R1, Rf (ohms, positive numbers), Vin (volts),
+    Vsat_pos (default 15), Vsat_neg (default -15). Secret: vout_expected, gain_expected (computed by the server).
+    Submit {vout: number} or the number (tolerance 0.05 V)."""
     topology = _s(p.get("topology") or "inverting", 50).lower()
     r1 = _num(p.get("R1") or p.get("r1"))
     rf = _num(p.get("Rf") or p.get("rf"))
@@ -217,12 +256,12 @@ def _grade_opamp_gain_calc(item: Dict[str, Any], submission: Any) -> Dict[str, A
 
     diff = abs(user_vout - expected_vout)
     ok = (diff <= 0.05)
-    score = 1.0 if ok else max(0.0, round(1.0 - (diff / 2.0), 2))
+    score = 1.0 if ok else 0.0
     return {
         "ok": ok,
         "score": score,
-        "feedback": f"Accurate output voltage ({user_vout} V)." if ok else f"Vout off target. Expected {expected_vout} V (account for rails).",
-        "details": {"submitted": user_vout, "expected": expected_vout},
+        "feedback": f"Accurate output voltage ({user_vout} V)." if ok else "Vout is off target. Remember the supply rails limit the output.",
+        "details": {"submitted": user_vout} if ok else {},
     }
 
 

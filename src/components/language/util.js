@@ -62,3 +62,73 @@ export function genderOf(front, lang, { gender, back } = {}) {
   if (m[1] === 'die' && /\(plural\)/i.test(String(back || ''))) return 'pl';
   return ARTICLE_GENDER[m[1]];
 }
+
+// ---- Word strength with memory decay -------------------------------------------------------------------------
+// A word's progress is {n, firstReviewed, lastReviewed} (ms timestamps): n counts net right answers (0-4).
+const DAY = 86400000;
+
+/** Bars (0-4) to show: 0 = never reviewed or never answered right (n 0); otherwise min(n, 4) minus one per full 7 days
+ * since lastReviewed (never below 1); the 4th bar needs n >= 4 and a first review at least 14 days before the last
+ * one, otherwise 3 at most. */
+export function strengthBars(entry, now = Date.now()) {
+  const e = normalizeEntry(entry, now);
+  if (!e.firstReviewed || e.n < 1) return 0;
+  const decay = Math.floor(Math.max(0, now - e.lastReviewed) / (7 * DAY));
+  let bars = Math.min(e.n, 4) - decay;
+  const mastered = e.n >= 4 && e.lastReviewed - e.firstReviewed >= 14 * DAY;
+  if (bars >= 4 && !mastered) bars = 3;
+  return Math.max(1, Math.min(4, bars));
+}
+
+/** A stored value as an entry: old files stored a bare number (n); a positive one counts as reviewed at `now`. */
+export function normalizeEntry(raw, now = Date.now()) {
+  if (raw && typeof raw === 'object') {
+    return { n: Math.max(0, Math.min(4, Number(raw.n) || 0)), firstReviewed: raw.firstReviewed || null, lastReviewed: raw.lastReviewed || raw.firstReviewed || null };
+  }
+  const n = Math.max(0, Math.min(4, Number(raw) || 0));
+  return n > 0 ? { n, firstReviewed: now, lastReviewed: now } : { n: 0, firstReviewed: null, lastReviewed: null };
+}
+
+/** The strength map with every old numeric value migrated: {map, changed}. */
+export function migrateStrength(map, now = Date.now()) {
+  const out = {};
+  let changed = false;
+  for (const [k, v] of Object.entries(map || {})) {
+    if (v && typeof v === 'object') { out[k] = v; continue; }
+    changed = true;
+    const e = normalizeEntry(v, now);
+    if (e.firstReviewed) out[k] = e;  // a stored 0 meant "never reviewed"
+  }
+  return { map: out, changed };
+}
+
+/** The entry after one review: a right answer adds 1 to n, a wrong one removes 1; the times move forward. */
+export function reviewEntry(entry, delta, now = Date.now()) {
+  const e = normalizeEntry(entry, now);
+  return { n: Math.max(0, Math.min(4, e.n + delta)), firstReviewed: e.firstReviewed || now, lastReviewed: now };
+}
+
+/** The stem most forms of a verb share, and which forms break it (irregular): {stem, irregular: [bool per form]}.
+ * Forms are grouped by their first two letters; the biggest group (3 or more forms) gives the stem. */
+export function conjugationStem(forms) {
+  const words = (forms || []).map((f) => String(f[1] || '').toLowerCase());
+  const none = { stem: '', irregular: words.map(() => false) };
+  const groups = {};
+  words.forEach((w, i) => { if (w.length >= 2) (groups[w.slice(0, 2)] ||= []).push(i); });
+  const best = Object.values(groups).sort((a, b) => b.length - a.length)[0];
+  if (!best || best.length < 3) return none;
+  let stem = words[best[0]];
+  for (const i of best) while (stem && !words[i].startsWith(stem)) stem = stem.slice(0, -1);
+  if (stem.length < 2) return none;
+  return { stem, irregular: words.map((_, i) => !best.includes(i)) };
+}
+
+/** A lesson's minimal-pair drill (add_minimal_pairs): a listen_choose asking "which word" among single words. */
+export function isMinimalPair(p) {
+  return p?.type === 'listen_choose' && /which word/i.test(p.prompt || '') && (p.options || []).length >= 2 && (p.options || []).every((o) => !/\s/.test(String(o).trim()));
+}
+
+/** A lesson's dictation item (add_dictation): a listen_type whose audio is a sentence of 3 or more words. */
+export function isDictation(p) {
+  return p?.type === 'listen_type' && String(p.audio_text || '').trim().split(/\s+/).length >= 3;
+}

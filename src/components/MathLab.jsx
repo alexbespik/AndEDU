@@ -749,7 +749,7 @@ function NotebookTab({ userId }) {
     api(`/api/users/${userId}/notes`)
       .then((data) => {
         if (!cancelled) {
-          if (data && data.notes_text !== undefined && data.notes_text !== '') {
+          if (!isDirty.current && data && data.notes_text !== undefined && data.notes_text !== '') {  // never overwrite what was typed meanwhile
             setText(data.notes_text);
             store.set(key, data.notes_text);
           }
@@ -773,6 +773,16 @@ function NotebookTab({ userId }) {
     }, 800);
     return () => clearTimeout(t);
   }, [key, text, userId]);
+
+  // leaving the tab inside the debounce window must not lose the last keystrokes
+  const latest = useRef({ text, key, userId });
+  latest.current = { text, key, userId };
+  useEffect(() => () => {
+    if (!isDirty.current || !isLoaded.current) return;
+    const { text: t, key: k, userId: u } = latest.current;
+    store.set(k, t);
+    if (u) api(`/api/users/${u}/notes`, { method: 'PUT', body: { notes_text: t } }).catch(() => {});
+  }, []);
 
   const insert = (snippet) => {
     isDirty.current = true;

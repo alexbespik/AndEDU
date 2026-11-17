@@ -6,6 +6,7 @@ source. Spacing, curly quotes, dashes and Gutenberg's _italics_ markers are norm
     python3 scripts/verify_quotes.py            # all banks
     python3 scripts/verify_quotes.py stoic      # one bank
 """
+import http.client
 import json
 import re
 import sys
@@ -27,8 +28,14 @@ def fetch(url: str, cache: dict) -> str:
     if not url.startswith("https://") or host not in ALLOWED_HOSTS:
         raise ValueError(f"source_url not allowed: {url}")
     if url not in cache:
-        with urllib.request.urlopen(url, timeout=30) as r:
-            cache[url] = normalise(r.read().decode("utf-8", "replace"))
+        for attempt in range(4):  # a proxy or busy host can cut a large page short; a partial page is never used
+            try:
+                with urllib.request.urlopen(url, timeout=30) as r:
+                    cache[url] = normalise(r.read().decode("utf-8", "replace"))
+                break
+            except http.client.IncompleteRead:
+                if attempt == 3:
+                    raise
     return cache[url]
 
 

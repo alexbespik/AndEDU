@@ -146,8 +146,8 @@ export default function GeometrySim({ spec }) {
     return bodies.map((b) => {
       const override = b.id ? draggedBodies[b.id] : null;
       const type = b.type || 'box';
-      const x = override ? override.x : evalExpr(b.x, 0);
-      const y = override ? override.y : evalExpr(b.y, 0);
+      const x = override && override.x !== undefined ? override.x : evalExpr(b.x, 0);
+      const y = override && override.y !== undefined ? override.y : evalExpr(b.y, 0);
       const width = evalExpr(b.width, 1);
       const height = evalExpr(b.height, 1);
       const radius = evalExpr(b.radius, 0.5);
@@ -163,6 +163,7 @@ export default function GeometrySim({ spec }) {
         width, height,
         radius, angle,
         x1, y1, x2, y2,
+        xExprs: { x: b.x, y: b.y, x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 },
       };
     });
   }, [spec?.bodies, draggedBodies, evalExpr]);
@@ -197,8 +198,8 @@ export default function GeometrySim({ spec }) {
         oy = evalExpr(f.y, oy);
       }
 
-      const mag = override ? override.mag : evalExpr(f.magnitude, 1);
-      const deg = override ? override.deg : evalExpr(f.angle, 0);
+      const mag = override && override.mag !== undefined ? override.mag : evalExpr(f.magnitude, 1);
+      const deg = override && override.deg !== undefined ? override.deg : evalExpr(f.angle, 0);
       const rad = (deg * Math.PI) / 180;
       const dx = mag * Math.cos(rad);
       const dy = mag * Math.sin(rad);
@@ -215,6 +216,35 @@ export default function GeometrySim({ spec }) {
       };
     });
   }, [spec?.forces, bodyMap, draggedForces, evalExpr]);
+
+  // The spec param an expression names exactly (e.g. "theta"), else null.
+  const bareParam = (expr) => {
+    if (typeof expr !== 'string') return null;
+    const name = expr.trim();
+    return (spec?.params || []).find((p) => p.name === name) || null;
+  };
+
+  // Keep a dragged value inside its slider's range; `param` is a spec param object or a param name.
+  const clampToParam = (param, value) => {
+    const p = typeof param === 'string' ? (spec?.params || []).find((q) => q.name === param) : param;
+    let v = value;
+    if (p) {
+      const lo = Number(p.min);
+      const hi = Number(p.max);
+      if (p.min !== undefined && Number.isFinite(lo)) v = Math.max(lo, v);
+      if (p.max !== undefined && Number.isFinite(hi)) v = Math.min(hi, v);
+    }
+    return v;
+  };
+
+  const handleHandlePointerDown = (e, id, xName, yName) => {
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      e.target.setPointerCapture(e.pointerId);
+    } catch (err) {}
+    setActiveDrag({ type: 'handle', id, xName, yName, pointerId: e.pointerId });
+  };
 
   // Pointer drag event handlers with setPointerCapture
   const handleForcePointerDown = (e, f) => {
@@ -261,13 +291,14 @@ export default function GeometrySim({ spec }) {
       if (newDeg < 0) newDeg += 360;
 
       // Update reactive sliders if corresponding param exists
-      const magParam = (spec?.params || []).find((p) => p.name === f.magnitude || p.name === 'F' || p.name === 'mag');
-      const angleParam = (spec?.params || []).find((p) => p.name === f.angle || p.name === 'theta' || p.name === 'angle');
+      // Only a bare param name drives a slider; any other expression is overridden locally for this force.
+      const magParam = bareParam(f.magnitude);
+      const angleParam = bareParam(f.angle);
 
       setParams((prev) => {
         const next = { ...prev };
-        if (magParam) next[magParam.name] = Number(newMag.toFixed(2));
-        if (angleParam) next[angleParam.name] = Number(newDeg.toFixed(1));
+        if (magParam) next[magParam.name] = Number(clampToParam(magParam, newMag).toFixed(2));
+        if (angleParam) next[angleParam.name] = Number(clampToParam(angleParam, newDeg).toFixed(1));
         return next;
       });
 
@@ -275,18 +306,28 @@ export default function GeometrySim({ spec }) {
         ...prev,
         [activeDrag.id]: { mag: newMag, deg: newDeg }
       }));
+    } else if (activeDrag.type === 'handle') {
+      setParams((prev) => {
+        const next = { ...prev };
+        if (activeDrag.xName) next[activeDrag.xName] = Number(clampToParam(activeDrag.xName, coords.x).toFixed(2));
+        if (activeDrag.yName) next[activeDrag.yName] = Number(clampToParam(activeDrag.yName, coords.y).toFixed(2));
+        return next;
+      });
     } else if (activeDrag.type === 'body') {
       const b = activeDrag.body;
       const newX = coords.x - (activeDrag.offsetX || 0);
       const newY = coords.y - (activeDrag.offsetY || 0);
 
-      const xParam = (spec?.params || []).find((p) => p.name === b.x || p.name === `${b.id}_x`);
-      const yParam = (spec?.params || []).find((p) => p.name === b.y || p.name === `${b.id}_y`);
+      // b is the evaluated body (numbers), so the param a coordinate is bound to comes from its raw expression
+      const xName = bareParam(b.xExprs?.x) || `${b.id}_x`;
+      const yName = bareParam(b.xExprs?.y) || `${b.id}_y`;
+      const xParam = (spec?.params || []).find((p) => p.name === xName);
+      const yParam = (spec?.params || []).find((p) => p.name === yName);
 
       setParams((prev) => {
         const next = { ...prev };
-        if (xParam) next[xParam.name] = Number(newX.toFixed(2));
-        if (yParam) next[yParam.name] = Number(newY.toFixed(2));
+        if (xParam) next[xParam.name] = Number(clampToParam(xParam, newX).toFixed(2));
+        if (yParam) next[yParam.name] = Number(clampToParam(yParam, newY).toFixed(2));
         return next;
       });
 
@@ -302,6 +343,34 @@ export default function GeometrySim({ spec }) {
       try {
         e.target.releasePointerCapture(activeDrag.pointerId);
       } catch (err) {}
+      // The drag already wrote the param; drop the local override so the slider drives that value again.
+      if (activeDrag.type === 'force') {
+        const f = activeDrag.force;
+        const keepMag = !bareParam(f.magnitude);
+        const keepDeg = !bareParam(f.angle);
+        setDraggedForces((prev) => {
+          const cur = prev[activeDrag.id];
+          if (!cur) return prev;
+          const next = { ...prev };
+          const left = { mag: keepMag ? cur.mag : undefined, deg: keepDeg ? cur.deg : undefined };
+          if (left.mag === undefined && left.deg === undefined) delete next[activeDrag.id];
+          else next[activeDrag.id] = left;
+          return next;
+        });
+      } else if (activeDrag.type === 'body') {
+        const b = activeDrag.body;
+        const keepX = !bareParam(b.xExprs?.x ?? b.x);
+        const keepY = !bareParam(b.xExprs?.y ?? b.y);
+        setDraggedBodies((prev) => {
+          const cur = prev[activeDrag.id];
+          if (!cur) return prev;
+          const next = { ...prev };
+          const left = { x: keepX ? cur.x : undefined, y: keepY ? cur.y : undefined };
+          if (left.x === undefined && left.y === undefined) delete next[activeDrag.id];
+          else next[activeDrag.id] = left;
+          return next;
+        });
+      }
       setActiveDrag(null);
     }
   };
@@ -585,10 +654,17 @@ export default function GeometrySim({ spec }) {
               );
             }
             if (el.type === 'dimension') {
-              const x1 = toSvgX(el.x1);
-              const y1 = toSvgY(el.y1);
-              const x2 = toSvgX(el.x2);
-              const y2 = toSvgY(el.y2);
+              // offset shifts the dimension line sideways (world units, left of the x1 -> x2 direction)
+              const dxw = el.x2 - el.x1;
+              const dyw = el.y2 - el.y1;
+              const lenw = Math.hypot(dxw, dyw) || 1;
+              const off = Number(el.offset) || 0;
+              const ox = (-dyw / lenw) * off;
+              const oy = (dxw / lenw) * off;
+              const x1 = toSvgX(el.x1 + ox);
+              const y1 = toSvgY(el.y1 + oy);
+              const x2 = toSvgX(el.x2 + ox);
+              const y2 = toSvgY(el.y2 + oy);
               return (
                 <g key={`el-dim-${el.idx}`}>
                   <line
@@ -642,7 +718,20 @@ export default function GeometrySim({ spec }) {
               const pts = `${p1x},${p1y} ${p2x},${p2y} ${p3x},${p3y}`;
               return (
                 <g key={b.id || `wedge-${b.x}`}>
-                  <polygon points={pts} fill={fillCol} stroke={strokeCol} strokeWidth="1.8" />
+                  <g transform={b.angle ? `rotate(${-b.angle} ${p1x} ${p1y})` : undefined}>
+                    <polygon points={pts} fill={fillCol} stroke={strokeCol} strokeWidth="1.8" />
+                  </g>
+                  {(() => {
+                    const xp = bareParam(b.xExprs?.x);
+                    const yp = bareParam(b.xExprs?.y);
+                    if (!xp && !yp) return null;
+                    return (
+                      <g style={{ cursor: 'grab' }} onPointerDown={(e) => handleHandlePointerDown(e, `${b.id}-apex`, xp && xp.name, yp && yp.name)}>
+                        <circle cx={p1x} cy={p1y} r="4.5" fill="var(--gold, #e5b85c)" stroke="#ffffff" strokeWidth="1.2" />
+                        <circle cx={p1x} cy={p1y} r="14" fill="transparent" />
+                      </g>
+                    );
+                  })()}
                   {b.label && (
                     <foreignObject x={(p1x + p2x) / 2 - 20} y={(p1y + p3y) / 2 - 15} width="60" height="30" style={{ overflow: 'visible', pointerEvents: 'none' }}>
                       <div style={{ color: strokeCol, fontSize: '0.85rem' }} dangerouslySetInnerHTML={{ __html: renderKaTeX(b.label) }} />
@@ -739,6 +828,18 @@ export default function GeometrySim({ spec }) {
               return (
                 <g key={b.id || `rod-${b.x1}`}>
                   <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={strokeCol} strokeWidth={b.thickness || 4} strokeLinecap="round" />
+                  {[[b.x1, b.y1, x1, y1, 'a'], [b.x2, b.y2, x2, y2, 'b']].map(([, , hx, hy, end], k) => {
+                    const src = end === 'a' ? [b.xExprs?.x1, b.xExprs?.y1] : [b.xExprs?.x2, b.xExprs?.y2];
+                    const xp = bareParam(src[0]);
+                    const yp = bareParam(src[1]);
+                    if (!xp && !yp) return null;
+                    return (
+                      <g key={`rod-h-${k}`} style={{ cursor: 'grab' }} onPointerDown={(e) => handleHandlePointerDown(e, `${b.id}-${end}`, xp && xp.name, yp && yp.name)}>
+                        <circle cx={hx} cy={hy} r="4.5" fill="var(--gold, #e5b85c)" stroke="#ffffff" strokeWidth="1.2" />
+                        <circle cx={hx} cy={hy} r="14" fill="transparent" />
+                      </g>
+                    );
+                  })}
                   {b.label && (
                     <foreignObject x={(x1 + x2) / 2 - 20} y={(y1 + y2) / 2 - 20} width="50" height="25" style={{ overflow: 'visible', pointerEvents: 'none' }}>
                       <div style={{ color: strokeCol, fontSize: '0.82rem' }} dangerouslySetInnerHTML={{ __html: renderKaTeX(b.label) }} />
@@ -757,14 +858,14 @@ export default function GeometrySim({ spec }) {
                 <g key={b.id || `wall-${b.x1}`}>
                   <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={strokeCol} strokeWidth="2.5" />
                   {/* Surface hatch indicator */}
-                  <rect
+                  {b.hatch !== false && <rect
                     x={Math.min(x1, x2)}
                     y={Math.min(y1, y2)}
                     width={Math.max(Math.abs(x2 - x1), 10)}
                     height={Math.max(Math.abs(y2 - y1), 8)}
                     fill="url(#geom-hatch)"
                     opacity="0.6"
-                  />
+                  />}
                 </g>
               );
             }

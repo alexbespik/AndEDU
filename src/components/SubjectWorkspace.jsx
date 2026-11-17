@@ -1,8 +1,14 @@
 import React from 'react';
 import HistoryLab from './HistoryLab';
 import LanguageLab from './LanguageLab';
+import PhilosophyLab from './PhilosophyLab';
+import KitWorkspace from './KitWorkspace';
+import { KIT_MODES } from '../lib/workspaces';
 
-/** History and Languages workspaces: each subject has its own lab with the tools that subject needs. */
+/** Subject workspaces: each has its own lab with the tools that subject needs (the six kits share KitWorkspace). */
 export default function SubjectWorkspace(props) {
-  return props.kind === 'language' ? <LanguageLab {...props} /> : <HistoryLab {...props} />;
+  if (props.kind === 'language') return <LanguageLab {...props} />;
+  if (props.kind === 'philosophy') return <PhilosophyLab {...props} />;
+  if (KIT_MODES.includes(props.kind)) return <KitWorkspace {...props} />;
+  return <HistoryLab {...props} />;
 }

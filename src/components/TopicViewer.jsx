@@ -187,7 +187,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
           <QuizEngine key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId}
             onAskTutor={(focus) => { setTutorFocus(focus); setActiveTab('tutor'); }} />
         )}
-        {tab === 'tutor' && <LessonTutor key={topic.id} topic={topic} focus={tutorFocus} onFocusUsed={() => setTutorFocus(null)} />}
+        {tab === 'tutor' && <LessonTutor key={topic.id} topic={topic} userId={userId} focus={tutorFocus} onFocusUsed={() => setTutorFocus(null)} />}
         {tab === 'cards' && <FlashcardDeck key={topic.id} cards={topic.flashcards} topicId={topic.id} />}
         {tab === 'speed' && <SpeedRound key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId} />}
         {tab === 'timeline' && <TimelineView key={topic.id} events={topic.timeline} topicId={topic.id} />}

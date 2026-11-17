@@ -121,7 +121,15 @@ Every lesson in &.edu is stored on disk as a single canonical JSON file:
 #### 3.1.1 Practice item contract (all types)
 - Every item needs `type`, `prompt` (non-empty: `normalize_practice` drops items without one), `explanation`, and a stable `id`
   (`p<n>`); XP refs are `<topicId>:<itemId>`, so ids must not change once a student has seen the item.
-- Unknown or malformed items are dropped and reported as `warnings`; nothing is graded server-side except `draw`.
+- Unknown or malformed items are dropped and reported as `warnings`. Ids are unique per topic (`unique_practice_ids`: a missing or
+  duplicate id gets the next free `p<n>`).
+- Server-graded kit types (the 6 liberal-arts and 5 STEM modules): each `practice_<kit>.py` exports `NORMALIZERS`, `GRADERS`,
+  `SECRET_FIELDS` and `PUBLIC_FIELDS` (per type). Secret fields are stripped from every response that carries practice
+  (`redact_practice_item`) and restored on save when a client sends a stored item back without them
+  (`restore_practice_secrets`). The browser grades through `src/practice/serverGrade.js` → `POST /api/practice/grade
+  {topicId, itemId, submission}` → `{ok, score, feedback, details}`; a miss never echoes the key; malformed submissions get
+  400; rate limit `practice_grade`. `draw` is graded server-side too (`fbd_spec` → `fbd_grader.py`, else the vision model).
+  `tests/test_practice_contract.py` checks every server type has a client body.
 - Language types: `translate {source, answer, accepted?[<=6], lang, sourceLang?}`, `word_bank {answer, bank[4-14] ⊇ answer words}`,
   `listen_type {audio_text, lang, answer, accepted?}`, `listen_choose {audio_text, lang, options, answer ∈ options}`,
   `speak {target, lang, ipa?, translation?}`. `lang` is a BCP-47 tag from `src/lib/speech.js` `LANGUAGES`.
@@ -129,15 +137,15 @@ Every lesson in &.edu is stored on disk as a single canonical JSON file:
 - One normalizer and one renderer per type, registered by type name: server `PRACTICE_NORMALIZERS` (server.py, also the
   `PRACTICE_TYPES` set, populated from `practice_general.py`, `practice_history.py`, `practice_language_extra.py`, `practice_philosophy.py`,
   and the 5 STEM kits: `practice_ee.py`, `practice_ai.py`, `practice_systems.py`, `practice_stats.py`, `practice_bio.py`), client `src/practice/registry.js`, which merges each subject file's map (`src/practice/language.jsx`,
-  `src/practice/history.jsx`, `src/practice/general.jsx`, `src/practice/language_extra.jsx`, `src/practice/philosophy.jsx`). Server-side `PRACTICE_GRADERS` evaluate student submissions deterministically where physical, mathematical, or algorithmic ground-truth exists. Subject bodies take `{item, onResult(ok, given), retry}` (`ok === null` = skipped) so both
+  `src/practice/history.jsx`, `src/practice/general.jsx`, `src/practice/language_extra.jsx`, `src/practice/philosophy.jsx`, `src/practice/liberal_arts.jsx`, `src/practice/stem_kits.jsx`). Server-side `PRACTICE_GRADERS` evaluate student submissions deterministically where physical, mathematical, or algorithmic ground-truth exists. Subject bodies take `{item, onResult(ok, given), retry}` (`ok === null` = skipped) so both
   `PracticeDeck` and subject practice views can use them. MCP tools follow the same split: `mcp_tools_<subject>.py` exports
   `tools(call, q, S, STR, OBJ, ARR)` and `mcp_server.py` merges them. Philosophy types (`truth_table`, `validity`, `syllogism`, `proof_steps`, `argument_map`, `spot_parts`, `fallacy_id`) have AI answers stripped and evaluated deterministically against `logic_engine.py`.
-- STEM engineering types:
-  - `practice_ee.py` (4 types): `circuit_dc_analysis` (KCL/KVL branch currents/voltages), `thevenin_equivalent` ($V_{\text{th}}, R_{\text{th}}$), `bode_cutoff_calc` ($f_c$, filter type), `opamp_gain_calc` ($A_v$, inverting/non-inverting).
-  - `practice_ai.py` (4 types): `gradient_descent_step` ($w_{t+1} = w_t - \eta \nabla L$), `confusion_matrix_metrics` (Precision, Recall, $F_1$), `attention_score_calc` ($\text{softmax}(QK^T/\sqrt{d_k})$), `convolution_output_dim` ($\lfloor(W-K+2P)/S\rfloor+1$).
-  - `practice_systems.py` (4 types): `pipeline_hazard_spot` (RAW stalls, forwarding), `cache_address_decode` (Tag, Set, Offset), `assembly_step_trace` (register/memory trace), `virtual_memory_translate` (VPN, offset, PA).
-  - `practice_stats.py` (4 types): `p_value_decision` (critical rejection), `confidence_interval_calc` (margin of error), `bayes_posterior_calc` (Bayes rule), `regression_residual_audit` (residuals, leverage).
-  - `practice_bio.py` (4 types): `dna_transcription_translate` (transcription/codon translation), `hardy_weinberg_calc` ($p, q, p^2, 2pq, q^2$), `enzyme_michaelis_menten` ($v_0 = V_{\max}[S]/(K_m+[S])$), `genomic_gc_content` (GC%, $T_m$).
+- STEM engineering types (server-graded; fields in each normalizer's docstring, `GET /api/practice/guide`):
+  - `practice_ee.py` (Electrical engineering): `circuit_kcl_kvl`, `bode_plot_analyzer`, `boolean_gate_minimization`, `opamp_gain_calc`
+  - `practice_ai.py` (AI and machine learning): `backprop_layer_step`, `attention_score_matrix`, `confusion_matrix_metrics`, `loss_gradient_verify`
+  - `practice_systems.py` (Computer systems): `page_table_walk`, `cache_tag_index_offset`, `assembly_reg_trace`, `deadlock_bankers`
+  - `practice_stats.py` (Statistics): `hypothesis_test_two_sample`, `bayes_posterior_update`, `mle_parameter_derivation`, `markov_steady_state`
+  - `practice_bio.py` (Bioinformatics): `smith_waterman_align`, `orf_finder_translate`, `restriction_digest_mapper`, `phylogenetic_upgma_step`
 - Languages session progress (word strength 0-4, crowns per unit, missed items) is per browser (localStorage keys
   `andedu_lang_*`); XP goes through the existing `practice_correct` source with ref `lang:<topicId>:<itemId>`.
 
@@ -546,38 +554,15 @@ Deterministic logic and argumentation practice types registered in `server.PRACT
 7. `fallacy_id`: Identification of formal and informal fallacies, cross-validated against `logic_forms.identify`.
 Authoring tools in `mcp_tools_philosophy.py` validate all items through `logic_engine.check()` before storage. Rendering is implemented in `src/practice/philosophy.jsx` and registered in `src/practice/registry.js`.
 
-#### 3.12.2 Expanded Liberal Arts Practice Engines (6 Modules)
-Standard library only, flat modules in root registered in `server.PRACTICE_NORMALIZERS` and `server.PRACTICE_TYPES`:
-1. **Literature (`practice_literature.py`)**:
-   - `scansion`: Poetic meter analysis (syllables and stress values). Normalized without leaking answer patterns; graded by syllable count and stress array comparison.
-   - `volta_spot`: Sonnet thematic turn (volta) identification. Graded against targeted line position.
-   - `rhyme_scheme_audit`: Identification of stanzaic rhyme schemes (e.g., ABAB, CDCD). Graded via canonical rhyme equivalence matching.
-   - `chronology_unravel`: Reconstruction of chronological fabula from anachronic syuzhet narrative order. Graded via permutation distance.
-2. **Music (`practice_music.py`)**:
-   - `lint_satb_progression`: Voice-leading rule verification for 4-part SATB harmony (parallel fifths, parallel octaves, voice crossing).
-   - `roman_numeral_analysis`: Harmonic analysis of chord progressions in major and minor keys with inversion notation.
-   - `ear_interval_id`: Semitone interval distance identification and classification.
-   - `figured_bass_realize`: Realization of historical figured bass symbols (`5/3`, `6/3`, `6/4`, `7`) into constituent pitch classes.
-3. **Art History (`practice_art_history.py`)**:
-   - `composition_vector`: Visual structural vectors and compositional dynamics (golden ratio, pyramidal, diagonal tension).
-   - `label_architecture`: Architectural structural component identification on diagrams (clerestory, flying buttress, nave, pediment).
-   - `iconography_decode`: Associating classical/religious attributes with iconographic figures.
-   - `stylistic_taxonomy`: Taxonomic classification of period styles (Baroque, Rococo, Neoclassical, Impressionist) from visual characteristics.
-4. **Classics & Archaeology (`practice_classics.py`)**:
-   - `epigraphy_transcribe`: Ancient inscription transcription and lacuna restoration under Leiden conventions (`[text]`, `(text)`).
-   - `harris_matrix_build`: Stratigraphic archaeological sequence diagramming verified by topological sort and transitive reduction.
-   - `cursus_honorum_order`: Sequential progression of Roman magisterial offices under republican statutory constraints.
-   - `athenian_sortition_sim`: Deterministic simulation and validation of democratic lottery allotment (Kleroterion).
-5. **Rhetoric (`practice_rhetoric.py`)**:
-   - `stasis_classify`: Classification into Hermagoras' four stases: conjectural, definitional, qualitative, translative.
-   - `trope_hunter`: Identification of classical rhetorical figures and tropes (chiasmus, anaphora, zeugma, metonymy).
-   - `dispositio_sort`: Ordering classical 6-part oratorical discourse (exordium, narratio, partitio, confirmatio, refutatio, peroratio).
-   - `enthymeme_excavator`: Unearthing implicit bridge premises in informal rhetorical deductions.
-6. **Polity & Political Science (`practice_polity.py`)**:
-   - `compute_dhondt`: Deterministic highest-averages quotient seat allocation for proportional representation systems.
-   - `compute_shapley_shubik_pivotal`: Permutation-based voting power index measuring pivotal voter probabilities.
-   - `veto_pipeline`: Multi-cameral legislative threshold evaluation (veto gates, supermajorities, executive assent).
-   - `instant_runoff_tally`: Sequential elimination and preference redistribution for ranked-choice electoral tallies.
+#### 3.12.2 Liberal-arts kits (6 modules, 24 server-graded types)
+Each kit is also a Liberal arts subject (mode id = workspace id, `src/lib/workspaces.js`) that opens `KitWorkspace.jsx`: the
+open class, the kit's courses and its practice types. Bodies: `src/practice/liberal_arts.jsx`. Grading contract: 3.1.1.
+- `practice_literature.py`: `scansion`, `volta_spot`, `rhyme_scheme_audit`, `chronology_unravel`
+- `practice_music.py`: `lint_satb_progression`, `roman_numeral_analysis`, `ear_interval_id`, `figured_bass_realize`
+- `practice_art_history.py`: `composition_vector`, `label_architecture`, `iconography_decode`, `stylistic_taxonomy`
+- `practice_classics.py`: `epigraphy_transcribe`, `harris_matrix_build`, `cursus_honorum_order`, `athenian_sortition_sim`
+- `practice_rhetoric.py`: `stasis_classify`, `trope_hunter`, `dispositio_sort`, `enthymeme_excavator`
+- `practice_polity.py`: `compute_dhondt`, `compute_shapley_shubik_pivotal`, `veto_pipeline`, `instant_runoff_tally`
 
 #### 3.12.3 Declarative Decision Tree Engine (`decision_tree_engine.py`, `simspec.py`)
 - Declarative simulation format (`kind: "decision_tree"`, SimSpec v1 specification):
@@ -590,6 +575,18 @@ Standard library only, flat modules in root registered in `server.PRACTICE_NORMA
   3. Dialectical consistency score: detects if subsequent choices contradict earlier affirmed `stated_premises`.
 - Validated via `simspec.validate_spec()` and executed via `decision_tree_engine.step_decision_tree()`.
 Authoring tools in `mcp_tools_philosophy.py` validate all items through `logic_engine.check()` before storage. Rendering is implemented in `src/practice/philosophy.jsx` and registered in `src/practice/registry.js`.
+
+#### 3.12.4 Philosophy tab (`PhilosophyLab.jsx`, `src/components/philosophy/`)
+Tabs: Class (when a philosophy class is open), Analyze and All sides (PHILIN), Logic workbench (truth tables / classify /
+equivalence, a Fitch proof editor with 4 scaffolds, syllogisms with a client-drawn Venn diagram; every verdict from
+`POST /api/logic/grade`), Fallacies (formal ones checked by the engine's `forms` and `syllogism` ops; informal ones only as a
+static teaching catalog, never judged from text), Thought experiments (six branching dilemmas; reflective only: no scores,
+gauges, percentages, rankings or XP), Philosophers (`GET /api/philosophy/figures`, `POST /api/philosophy/dialogue
+{figure, message, history, topicId?}` → `{reply, quote, suggested_questions}`, `philosophy_dialogue.py`). A figure is an author
+with quotes in `content/quotes/` (id = slug of the author); the reply is an AI portrayal under the persona rules, and the quote
+shown always comes from the bank (the model may only name one of up to 20 shortlisted ids). Rate limit `dialogue`; the call
+counts in the daily model budget. Quote banks ship with the app (`QUOTES_DIR`; desktop stages them from git, Docker copies them
+into the data volume at start) and are added only after `scripts/verify_quotes.py` finds each quote in its source.
 
 ### 3.13 Campus events (`campus_events.py`, `campus_events_import.py`; ported from AndEVENTS)
 The Campus tab (`src/components/campus/`, mode id `campus`; `App.jsx` renders `CampusEvents` and holds the one unread-alerts fetch that feeds the tab badge and the My courses card `CampusGlance`, which also reads `/now` and `/saved`): W&M public event calendars as a directory, a "now" view, a week planner with the student's classes, and interest alerts.
@@ -865,33 +862,7 @@ ChemSpec v1 widgets match the visual fidelity and physical realism of the physic
 1. **In-Browser Memory & Variable Inspector**: Lightweight Pyodide post-execution introspection capturing local/global variables, types, sequence lengths, and array memory grid cells.
 2. **Socratic Error Diagnostic Engine**: Translates assertion errors and Python tracebacks into process-level Socratic hints (missing return, off-by-one loop boundaries, boundary conditions, index errors, type mismatches).
 
-### 10.4 Advanced STEM & Engineering Practice Kits (20 Deterministic Practice Types)
-Five flat root modules (standard library only) providing normalizers and deterministic graders for upper-division engineering and science:
-1. **Electrical Engineering (`practice_ee.py`)**:
-   - `circuit_dc_analysis`: Branch current and node voltage verification via Ohm's law and Kirchhoff's Current/Voltage Laws.
-   - `thevenin_equivalent`: Open-circuit voltage $V_{\text{th}}$ and Thevenin resistance $R_{\text{th}}$ calculation.
-   - `bode_cutoff_calc`: 3dB corner frequency $f_c$ and filter topology classification (low-pass, high-pass, band-pass).
-   - `opamp_gain_calc`: Closed-loop operational amplifier voltage gain $A_v$ for inverting and non-inverting configurations.
-2. **Artificial Intelligence & Machine Learning (`practice_ai.py`)**:
-   - `gradient_descent_step`: Trace single weight update $w_{t+1} = w_t - \eta \frac{\partial L}{\partial w}$.
-   - `confusion_matrix_metrics`: Exact precision, recall, $F_1$, and specificity calculation from confusion matrix counts.
-   - `attention_score_calc`: Scaled dot-product attention calculation $\operatorname{softmax}(QK^T / \sqrt{d_k})$.
-   - `convolution_output_dim`: Spatial output dimension $\lfloor (W - K + 2P)/S \rfloor + 1$.
-3. **Computer Systems & Architecture (`practice_systems.py`)**:
-   - `pipeline_hazard_spot`: Data hazard (RAW) identification, load-use stalls, and branch delay slot flush penalties.
-   - `cache_address_decode`: Decomposition of memory address into Tag, Set Index, and Offset bit ranges.
-   - `assembly_step_trace`: Tracing RISC-V register file ($t0, t1, s0$) and memory contents after instruction execution.
-   - `virtual_memory_translate`: Virtual Page Number (VPN), Page Offset, page table lookup, and physical address calculation.
-4. **Statistics & Data Science (`practice_stats.py`)**:
-   - `p_value_decision`: Exact $p$-value computation and hypothesis test rejection decision.
-   - `confidence_interval_calc`: Sample mean margin of error $E = z^* \frac{\sigma}{\sqrt{n}}$ and two-sided confidence interval.
-   - `bayes_posterior_calc`: Exact Bayesian posterior probability $P(H|E)$.
-   - `regression_residual_audit`: Residual computation $e_i = y_i - \hat{y}_i$ and leverage/outlier classification.
-5. **Quantitative Biology & Bioinformatics (`practice_bio.py`)**:
-   - `dna_transcription_translate`: $5' \to 3'$ DNA transcription to mRNA and codon translation into peptide sequence.
-   - `hardy_weinberg_calc`: Allele frequencies $p, q$ and genotype frequencies $p^2, 2pq, q^2$.
-   - `enzyme_michaelis_menten`: Initial velocity $v_0 = \frac{V_{\max}[S]}{K_m + [S]}$ and Lineweaver-Burk parameters.
-   - `genomic_gc_content`: GC-content percentage and primer melting temperature $T_m$ calculation.
-
-
+### 10.4 STEM practice kits (20 server-graded types)
+Five flat root modules (standard library only); see 3.1.1 for the grading contract and the type list. Bodies are in
+`src/practice/stem_kits.jsx`; sample lessons come from `scripts/seed_kits.py`.
 

@@ -1,13 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Scale, Blocks, Users, Search, CheckCircle2, AlertTriangle, XCircle, Trash2 } from 'lucide-react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Scale, Blocks, Users, Search, CheckCircle2, AlertTriangle, XCircle, Trash2, BookOpen, Sigma, Lightbulb, MessagesSquare, ShieldAlert } from 'lucide-react';
 import { api } from '../lib/api';
 import WorkspaceShell from './WorkspaceShell';
+import '../styles/philosophy.css';
+
+// the new desks load on first visit
+const LogicWorkbench = lazy(() => import('./philosophy/LogicWorkbench'));
+const FallacyLab = lazy(() => import('./philosophy/FallacyLab'));
+const ThoughtExperimentsLab = lazy(() => import('./philosophy/ThoughtExperimentsLab'));
+const PhilosopherDialogue = lazy(() => import('./philosophy/PhilosopherDialogue'));
 
 // PHILIN (philin.py): text -> editable claim blocks -> the Python logic engine -> two-pass web fact-checks -> all
 // positions compared by a fixed rule. Everything the model writes is shown as plain text.
 const TABS = [
   { id: 'analyze', label: 'Analyze', icon: Blocks },
   { id: 'sides', label: 'All sides', icon: Users },
+  { id: 'workbench', label: 'Logic workbench', icon: Sigma },
+  { id: 'fallacies', label: 'Fallacies', icon: ShieldAlert },
+  { id: 'experiments', label: 'Thought experiments', icon: Lightbulb },
+  { id: 'dialogue', label: 'Philosophers', icon: MessagesSquare },
 ];
 const MAX_TEXT = 8000;
 const ROLES = ['conclusion', 'premise', 'objection', 'rebuttal'];
@@ -373,22 +384,39 @@ function Ranking({ ranking }) {
   );
 }
 
-export default function PhilosophyLab({ requestedTab }) {
-  const [tab, setTab] = useState('analyze');
+export default function PhilosophyLab({ classTopic, renderClass, requestedTab }) {
+  const [tab, setTab] = useState(classTopic && renderClass ? 'class' : 'analyze');
   const [question, setQuestion] = useState('');
+  const [visited, setVisited] = useState(() => new Set());
+  const hasClass = Boolean(classTopic && renderClass);
+  useEffect(() => { if (classTopic && renderClass) setTab('class'); }, [classTopic?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!hasClass && tab === 'class') setTab('analyze'); }, [hasClass, tab]);
+  useEffect(() => { setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab))); }, [tab]);
+  const tabs = [
+    ...(hasClass ? [{ id: 'class', label: `Class ${classTopic.source?.classSeq ?? ''}`.trim(), icon: BookOpen }] : []),
+    ...TABS,
+  ];
   useEffect(() => {
     if (!requestedTab?.tab || (requestedTab.mode && requestedTab.mode !== 'philosophy') || requestedTab.at === handledRequest) return;
     handledRequest = requestedTab.at;
-    if (TABS.some((t) => t.id === requestedTab.tab)) {
+    if (tabs.some((t) => t.id === requestedTab.tab)) {
       setTab(requestedTab.tab);
     }
   }, [requestedTab?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lazyTab = (id, node) => (
+    <div hidden={tab !== id}>{visited.has(id) && <Suspense fallback={<p className="hint" role="status">Loading…</p>}>{node}</Suspense>}</div>
+  );
   return (
-    <WorkspaceShell kind="Philosophy" title="Philosophy" tabs={TABS} current={tab} onTab={setTab}
-      intro="PHILIN uses AI to split text into claim blocks, identify premises and conclusions (output), and fact-check empirical claims with search. Python deterministically checks logic validity, named forms, and fallacies without AI. Value claims are never ranked.">
-      {/* both stay mounted so switching tabs keeps the work */}
+    <WorkspaceShell kind="Philosophy" title="Philosophy" tabs={tabs} current={tab} onTab={setTab}
+      intro="Test an argument with PHILIN (AI splits the text, Python checks the logic), work in the logic workbench, learn the fallacies, think through classic dilemmas and talk with historical philosophers (an AI portrayal). Value claims are never ranked.">
+      {tab === 'class' && hasClass && renderClass(classTopic)}
+      {/* these stay mounted so switching tabs keeps the work */}
       <div hidden={tab !== 'analyze'}><Analyze onQuestion={(q) => setQuestion((cur) => cur || q)} /></div>
       <div hidden={tab !== 'sides'}><Sides question={question} setQuestion={setQuestion} /></div>
+      {lazyTab('workbench', <LogicWorkbench />)}
+      {lazyTab('fallacies', <FallacyLab />)}
+      {lazyTab('experiments', <ThoughtExperimentsLab />)}
+      {lazyTab('dialogue', <PhilosopherDialogue topicId={classTopic?.id} />)}
     </WorkspaceShell>
   );
 }

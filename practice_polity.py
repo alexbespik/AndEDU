@@ -1,12 +1,18 @@
 """
 Polity / Political Science practice types: compute_dhondt, compute_shapley_shubik_pivotal, veto_pipeline, instant_runoff_tally.
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type).
 Standard library only.
 """
 import itertools
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"solution", "pivotal_counts", "shapley_shubik_index", "winner", "elimination_order", "rounds"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "compute_dhondt": {"solution"},
+    "compute_shapley_shubik_pivotal": {"solution", "pivotal_counts", "shapley_shubik_index"},
+    "veto_pipeline": {"solution", "will_pass", "blocking_actor"},
+    "instant_runoff_tally": {"solution", "winner", "elimination_order", "rounds"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {t: set() for t in SECRET_FIELDS}
 
 
 def _s(v: Any, limit: int = 500) -> str:
@@ -31,6 +37,9 @@ def _calc_dhondt(votes: Dict[str, int], seats: int) -> Dict[str, int]:
 
 
 def _np_compute_dhondt(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """compute_dhondt: allocate seats by the D'Hondt highest-averages method.
+    Fields: votes {party: votes}, seats (positive integer). Secret: solution {party: seats}, computed by the server.
+    Submit {party: seats} with integer counts."""
     raw_votes = p.get("votes")
     seats = p.get("seats")
     if not isinstance(raw_votes, dict) or not raw_votes:
@@ -73,8 +82,8 @@ def _grade_compute_dhondt(item: Dict[str, Any], submission: Any) -> Dict[str, An
     return {
         "ok": ok,
         "score": 1.0 if ok else score,
-        "feedback": "D'Hondt proportional representation seats calculated correctly!" if ok else f"Seat allocation differs: {correct_seats}/{total_seats} correct.",
-        "details": {"submitted": sub_alloc, "solution": expected},
+        "feedback": "D'Hondt proportional representation seats calculated correctly!" if ok else "Not yet: recheck the quotients and the order in which seats are awarded.",
+        "details": {"submitted": sub_alloc},
     }
 
 
@@ -99,6 +108,9 @@ def _calc_shapley_shubik(quota: int, weights: Dict[str, int]) -> Tuple[Dict[str,
 
 
 def _np_compute_shapley_shubik_pivotal(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """compute_shapley_shubik_pivotal: find each voter's Shapley-Shubik power index.
+    Fields: quota (integer), weights {voter: weight} (2-8 voters). Secret: pivotal_counts, shapley_shubik_index,
+    solution (computed by the server). Submit {voter: index} with indices as fractions (tolerance 0.05)."""
     quota = p.get("quota")
     raw_weights = p.get("weights")
     if not isinstance(raw_weights, dict) or len(raw_weights) < 2 or len(raw_weights) > 8:
@@ -140,12 +152,16 @@ def _grade_compute_shapley_shubik_pivotal(item: Dict[str, Any], submission: Any)
         "ok": ok,
         "score": 1.0 if ok else 0.0,
         "feedback": "Shapley-Shubik voting power indices computed correctly!" if ok else "Voting power indices diverge from combinatorial pivot calculation.",
-        "details": {"max_diff": round(max_diff, 4)},
+        "details": {},
     }
 
 
 # ---- 3. veto_pipeline ----
 def _np_veto_pipeline(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """veto_pipeline: decide whether a bill clears every veto player, and who blocks it.
+    Fields: bill (text, default "Legislation"), veto_players (list of actors, free form: names or {name, position}).
+    Secret: will_pass (bool, default true), blocking_actor (text), solution. Submit {will_pass: bool,
+    blocking_actor: text (needed only when the bill fails)}."""
     players = p.get("veto_players")
     if not isinstance(players, list) or not players:
         return None
@@ -200,46 +216,42 @@ def _grade_veto_pipeline(item: Dict[str, Any], submission: Any) -> Dict[str, Any
 
 # ---- 4. instant_runoff_tally ----
 def _calc_irv(candidates: List[str], ballots: List[List[str]]) -> Tuple[List[Dict[str, int]], List[str], str]:
-    active_cands = set(candidates)
+    """Deterministic count: candidates keep their given order; a tie for last drops the alphabetically first, a tie
+    in the final two goes to the alphabetically first (stated in the normalizer docstring)."""
+    active = list(dict.fromkeys(candidates))
     elimination_order: List[str] = []
     rounds: List[Dict[str, int]] = []
-
-    while True:
-        # Count top active candidate on each ballot
-        tally: Dict[str, int] = {c: 0 for c in active_cands}
-        valid_ballots = 0
+    while active:
+        tally: Dict[str, int] = {c: 0 for c in active}
+        valid = 0
         for b in ballots:
             for choice in b:
-                if choice in active_cands:
+                if choice in tally:
                     tally[choice] += 1
-                    valid_ballots += 1
+                    valid += 1
                     break
-
         rounds.append(dict(tally))
-        if valid_ballots == 0 or not active_cands:
+        if valid == 0:
             return rounds, elimination_order, ""
-
-        # Check for majority winner
-        for c, count in tally.items():
-            if count > valid_ballots / 2:
+        for c in active:
+            if tally[c] * 2 > valid:
                 return rounds, elimination_order, c
-
-        # If only 2 or 1 candidate left
-        if len(active_cands) <= 2:
-            sorted_by_votes = sorted(tally.items(), key=lambda x: x[1], reverse=True)
-            winner = sorted_by_votes[0][0]
-            return rounds, elimination_order, winner
-
-        # Eliminate candidate with minimum votes
-        min_votes = min(tally.values())
-        lowest = [c for c, count in tally.items() if count == min_votes]
-        # Tie breaker: alphabetical
-        to_eliminate = sorted(lowest)[0]
-        active_cands.remove(to_eliminate)
-        elimination_order.append(to_eliminate)
+        if len(active) <= 2:
+            top = max(tally.values())
+            return rounds, elimination_order, sorted(c for c in active if tally[c] == top)[0]
+        low = min(tally.values())
+        out = sorted(c for c in active if tally[c] == low)[0]
+        active.remove(out)
+        elimination_order.append(out)
+    return rounds, elimination_order, ""
 
 
 def _np_instant_runoff_tally(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """instant_runoff_tally: run an instant-runoff (ranked-choice) count.
+    Fields: ballots (list of ranked candidate lists), candidates (derived from the ballots when absent).
+    Secret: rounds, elimination_order, winner, solution (computed by the server; a tie for last drops the alphabetically
+    first, a tie between the final two goes to the alphabetically first).
+    Submit {winner, elimination_order (optional list)} or just the winner's name."""
     raw_ballots = p.get("ballots")
     raw_cands = p.get("candidates")
     if not isinstance(raw_ballots, list) or not raw_ballots:
@@ -273,7 +285,8 @@ def _grade_instant_runoff_tally(item: Dict[str, Any], submission: Any) -> Dict[s
     sub_elim = []
     if isinstance(submission, dict):
         sub_winner = str(submission.get("winner") or "").strip().lower()
-        sub_elim = [str(x).strip().lower() for x in submission.get("elimination_order", [])]
+        raw_elim = submission.get("elimination_order")
+        sub_elim = [str(x).strip().lower() for x in raw_elim] if isinstance(raw_elim, list) else []
     else:
         sub_winner = str(submission or "").strip().lower()
 
@@ -284,8 +297,8 @@ def _grade_instant_runoff_tally(item: Dict[str, Any], submission: Any) -> Dict[s
     return {
         "ok": ok,
         "score": 1.0 if ok else (0.5 if winner_ok else 0.0),
-        "feedback": f"Instant-runoff voting rounds tallies correct: {item.get('winner')} elected!" if ok else "Ranked-choice / IRV elimination tally differs.",
-        "details": {"submitted_winner": sub_winner, "expected_winner": item.get("winner")},
+        "feedback": f"Instant-runoff voting rounds tallies correct: {item.get('winner')} elected!" if ok else "Not yet: redo each round, eliminating the candidate with the fewest first-choice votes.",
+        "details": {"submitted_winner": sub_winner},
     }
 
 

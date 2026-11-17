@@ -48,13 +48,15 @@ stage_backend() {
   echo "== frontend build"
   npm run build
   rm -rf "$OUT/backend"
-  mkdir -p "$OUT/backend/public/diagrams" "$OUT/backend/seed/topics"
+  mkdir -p "$OUT/backend/public/diagrams" "$OUT/backend/seed/topics" "$OUT/backend/content/quotes"
   git ls-files -z -- '*.py' ':!:*/*' ':!:mcp_server.py' | xargs -0 -I{} cp {} "$OUT/backend/"
   cp desktop_main.py "$OUT/backend/"   # the launcher, even before it is committed
   cp -R dist "$OUT/backend/dist"
   git ls-files -z -- 'public/diagrams' | xargs -0 -I{} cp {} "$OUT/backend/public/diagrams/"
   # library lessons as committed, not as edited on this machine
   git archive HEAD content/topics | tar -x -C "$OUT/backend/seed/topics" --strip-components=2
+  # quote banks (loading screens, philosophy dialogue) as committed; server.py reads <backend>/content/quotes
+  git archive HEAD content/quotes | tar -x -C "$OUT/backend/content/quotes" --strip-components=2
   echo "   $(ls "$OUT/backend" | wc -l | tr -d ' ') entries, $(ls "$OUT/backend/seed/topics" | wc -l | tr -d ' ') seed topics"
 }
 

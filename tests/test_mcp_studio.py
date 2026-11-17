@@ -255,7 +255,9 @@ class StudioMcpTools(unittest.TestCase):
         })
         self.assertIn("copied", res)
         post_paths = [c[1] for c in self.calls if c[0] == "POST"]
-        self.assertIn("/api/topics/dest-topic/practice", post_paths)
+        # practice is copied by the server (answer keys of kit items never reach the tool); flashcards still go as items
+        self.assertIn("/api/topics/dest-topic/practice/copy", post_paths)
+        self.assertNotIn("/api/topics/dest-topic/practice", post_paths)
         self.assertIn("/api/topics/dest-topic/flashcards", post_paths)
 
     def test_search_topics_tool(self):

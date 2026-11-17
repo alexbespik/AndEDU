@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale, CalendarDays } from 'lucide-react';
+import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale, CalendarDays, Feather, Music, Palette, Columns3, Megaphone, Vote } from 'lucide-react';
 import AccountMenu from './AccountMenu';
+import { KIT_MODES, KIT_META } from '../lib/workspaces';
 
 // Workspaces by mode id (ids and course.workspace values never change; only the navigation groups them)
 const SUBJECTS = {
@@ -9,8 +10,11 @@ const SUBJECTS = {
   math: { label: 'Math', icon: Sigma, title: 'Graphing, LaTeX notes and practice' },
   history: { label: 'History', icon: Landmark, title: 'Timelines, flashcards and history classes' },
   language: { label: 'Languages', icon: Languages, title: 'Languages and linguistics: flashcards read aloud, pronunciation, IPA' },
-  philosophy: { label: 'Philosophy', icon: Scale, title: 'PHILIN: test an argument\'s logic and check its facts' },
+  philosophy: { label: 'Philosophy', icon: Scale, title: 'Logic workbench, fallacies, thought experiments, philosopher dialogues and PHILIN argument checks' },
 };
+// the six liberal-arts kits (src/lib/workspaces.js) join the Liberal arts menu
+const KIT_ICONS = { literature: Feather, music: Music, art_history: Palette, classics: Columns3, rhetoric: Megaphone, polity: Vote };
+for (const id of KIT_MODES) SUBJECTS[id] = { label: KIT_META[id].label, icon: KIT_ICONS[id], title: KIT_META[id].blurb };
 
 // Similar disciplines share one tab. A group with one subject is a plain tab; with more, it opens a menu.
 // A new subject (Philosophy, Statistics, Biology...) joins a group's members instead of adding a tab.
@@ -19,7 +23,7 @@ const NAV = [
   { group: 'math', label: 'Math', icon: Sigma, members: ['math'] },
   { group: 'it', label: 'IT', icon: Code2, members: ['code'] },
   { group: 'lab', label: 'Lab', icon: FlaskConical, members: ['physics'] },
-  { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language', 'philosophy'] },
+  { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language', 'philosophy', ...KIT_MODES] },
   { mode: 'advisor', label: 'Advisor', icon: Compass, title: 'Course advisor: your record, the catalog, readiness checks' },
   { mode: 'campus', label: 'Campus', icon: CalendarDays, title: 'Campus events: what is on now, the directory, your week and interest alerts' },
 ];

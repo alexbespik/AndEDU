@@ -137,6 +137,7 @@ def _keywords(text: str) -> List[str]:
     stop = {"what", "which", "should", "take", "next", "course", "courses", "class", "classes", "can", "the", "and",
             "for", "with", "that", "this", "have", "need", "want", "about", "semester", "year", "will", "does", "are",
             "there", "any", "from", "into", "them", "they", "some", "more", "also", "help", "plan", "like", "would", "could"}
+    stop |= advisor.ADVISOR_STOP_WORDS
     words = [w.lower() for w in re.findall(r"[A-Za-z]{4,}", text or "")]
     return [w for w in dict.fromkeys(words) if w not in stop][:5]
 

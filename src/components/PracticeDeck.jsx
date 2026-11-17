@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ArrowDown, RotateCcw, Play, Loader2 } from 'lucide-react';
 import { runPython } from '../lib/pyodide';
+import { explainError } from '../lib/explainError';
 import Md, { MdInline } from './Md';
 import { MatchPairs } from './Activities';
 import DrawingBoard from './DrawingBoard';
@@ -156,18 +157,6 @@ function TrueFalse({ item }) {
   );
 }
 
-/** Turns a Pyodide traceback into what a student needs: which test failed, or the error and its line. */
-function explainError(raw, script, userLines) {
-  if (!raw) return '';
-  const lines = raw.split('\n').map((l) => l.trimEnd()).filter(Boolean);
-  const last = lines[lines.length - 1] || raw;
-  const frames = [...raw.matchAll(/File "<exec>", line (\d+)/g)];
-  const n = frames.length ? Number(frames[frames.length - 1][1]) : null;
-  const src = n ? (script.split('\n')[n - 1] || '').trim() : '';
-  if (/^AssertionError/.test(last) && n && n > userLines) return `Failed: ${src}${last.length > 15 ? `\n${last}` : ''}`;
-  return n && n <= userLines ? `${last}\n(your code, line ${n}: ${src})` : last;
-}
-
 function CodeExercise({ item }) {
   const [code, setCode] = useState(item.starter || '');
   const [running, setRunning] = useState(false);
@@ -273,9 +262,9 @@ function DrawExercise({ item }) {
       <DrawingBoard ref={board} background={item.background || 'grid'} onChange={() => setDirty(true)} />
       <div className="btn-row">
         <button type="button" className="btn btn-primary btn-sm" onClick={check} disabled={busy}>
-          {busy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : null} {busy ? 'Checking your drawing…' : result ? 'Check again' : 'Check with AI'}
+          {busy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : null} {busy ? 'Checking your drawing…' : result ? 'Check again' : item.fbd_spec ? 'Check my diagram' : 'Check with AI'}
         </button>
-        <span className="hint">Your drawing is sent to the AI to be checked. Neatness doesn't count; content does.</span>
+        <span className="hint">{item.fbd_spec ? 'Checks your arrows and labels. Neatness doesn\'t count; content does.' : 'Your drawing is sent to the AI to be checked. Neatness doesn\'t count; content does.'}</span>
       </div>
       {error && <p className="notice notice-bad">{error}</p>}
       {result && (
@@ -318,10 +307,10 @@ function SolvedReporter({ ok, item }) {
 }
 
 // Registry bodies report through onResult; this adapter turns that into the deck's solved report.
-const fromRegistry = (Body) => function RegistryBody({ item }) {
+const fromRegistry = (Body) => function RegistryBody({ item, retry = true }) {
   const [ok, setOk] = useState(false);
   useReportSolved(ok, item);
-  return <Body item={item} onResult={(right) => right && setOk(true)} />;
+  return <Body item={item} retry={retry} onResult={(right) => right && setOk(true)} />;
 };
 const EXTRA = Object.fromEntries(Object.entries(EXTRA_RENDER).map(([t, Body]) => [t, fromRegistry(Body)]));
 

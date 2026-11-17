@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "collection": "hume",
+  "note": "Public-domain texts only; year is the first publication of this text or translation. Every text is checked word for word against source_url by scripts/verify_quotes.py. Never add a quote from memory. translator is empty for works written in English.",
+  "quotes": [
+    {
+      "id": "hume-ehu-10-wise-man",
+      "author": "David Hume",
+      "work": "An Enquiry Concerning Human Understanding",
+      "ref": "sec. 10",
+      "translator": "",
+      "year": 1748,
+      "text": "A wise man, therefore, proportions his belief to the evidence.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/david-hume/an-enquiry-concerning-human-understanding/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "hume-ehu-5-custom",
+      "author": "David Hume",
+      "work": "An Enquiry Concerning Human Understanding",
+      "ref": "sec. 5",
+      "translator": "",
+      "year": 1748,
+      "text": "Custom, then, is the great guide of human life.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/david-hume/an-enquiry-concerning-human-understanding/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "hume-ehu-12-flames",
+      "author": "David Hume",
+      "work": "An Enquiry Concerning Human Understanding",
+      "ref": "sec. 12",
+      "translator": "",
+      "year": 1748,
+      "text": "Commit it then to the flames: for it can contain nothing but sophistry and illusion.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/david-hume/an-enquiry-concerning-human-understanding/text/single-page",
+      "pd": true
+    }
+  ]
+}
