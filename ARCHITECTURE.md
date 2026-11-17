@@ -564,6 +564,22 @@ open class, the kit's courses and its practice types. Bodies: `src/practice/libe
 - `practice_rhetoric.py`: `stasis_classify`, `trope_hunter`, `dispositio_sort`, `enthymeme_excavator`
 - `practice_polity.py`: `compute_dhondt`, `compute_shapley_shubik_pivotal`, `veto_pipeline`, `instant_runoff_tally`
 
+#### 3.12.5 Kit tools (`kit_tools.py`, `src/components/kits/`)
+Each liberal-arts subject has a Tools tab in `KitWorkspace.jsx` next to its class, courses and practice types. The
+desks compute with the student's own input only; nothing is stored and no model is called.
+- `kit_tools.run(kind, op, args)` returns `{ok, result|error}` and never raises (error codes `bad_op`, `bad_args`
+  with `at`, `too_large`, `too_complex`, `bad_input`). Ops: polity `allocate` (dhondt, sainte_lague, fptp), `stv`
+  (Droop quota, Gregory transfers), `irv`, `power` (Shapley-Shubik, Banzhaf, minimal winning coalitions); music
+  `lint` (SATB voice leading, the same rules as `lint_satb_progression`), `tuning` (equal, just, Pythagorean: cents,
+  Hz, beats); classics `harris` (cycle check, phases, redundant relations), `leiden` (epigraphic sigla to spans and
+  diplomatic/edited readings); literature `scan` (feet, substitutions, line name), `form` (sonnet, villanelle,
+  terza rima rhyme schemes and refrains); rhetoric `toulmin`, `appeals`. Art history has no server op: its
+  composition overlay (thirds, golden section, diagonals) runs in the browser on a local image or an offline diagram.
+- Routes: `GET /api/kits/tools` (the ops' docstrings), `POST /api/kits/{kind}/tool {op, args}` (unknown kind 404,
+  otherwise 200 with `{ok, ...}`), rate limit `kit_tool` (1200/h); `/api/logic/grade` is a plain def with its own
+  `logic_grade` limit (1200/h). MCP: `kit_tool`. Sample lessons: `scripts/seed_kit_syllabi.py` (4 classes per kit,
+  ids `kit-<kit>-class-<n>`, `--dry-run` writes nothing).
+
 #### 3.12.3 Declarative Decision Tree Engine (`decision_tree_engine.py`, `simspec.py`)
 - Declarative simulation format (`kind: "decision_tree"`, SimSpec v1 specification):
   - `initial_node`: Root scenario identifier.

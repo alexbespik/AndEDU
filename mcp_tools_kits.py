@@ -44,7 +44,13 @@ def tools(call, q, S, STR, OBJ, ARR):
                                f"(kit {KIT_OF[ptype]}); every item needs a prompt and the fields listed there.")
         return {**res, "kit": KIT_OF[ptype], "type": ptype}
 
+    def kit_tool(a):
+        return call("POST", f"/api/kits/{q(str(a['kind']))}/tool", {"op": a["op"], "args": a.get("args") or {}})
+
     return [
+        ("kit_tool", "Run one deterministic liberal-arts desk operation (no model): polity allocate|stv|irv|power, music lint|tuning, classics harris|leiden, literature scan|form, rhetoric toulmin|appeals. Returns {ok, result} or {ok: false, error}. GET /api/kits/tools lists every op's fields.",
+         S(kind=STR("polity | music | classics | literature | rhetoric", enum=["polity", "music", "classics", "literature", "rhetoric"]), op=STR("operation name"), args=OBJ("the operation's arguments", optional=True)),
+         kit_tool),
         ("kit_types", "The kit practice types (literature, music, art_history, classics, rhetoric, polity, ee, ai, systems, stats, bio) with their fields, from the backend guide. Secret fields (answer keys) are listed as 'Secret'; the server keeps them out of the browser.",
          S(kit=STR("one kit id; all kits when omitted", enum=list(KITS), optional=True)), kit_types),
         ("add_kit_practice", "Add one kit practice item (any of the 44 kit types) to a lesson. The backend validates it, computes answer keys where the type has them and returns {added, rejected, total}; a rejected item raises an error.",

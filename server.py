@@ -114,7 +114,8 @@ RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload":
                "language_roleplay": 120, "advisor": 60, "language_tts": 300, "explain": 20, "key_check": 20,
                "philin": 20, "philin_factcheck": 30,  # PHILIN: transcribe/positions per request, fact-checks per claim
                "campus": 30, "campus_sync": 6,
-               "practice_grade": 600, "dialogue": 120}  # server-graded kit items; philosophy figure dialogue (one model call each)  # campus events: interest keywords (one model call), manual feed sync
+               "practice_grade": 600, "dialogue": 120,
+               "kit_tool": 1200, "logic_grade": 1200}  # deterministic kit desks and the logic engine: no model  # server-graded kit items; philosophy figure dialogue (one model call each)  # campus events: interest keywords (one model call), manual feed sync
 RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
 _rate_hits: Dict[Tuple[str, str], List[float]] = {}
 _rate_lock = threading.Lock()
@@ -4584,11 +4585,31 @@ def logic_guide():
     }
 
 @app.post("/api/logic/grade")
-async def logic_grade(body: Dict[str, Any]):
-    """Grades logic problems deterministically using logic_engine with zero model calls."""
+def logic_grade(body: Dict[str, Any]):
+    """Grades logic problems deterministically using logic_engine with zero model calls (plain def: CPU work runs in the threadpool)."""
+    rate_limit("logic_grade")
     if not isinstance(body, dict):
         raise HTTPException(status_code=422, detail="The body must be an object with an op.")
     return logic_engine.check(body)
+
+import kit_tools  # noqa: E402
+
+class KitToolBody(BaseModel):
+    op: str
+    args: Dict[str, Any] = {}
+
+@app.get("/api/kits/tools")
+def kit_tools_guide():
+    """Guide for the deterministic kit desks: {kind: {op: doc}}."""
+    return kit_tools.guide()
+
+@app.post("/api/kits/{kind}/tool")
+def kit_tool(kind: str, body: KitToolBody):
+    """One deterministic desk operation (no model). Always 200 with {ok, result|error}; plain def so the CPU work runs in the threadpool."""
+    if kind not in kit_tools.TOOLS:
+        raise HTTPException(status_code=404, detail="No tools for this kit.")
+    rate_limit("kit_tool")
+    return kit_tools.run(kind, body.op, body.args)
 
 DIAGRAMS_DIR = Path(__file__).parent / "public" / "diagrams"
 DIAGRAM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.svg$")

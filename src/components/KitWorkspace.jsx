@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { BookOpen, GraduationCap, ListChecks } from 'lucide-react';
+import React, { Suspense, useEffect, useState } from 'react';
+import { BookOpen, GraduationCap, ListChecks, Wrench } from 'lucide-react';
 import { CoursesTab } from './MathLab';
 import WorkspaceShell from './WorkspaceShell';
+import ErrorBoundary from './ErrorBoundary';
+import { KIT_TOOLS } from './kits';
 import { KIT_META } from '../lib/workspaces';
 import { EXTRA_LABEL } from '../practice/registry';
 
@@ -24,10 +26,12 @@ export default function KitWorkspace({ kind, classTopic, topics = [], onOpenTopi
   const meta = KIT_META[kind] || { label: kind, blurb: '' };
   const [tab, setTab] = useState(classTopic ? 'class' : 'courses');
   useEffect(() => { if (classTopic) setTab('class'); }, [classTopic?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const Desk = KIT_TOOLS[kind];
   const tabs = [
     ...(classTopic ? [{ id: 'class', label: `Class ${classTopic.source?.classSeq ?? ''}`.trim(), icon: BookOpen }] : []),
     { id: 'courses', label: 'Courses', icon: GraduationCap },
     { id: 'practice', label: 'Practice types', icon: ListChecks },
+    ...(Desk ? [{ id: 'tools', label: 'Tools', icon: Wrench }] : []),
   ];
   const current = tabs.some((t) => t.id === tab) ? tab : 'courses';
   return (
@@ -45,6 +49,13 @@ export default function KitWorkspace({ kind, classTopic, topics = [], onOpenTopi
             {(KIT_TYPES[kind] || []).map((t) => <li key={t}>{EXTRA_LABEL[t] || humanize(t)}</li>)}
           </ul>
         </div>
+      )}
+      {current === 'tools' && Desk && (
+        <ErrorBoundary>
+          <Suspense fallback={<p className="hint" role="status" style={{ marginTop: 'var(--space-4)' }}>Loading tools...</p>}>
+            <Desk kind={kind} />
+          </Suspense>
+        </ErrorBoundary>
       )}
     </WorkspaceShell>
   );
