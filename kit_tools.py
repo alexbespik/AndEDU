@@ -3,7 +3,8 @@
 Stdlib only, no model calls, no network. `run(kind, op, args)` never raises: it answers {"ok": True, "result": ...} or
 {"ok": False, "error": {"code", "message", "at"?}}. Domain outcomes (a cycle, an unbalanced bracket, a form mismatch)
 are results, not errors. Floats are rounded to 4 places; exact values are fraction strings such as "7/30".
-art_history has no server ops (its composition HUD runs in the browser)."""
+art_history has no server ops (its composition HUD runs in the browser). The STEM kits (ee, ai, systems, stats, bio;
+docs/plans/STEM_KIT_TOOLS_CONTRACT.md) follow the same rules; their size caps answer too_large or too_complex."""
 import heapq
 import inspect
 import json
@@ -13,9 +14,11 @@ import unicodedata
 from fractions import Fraction
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import practice_bio
 import practice_classics
 import practice_music
 import practice_polity
+import practice_systems
 
 # The contract says 20_000, but its own caps (650 districts x 30 parties, 500 ballot groups) need far more room.
 MAX_ARGS_BYTES = 500_000
@@ -799,12 +802,944 @@ def _rhet_appeals(a: Dict[str, Any]) -> Dict[str, Any]:
             "point": {"x": _r4(x), "y": _r4(y)}, "untagged_chars": untagged}
 
 
+# ===================================================================== STEM kits (docs/plans/STEM_KIT_TOOLS_CONTRACT.md)
+# Size caps answer too_large (or too_complex for a circuit that is too big); wrong shapes and values answer bad_args.
+def _cap_list(v: Any, at: str, lo: int, hi: int) -> list:
+    if not isinstance(v, list):
+        raise _bad(f"{at} must be a list.", at)
+    if len(v) > hi:
+        raise ToolError("too_large", f"{at} has more than {hi} items.", at)
+    if len(v) < lo:
+        raise _bad(f"{at} needs at least {lo} items.", at)
+    return v
+
+
+def _real(v: Any, at: str, lo: float = -1e12, hi: float = 1e12) -> float:
+    """A finite number within [lo, hi] (as a float)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise _bad(f"{at} must be a number.", at)
+    if isinstance(v, float) and not math.isfinite(v):
+        raise _bad(f"{at} must be a finite number.", at)
+    try:
+        f = float(v)
+    except OverflowError:
+        raise _bad(f"{at} is out of range.", at)
+    if f < lo or f > hi:
+        raise _bad(f"{at} must be between {lo:g} and {hi:g}.", at)
+    return f
+
+
+def _sig(x: float) -> float:
+    """Six significant digits, for values that can be very small (frequencies, p-values)."""
+    return float(f"{x:.6g}") + 0.0
+
+
+def _is_pow2(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+
+# ===================================================================== ee
+def _node_name(v: Any, at: str) -> str:
+    if isinstance(v, bool) or not isinstance(v, (str, int)):
+        raise _bad(f"{at} must be a node name.", at)
+    s = str(v)
+    if not s or len(s) > 12:
+        raise _bad(f"{at} must be 1 to 12 characters.", at)
+    return s
+
+
+_EE_LIMIT = {"R": (Fraction(0), Fraction(10 ** 9)), "V": (Fraction(-10 ** 6), Fraction(10 ** 6)),
+             "I": (Fraction(-10 ** 6), Fraction(10 ** 6))}
+
+
+def _ee_dc_solve(a: Dict[str, Any]) -> Dict[str, Any]:
+    """dc_solve {elements: [{type: R|V|I, a, b, value}], ground = "0"}: DC operating point by modified nodal analysis
+    in exact fractions. R is ohms in (0, 1e9]; V volts with node `a` the + terminal; I amps flowing a -> b inside the
+    source; |V|, |I| <= 1e6. Node names up to 12 characters. Caps: 30 elements (too_large), 12 nodes and 10 voltage
+    sources (too_complex). The ground node must appear in an element (bad_args at "ground"). Currents run a -> b
+    through the element and power is absorbed (a voltage source that delivers power has negative power); the powers
+    sum to 0. Result: {solvable: true, nodes: {n: {exact, value}}, elements: [{index, type, current, voltage, power,
+    current_exact, voltage_exact, power_exact}]} or {solvable: false, reason: floating_node|singular, nodes_unreached:
+    [n]} (floating: no path of resistors or voltage sources to ground; singular: e.g. a loop of voltage sources)."""
+    ground = _node_name(a.get("ground", "0"), "ground")
+    raw = _cap_list(a.get("elements"), "elements", 1, 30)
+    els: List[Tuple[str, str, str, Fraction]] = []
+    nodes: List[str] = []
+    for i, e in enumerate(raw):
+        e = _dict(e, f"elements.{i}")
+        t = e.get("type")
+        if t not in _EE_LIMIT:
+            raise _bad("type is R, V or I.", f"elements.{i}.type")
+        na, nb = _node_name(e.get("a"), f"elements.{i}.a"), _node_name(e.get("b"), f"elements.{i}.b")
+        val = e.get("value")
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or (isinstance(val, float) and not math.isfinite(val)):
+            raise _bad("value must be a finite number.", f"elements.{i}.value")
+        fv = Fraction(str(val))
+        lo, hi = _EE_LIMIT[t]
+        if (t == "R" and not (lo < fv <= hi)) or (t != "R" and not (lo <= fv <= hi)):
+            raise _bad("value is out of range (R in (0, 1e9], V and I within 1e6).", f"elements.{i}.value")
+        els.append((t, na, nb, fv))
+        for n in (na, nb):
+            if n not in nodes:
+                nodes.append(n)
+    if ground not in nodes:
+        raise _bad("The ground node is not used by any element.", "ground")
+    if len(nodes) > 12:
+        raise ToolError("too_complex", "A circuit has at most 12 nodes.", "elements")
+    vs = [k for k, e in enumerate(els) if e[0] == "V"]
+    if len(vs) > 10:
+        raise ToolError("too_complex", "A circuit has at most 10 voltage sources.", "elements")
+    # floating nodes: nothing but current sources ties them to ground
+    adj: Dict[str, List[str]] = {n: [] for n in nodes}
+    for t, na, nb, _ in els:
+        if t in ("R", "V"):
+            adj[na].append(nb)
+            adj[nb].append(na)
+    seen = {ground}
+    stack = [ground]
+    while stack:
+        for m in adj[stack.pop()]:
+            if m not in seen:
+                seen.add(m)
+                stack.append(m)
+    lost = [n for n in nodes if n not in seen]
+    if lost:
+        return {"solvable": False, "reason": "floating_node", "nodes_unreached": lost}
+    free = [n for n in nodes if n != ground]
+    idx = {n: i for i, n in enumerate(free)}
+    nn, size = len(free), len(free) + len(vs)
+    M = [[Fraction(0)] * (size + 1) for _ in range(size)]
+    vcol = {k: nn + j for j, k in enumerate(vs)}
+    for k, (t, na, nb, v) in enumerate(els):
+        ia, ib = idx.get(na), idx.get(nb)
+        if t == "R":
+            g = 1 / v
+            for p, q, s in ((ia, ia, 1), (ib, ib, 1), (ia, ib, -1), (ib, ia, -1)):
+                if p is not None and q is not None:
+                    M[p][q] += s * g
+        elif t == "I":
+            if ia is not None:
+                M[ia][size] -= v
+            if ib is not None:
+                M[ib][size] += v
+        else:
+            c = vcol[k]
+            if ia is not None:
+                M[ia][c] += 1
+                M[c][ia] += 1
+            if ib is not None:
+                M[ib][c] -= 1
+                M[c][ib] -= 1
+            M[c][size] += v
+    for col in range(size):  # Gaussian elimination, first nonzero pivot in row order
+        piv = next((r for r in range(col, size) if M[r][col] != 0), None)
+        if piv is None:
+            return {"solvable": False, "reason": "singular", "nodes_unreached": []}
+        M[col], M[piv] = M[piv], M[col]
+        for r in range(size):
+            if r != col and M[r][col] != 0:
+                f = M[r][col] / M[col][col]
+                M[r] = [x - f * y for x, y in zip(M[r], M[col])]
+    x = [M[i][size] / M[i][i] for i in range(size)]
+    volt = {ground: Fraction(0)}
+    for n in free:
+        volt[n] = x[idx[n]]
+    out_nodes = {n: {"exact": _frac(volt[n]), "value": _r4(volt[n])} for n in nodes}
+    rows = []
+    for k, (t, na, nb, v) in enumerate(els):
+        dv = volt[na] - volt[nb]
+        cur = dv / v if t == "R" else (x[vcol[k]] if t == "V" else v)
+        pw = dv * cur
+        rows.append({"index": k, "type": t, "current": _r4(cur), "voltage": _r4(dv), "power": _r4(pw),
+                     "current_exact": _frac(cur), "voltage_exact": _frac(dv), "power_exact": _frac(pw)})
+    return {"solvable": True, "nodes": out_nodes, "elements": rows}
+
+
+def _ee_bode(a: Dict[str, Any]) -> Dict[str, Any]:
+    """bode {num: [c], den: [c], w_min = 0.01, w_max = 1e4, points = 121}: frequency response of N(s)/D(s) at s = jw.
+    Coefficients highest power first, degree <= 6, |c| <= 1e9, den not all zero; 0 < w_min < w_max <= 1e9; points
+    11..401, log-spaced. Phase is unwrapped from w_min, starting on the branch nearest the low-frequency asymptote (0 degrees for a positive gain, -180 for a negative gain, -90 per pole at the origin), so -1/(s+1) starts near -180. Crossings are found by bracketing on the grid and 60
+    bisection steps; frequencies are given to 6 significant digits. cutoff is the first w where the magnitude falls
+    3.0103 dB below its value at w_min; the gain crossover is the first crossing of 0 dB; the phase crossover the first
+    crossing of -180 degrees; phase margin = 180 + phase at the gain crossover (wrapped to -180..180); gain margin =
+    -gain (dB) at the phase crossover. Result: {samples: [{w, mag_db, phase_deg}], dc_gain_db (null when D(0) or N(0)
+    is 0), cutoff_rad_s, gain_crossover, phase_margin_deg, phase_crossover, gain_margin_db, undefined_at: [w]}; each
+    crossing value is null when the grid has none. Magnitude is floored at -400 dB."""
+    def poly(v: Any, at: str) -> List[float]:
+        return [_real(c, f"{at}.{i}", -1e9, 1e9) for i, c in enumerate(_cap_list(v, at, 1, 7))]
+    num, den = poly(a.get("num"), "num"), poly(a.get("den"), "den")
+    if not any(den):
+        raise _bad("den must not be all zero.", "den")
+    w_min = _real(a.get("w_min", 0.01), "w_min", 1e-12, 1e9)
+    w_max = _real(a.get("w_max", 1e4), "w_max", 1e-12, 1e9)
+    if w_min <= 0 or w_max <= w_min:
+        raise _bad("Need 0 < w_min < w_max.", "w_max")
+    pts = _int(a.get("points", 121), 11, 401, "points")
+
+    def resp(w: float) -> Optional[complex]:
+        s = complex(0, w)
+        n = d = 0j
+        for c in num:
+            n = n * s + c
+        for c in den:
+            d = d * s + c
+        scale = sum(abs(c) * w ** (len(den) - 1 - k) for k, c in enumerate(den))
+        return None if abs(d) <= max(1e-300, 1e-9 * scale) else n / d
+
+    def db(h: complex) -> float:
+        return 20 * math.log10(max(abs(h), 1e-20))
+
+    def unwrap(raw: float, ref: float) -> float:
+        return raw + 360 * round((ref - raw) / 360)
+
+    ratio = (w_max / w_min) ** (1 / (pts - 1))
+    S: List[Tuple[float, float, float]] = []
+    undefined: List[float] = []
+
+    def low_order(c: List[float]) -> Optional[Tuple[int, float]]:
+        for k in range(len(c) - 1, -1, -1):  # the lowest power of s with a nonzero coefficient
+            if c[k] != 0:
+                return len(c) - 1 - k, c[k]
+        return None
+    ln, ld = low_order(num), low_order(den)
+    # low-frequency asymptote: a positive constant is 0 degrees, a negative one -180, and each net pole at the origin -90
+    ref = None
+    if ln is not None and ld is not None:
+        ref = (0.0 if ln[1] / ld[1] > 0 else -180.0) + 90.0 * (ln[0] - ld[0])
+    for k in range(pts):
+        w = w_min * ratio ** k if k < pts - 1 else w_max
+        h = resp(w)
+        if h is None:
+            undefined.append(_sig(w))
+            continue
+        ph = math.degrees(math.atan2(h.imag, h.real))
+        ph = ph if ref is None else unwrap(ph, ref)
+        ref = ph
+        S.append((w, db(h), ph))
+
+    def bisect(f: Callable[[float], Optional[float]], lo: float, hi: float) -> Optional[float]:
+        flo = f(lo)
+        if flo is None:
+            return None
+        for _ in range(60):
+            mid = math.sqrt(lo * hi)
+            fm = f(mid)
+            if fm is None:
+                return None
+            if (fm > 0) == (flo > 0):
+                lo, flo = mid, fm
+            else:
+                hi = mid
+        return math.sqrt(lo * hi)
+
+    def mag_f(off: float) -> Callable[[float], Optional[float]]:
+        return lambda w: None if resp(w) is None else db(resp(w)) - off
+
+    cutoff = wgc = wpc = pm = gm = None
+    if S:
+        thr = S[0][1] - 3.0103
+        for i in range(1, len(S)):
+            if S[i][1] <= thr < S[i - 1][1]:
+                cutoff = bisect(mag_f(thr), S[i - 1][0], S[i][0])
+                break
+        for i in range(1, len(S)):
+            if (S[i - 1][1] > 0) != (S[i][1] > 0):
+                wgc = bisect(mag_f(0.0), S[i - 1][0], S[i][0])
+                if wgc is not None:
+                    h = resp(wgc)
+                    raw = math.degrees(math.atan2(h.imag, h.real))
+                    pm = ((180 + unwrap(raw, S[i - 1][2]) + 180) % 360) - 180
+                break
+        for i in range(1, len(S)):
+            if (S[i - 1][2] + 180 > 0) != (S[i][2] + 180 > 0):
+                left = S[i - 1][2]
+
+                def pf(w: float, left: float = left) -> Optional[float]:
+                    h = resp(w)
+                    if h is None:
+                        return None
+                    return unwrap(math.degrees(math.atan2(h.imag, h.real)), left) + 180
+                wpc = bisect(pf, S[i - 1][0], S[i][0])
+                if wpc is not None:
+                    gm = -db(resp(wpc))
+                break
+    dc = None
+    if den[-1] != 0 and num[-1] != 0:
+        dc = _r4(20 * math.log10(abs(num[-1] / den[-1])))
+    return {"samples": [{"w": _sig(w), "mag_db": _r4(m), "phase_deg": _r4(p)} for w, m, p in S],
+            "dc_gain_db": dc, "cutoff_rad_s": None if cutoff is None else _sig(cutoff),
+            "gain_crossover": None if wgc is None else _sig(wgc),
+            "phase_margin_deg": None if pm is None else _r4(pm),
+            "phase_crossover": None if wpc is None else _sig(wpc),
+            "gain_margin_db": None if gm is None else _r4(gm), "undefined_at": undefined}
+
+
+# ===================================================================== ai
+def _confusion_stats(m: List[List[int]], labels: List[int]) -> Dict[str, Any]:
+    k = len(m)
+    total = sum(sum(r) for r in m)
+    rows = [sum(r) for r in m]
+    cols = [sum(m[i][j] for i in range(k)) for j in range(k)]
+    per, f1s = [], []
+    for i in range(k):
+        tp = m[i][i]
+        fn, fp = rows[i] - tp, cols[i] - tp
+        tn = total - tp - fn - fp
+        p = tp / (tp + fp) if tp + fp else 0.0
+        r = tp / (tp + fn) if tp + fn else 0.0
+        f = 2 * p * r / (p + r) if p + r else 0.0
+        sp = tn / (tn + fp) if tn + fp else 0.0
+        f1s.append(f)
+        per.append({"label": labels[i], "precision": _r4(p), "recall": _r4(r), "f1": _r4(f),
+                    "specificity": _r4(sp), "support": rows[i]})
+    acc = sum(m[i][i] for i in range(k)) / total if total else 0.0
+    pe = sum(rows[i] * cols[i] for i in range(k)) / (total * total) if total else 0.0
+    kappa = (acc - pe) / (1 - pe) if 1 - pe > 1e-15 else 0.0
+    mcc = None
+    if k == 2:
+        tp, fn, fp, tn = m[0][0], m[0][1], m[1][0], m[1][1]
+        den = math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+        mcc = _r4((tp * tn - fp * fn) / den) if den else 0.0
+    weighted = sum(f * s for f, s in zip(f1s, rows)) / total if total else 0.0
+    return {"accuracy": _r4(acc), "per_class": per, "macro_f1": _r4(sum(f1s) / k), "weighted_f1": _r4(weighted),
+            "micro_f1": _r4(acc), "kappa": _r4(kappa), "mcc": mcc, "matrix": m}
+
+
+def _ai_metrics(a: Dict[str, Any]) -> Dict[str, Any]:
+    """metrics {matrix: [[int]]} or {labels: [0|1], scores: [num], threshold = 0.5}. A matrix is k x k with k 2..10,
+    rows = actual class, columns = predicted, counts 0..1e9; for k = 2 class 0 is the positive class (TP is
+    matrix[0][0]). Score mode takes 2..2000 pairs; a score >= threshold predicts label 1, and the matrix is
+    [[TP, FN], [FP, TN]] with label 1 positive (per_class lists label 1 first, then 0). A zero denominator gives 0.
+    Result: {accuracy, per_class: [{label, precision, recall, f1, specificity, support}], macro_f1, weighted_f1,
+    micro_f1 (= accuracy), kappa (Cohen), mcc (k = 2 only, else null), matrix}; score mode adds roc: [{fpr, tpr,
+    threshold}] (starts at (0, 0) with threshold null; equal scores form one point) and auc (trapezoid; null when a
+    class is missing)."""
+    if a.get("matrix") is not None:
+        raw = _cap_list(a["matrix"], "matrix", 2, 10)
+        m = []
+        for i, r in enumerate(raw):
+            r = _cap_list(r, f"matrix.{i}", 1, 10)
+            if len(r) != len(raw):
+                raise _bad("matrix must be square (k x k).", f"matrix.{i}")
+            m.append([_int(x, 0, 10 ** 9, f"matrix.{i}.{j}") for j, x in enumerate(r)])
+        return _confusion_stats(m, list(range(len(m))))
+    labels = _cap_list(a.get("labels"), "labels", 2, 2000)
+    scores = _cap_list(a.get("scores"), "scores", 2, 2000)
+    if len(labels) != len(scores):
+        raise _bad("labels and scores need the same length.", "scores")
+    thr = _real(a.get("threshold", 0.5), "threshold")
+    ys = [_int(v, 0, 1, f"labels.{i}") for i, v in enumerate(labels)]
+    ss = [_real(v, f"scores.{i}") for i, v in enumerate(scores)]
+    tp = sum(1 for y, s in zip(ys, ss) if y == 1 and s >= thr)
+    fp = sum(1 for y, s in zip(ys, ss) if y == 0 and s >= thr)
+    P, N = sum(ys), len(ys) - sum(ys)
+    out = _confusion_stats([[tp, P - tp], [fp, N - fp]], [1, 0])
+    roc: List[Dict[str, Any]] = [{"fpr": 0.0, "tpr": 0.0, "threshold": None}]
+    ctp = cfp = 0
+    pts = [(0.0, 0.0)]
+    order = sorted(range(len(ys)), key=lambda i: -ss[i])
+    i = 0
+    while i < len(order):
+        j = i
+        while j < len(order) and ss[order[j]] == ss[order[i]]:
+            ctp += ys[order[j]]
+            cfp += 1 - ys[order[j]]
+            j += 1
+        fpr, tpr = (cfp / N if N else 0.0), (ctp / P if P else 0.0)
+        pts.append((fpr, tpr))
+        roc.append({"fpr": _r4(fpr), "tpr": _r4(tpr), "threshold": _r4(ss[order[i]])})
+        i = j
+    out["roc"] = roc
+    out["auc"] = _r4(sum((x1 - x0) * (y0 + y1) / 2 for (x0, y0), (x1, y1) in zip(pts, pts[1:]))) if P and N else None
+    return out
+
+
+def _ai_descent(a: Dict[str, Any]) -> Dict[str, Any]:
+    """descent {model: linear|logistic, X: [[num]], y: [num], w?: [num], b = 0, lr = 0.1, steps = 50}: batch gradient
+    descent. 1..100 rows, 1..8 features, steps 1..500, lr in (0, 10], values within 1e6, logistic y in {0, 1}, w
+    defaults to zeros. Linear loss is mean 0.5*(yhat - y)^2; logistic loss is mean cross-entropy with p clamped to
+    [1e-12, 1 - 1e-12] (gradient from the logit, p - y). Row `step` k holds the parameters after k updates with the
+    loss and gradient at those parameters (step 0 is the start). It stops when the loss is not finite (that row is
+    left out) or above 1e12 (that row is kept). Result: {history: [{step, loss, w, b, grad_w, grad_b}] (at most 200
+    rows, evenly thinned, first and last kept), final: {w, b, loss, predictions (at most 100; probabilities for
+    logistic)}, diverged}."""
+    model = a.get("model")
+    if model not in ("linear", "logistic"):
+        raise _bad("model is linear or logistic.", "model")
+    X = _cap_list(a.get("X"), "X", 1, 100)
+    rows = []
+    for i, r in enumerate(X):
+        r = _cap_list(r, f"X.{i}", 1, 8)
+        rows.append([_real(v, f"X.{i}.{j}", -1e6, 1e6) for j, v in enumerate(r)])
+    n, d = len(rows), len(rows[0])
+    if any(len(r) != d for r in rows):
+        raise _bad("Every row of X needs the same number of features.", "X")
+    ys = [_real(v, f"y.{i}", -1e6, 1e6) for i, v in enumerate(_cap_list(a.get("y"), "y", 1, 100))]
+    if len(ys) != n:
+        raise _bad("y needs one value per row of X.", "y")
+    if model == "logistic" and any(v not in (0.0, 1.0) for v in ys):
+        raise _bad("Logistic y values are 0 or 1.", "y")
+    w0 = a.get("w")
+    w = [0.0] * d if w0 is None else [_real(v, f"w.{i}", -1e6, 1e6) for i, v in enumerate(_cap_list(w0, "w", 1, 8))]
+    if len(w) != d:
+        raise _bad("w needs one value per feature.", "w")
+    b = _real(a.get("b", 0), "b", -1e6, 1e6)
+    lr = _real(a.get("lr", 0.1), "lr", 0.0, 10.0)
+    if lr <= 0:
+        raise _bad("lr must be above 0.", "lr")
+    steps = _int(a.get("steps", 50), 1, 500, "steps")
+
+    def sigmoid(z: float) -> float:
+        if z >= 0:
+            return 1 / (1 + math.exp(-z))
+        e = math.exp(z)
+        return e / (1 + e)
+
+    def evaluate(w: List[float], b: float):
+        loss, gw, gb, preds = 0.0, [0.0] * d, 0.0, []
+        for x, y in zip(rows, ys):
+            z = sum(wi * xi for wi, xi in zip(w, x)) + b
+            if model == "linear":
+                err = z - y
+                loss += 0.5 * err * err
+                preds.append(z)
+            else:
+                p = sigmoid(z)
+                pc = min(max(p, 1e-12), 1 - 1e-12)
+                loss -= y * math.log(pc) + (1 - y) * math.log(1 - pc)
+                err = p - y
+                preds.append(p)
+            gb += err
+            for j in range(d):
+                gw[j] += err * x[j]
+        return loss / n, [g / n for g in gw], gb / n, preds
+
+    hist: List[Dict[str, Any]] = []
+    diverged = False
+    preds: List[float] = []
+    for step in range(steps + 1):
+        try:
+            loss, gw, gb, p = evaluate(w, b)
+        except OverflowError:
+            diverged = True
+            break
+        if not all(math.isfinite(v) for v in [loss, gb] + gw + w + [b]):
+            diverged = True
+            break
+        hist.append({"step": step, "loss": _r4(loss), "w": [_r4(v) for v in w], "b": _r4(b),
+                     "grad_w": [_r4(v) for v in gw], "grad_b": _r4(gb)})
+        preds = p
+        if loss > 1e12:
+            diverged = True
+            break
+        if step < steps:
+            w = [wi - lr * g for wi, g in zip(w, gw)]
+            b -= lr * gb
+    if len(hist) > 200:
+        keep = sorted({round(i * (len(hist) - 1) / 199) for i in range(200)})
+        hist = [hist[i] for i in keep]
+    last = hist[-1] if hist else None
+    return {"history": hist,
+            "final": {"w": last["w"] if last else [], "b": last["b"] if last else None,
+                      "loss": last["loss"] if last else None, "predictions": [_r4(v) for v in preds[:100]]},
+            "diverged": diverged}
+
+
+# ===================================================================== systems
+def _address(v: Any, bits: int, at: str) -> int:
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
+        raise _bad("An address is a hex string such as \"0x1f40\" or a whole number.", at)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        try:
+            n = int(s[2:], 16) if s.startswith("0x") else int(s, 10)
+        except ValueError:
+            raise _bad("An address is a hex string such as \"0x1f40\" or a whole number.", at)
+    else:
+        n = v
+    if n < 0 or n >= 1 << bits:
+        raise _bad(f"The address does not fit in {bits} bits.", at)
+    return n
+
+
+def _sys_cache(a: Dict[str, Any]) -> Dict[str, Any]:
+    """cache {address_bits = 32, cache_size_bytes = 32768, block_size_bytes = 64, ways = 4 | "full", policy = lru |
+    fifo, addresses: [str|int]}: a set-associative cache simulation. address_bits 8..64; cache and block sizes are
+    powers of two (cache <= 2^30, block <= cache); ways is a power of two or "full" (fully associative); addresses
+    are hex "0x..." or decimal, below 2^address_bits, 1..256 of them (too_large above). A miss is compulsory (the
+    block was never seen), capacity (a fully associative LRU cache of the same size also misses) or conflict.
+    Result: {bits: {tag, index, offset}, sets, steps: [{address, tag, index, offset, hit, miss_kind, evicted_tag}],
+    hits, misses, hit_rate, touched_sets: {index: [tags, oldest first]} (at most 64 sets)}."""
+    bits = _int(a.get("address_bits", 32), 8, 64, "address_bits")
+    size = _int(a.get("cache_size_bytes", 32768), 1, 1 << 30, "cache_size_bytes")
+    block = _int(a.get("block_size_bytes", 64), 1, 1 << 30, "block_size_bytes")
+    if not _is_pow2(size):
+        raise _bad("cache_size_bytes must be a power of two.", "cache_size_bytes")
+    if not _is_pow2(block) or block > size:
+        raise _bad("block_size_bytes must be a power of two, at most the cache size.", "block_size_bytes")
+    blocks = size // block
+    ways_raw = a.get("ways", 4)
+    ways = blocks if ways_raw == "full" else _int(ways_raw, 1, 1 << 30, "ways")
+    if not _is_pow2(ways) or ways > blocks:
+        raise _bad("ways must be \"full\" or a power of two that fits the cache.", "ways")
+    policy = a.get("policy", "lru")
+    if policy not in ("lru", "fifo"):
+        raise _bad("policy is lru or fifo.", "policy")
+    sets = blocks // ways
+    off_bits, idx_bits = block.bit_length() - 1, sets.bit_length() - 1
+    tag_bits = bits - idx_bits - off_bits
+    if tag_bits < 0:
+        raise _bad("address_bits is too small for this cache.", "address_bits")
+    addrs = [_address(v, bits, f"addresses.{i}") for i, v in enumerate(_cap_list(a.get("addresses"), "addresses", 1, 256))]
+    state: Dict[int, List[int]] = {}
+    seen: set = set()
+    shadow: List[int] = []
+    steps, hits = [], 0
+    for ad in addrs:
+        blk = ad >> off_bits
+        idx, tag = blk & (sets - 1), blk >> idx_bits
+        lines = state.setdefault(idx, [])
+        hit = tag in lines
+        kind, evicted = None, None
+        in_shadow = blk in shadow
+        if hit:
+            hits += 1
+            if policy == "lru":
+                lines.remove(tag)
+                lines.append(tag)
+        else:
+            kind = "compulsory" if blk not in seen else ("conflict" if in_shadow else "capacity")
+            lines.append(tag)
+            if len(lines) > ways:
+                evicted = lines.pop(0)
+        seen.add(blk)
+        if in_shadow:
+            shadow.remove(blk)
+        shadow.append(blk)
+        if len(shadow) > blocks:
+            shadow.pop(0)
+        steps.append({"address": ad, "tag": tag, "index": idx, "offset": ad & (block - 1), "hit": hit,
+                      "miss_kind": kind, "evicted_tag": evicted})
+    touched = {str(i): state[i] for i in sorted(state)[:64]}
+    return {"bits": {"tag": tag_bits, "index": idx_bits, "offset": off_bits}, "sets": sets, "steps": steps,
+            "hits": hits, "misses": len(addrs) - hits, "hit_rate": _r4(hits / len(addrs)), "touched_sets": touched}
+
+
+def _sys_bankers(a: Dict[str, Any]) -> Dict[str, Any]:
+    """bankers {allocation, max_claim, available, request?: {process, vector}}: the Banker's algorithm. Matrices are
+    at most 12 processes x 8 resources of ints 0..10000 (checked by the practice type's own reader), max_claim >=
+    allocation everywhere, available has one entry per resource. The safe sequence takes the lowest-index process
+    that can finish first. Result: {need, safe, sequence ([] when unsafe), steps: [{process, need, work_before,
+    work_after}] (when unsafe, the steps that could run before the search got stuck)}; with request, request_result:
+    {granted, reason: ok|exceeds_need|must_wait|unsafe, state_after?: {allocation, available, need}} (the state
+    after a granted request, to chain the next one)."""
+    avail_m = practice_systems._int_matrix([a.get("available")] if isinstance(a.get("available"), list) else None)
+    if not avail_m:
+        raise _bad("available must be a list of 1 to 8 whole numbers from 0 to 10000.", "available")
+    avail = avail_m[0]
+    alloc = practice_systems._int_matrix(a.get("allocation"), cols=len(avail))
+    if not alloc:
+        raise _bad("allocation must be a matrix (up to 12 x 8) with one column per resource.", "allocation")
+    claim = practice_systems._int_matrix(a.get("max_claim"), rows=len(alloc), cols=len(avail))
+    if not claim:
+        raise _bad("max_claim must have the same shape as allocation.", "max_claim")
+    if any(claim[i][j] < alloc[i][j] for i in range(len(alloc)) for j in range(len(avail))):
+        raise _bad("max_claim must be at least allocation everywhere.", "max_claim")
+
+    def analyse(al: List[List[int]], av: List[int]):
+        nd = [[claim[i][j] - al[i][j] for j in range(len(av))] for i in range(len(al))]
+        work, done, seq, steps = list(av), [False] * len(al), [], []
+        while len(seq) < len(al):
+            for i in range(len(al)):
+                if not done[i] and all(nd[i][j] <= work[j] for j in range(len(av))):
+                    before = list(work)
+                    work = [work[j] + al[i][j] for j in range(len(av))]
+                    done[i] = True
+                    seq.append(i)
+                    steps.append({"process": i, "need": nd[i], "work_before": before, "work_after": list(work)})
+                    break
+            else:
+                break
+        return nd, len(seq) == len(al), seq, steps
+
+    need, safe, seq, steps = analyse(alloc, avail)
+    out: Dict[str, Any] = {"need": need, "safe": safe, "sequence": seq if safe else [], "steps": steps}
+    req = a.get("request")
+    if req is not None:
+        req = _dict(req, "request")
+        p = _int(req.get("process"), 0, len(alloc) - 1, "request.process")
+        vec = [_int(v, 0, 10000, f"request.vector.{i}") for i, v in enumerate(_cap_list(req.get("vector"), "request.vector", 1, 8))]
+        if len(vec) != len(avail):
+            raise _bad("vector needs one entry per resource.", "request.vector")
+        if any(vec[j] > need[p][j] for j in range(len(vec))):
+            res: Dict[str, Any] = {"granted": False, "reason": "exceeds_need"}
+        elif any(vec[j] > avail[j] for j in range(len(vec))):
+            res = {"granted": False, "reason": "must_wait"}
+        else:
+            av2 = [avail[j] - vec[j] for j in range(len(vec))]
+            al2 = [list(r) for r in alloc]
+            al2[p] = [al2[p][j] + vec[j] for j in range(len(vec))]
+            nd2, ok2, _, _ = analyse(al2, av2)
+            res = ({"granted": True, "reason": "ok", "state_after": {"allocation": al2, "available": av2, "need": nd2}}
+                   if ok2 else {"granted": False, "reason": "unsafe"})
+        out["request_result"] = res
+    return out
+
+
+# ===================================================================== stats
+def _norm_sf(x: float) -> float:
+    return 0.5 * math.erfc(x / math.sqrt(2))
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1, a - 1
+    c, d = 1.0, 1 - qab * x / qap
+    d = 1 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 201):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1 + aa * d
+        d = 1 / (d if abs(d) > tiny else tiny)
+        c = 1 + aa / c
+        c = c if abs(c) > tiny else tiny
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1 + aa * d
+        d = 1 / (d if abs(d) > tiny else tiny)
+        c = 1 + aa / c
+        c = c if abs(c) > tiny else tiny
+        delta = d * c
+        h *= delta
+        if abs(delta - 1) < 3e-16:
+            break
+    return h
+
+
+def _betai(a: float, b: float, x: float) -> float:
+    """Regularized incomplete beta I_x(a, b)."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    lbeta = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
+    if x < (a + 1) / (a + b + 2):
+        return math.exp(lbeta) * _betacf(a, b, x) / a
+    return 1 - math.exp(lbeta) * _betacf(b, a, 1 - x) / b
+
+
+def _t_sf(t: float, df: float) -> float:
+    """P(T > t) for Student's t with df degrees of freedom (a normal above 1e6)."""
+    if df >= 1e6:
+        return _norm_sf(t)
+    tail = 0.5 * _betai(df / 2, 0.5, df / (df + t * t))
+    return tail if t >= 0 else 1 - tail
+
+
+def _stats_two_sample(a: Dict[str, Any]) -> Dict[str, Any]:
+    """two_sample {test: z | welch | pooled, alternative: two_sided | less | greater, alpha = 0.05, mean1, sd1, n1,
+    mean2, sd2, n2} or {x: [num], y: [num]} (2..1000 values each; sample means and sd with n - 1). n >= 2 (up to
+    1e9), sd >= 0, the standard error must be above 0, alpha in (0, 0.5]. z uses the normal curve; welch uses
+    Satterthwaite degrees of freedom; pooled uses n1 + n2 - 2; a t curve above 1e6 degrees of freedom is read as
+    normal. p-values and critical values come from the normal (erfc) or t (incomplete beta) distribution, critical
+    values by 80 bisection steps. p_value has 6 significant digits. Result: {statistic, df (null for z), p_value,
+    critical (positive for two_sided, signed for one-sided), reject (p < alpha), ci: [lo, hi] (the difference of
+    means, two-sided 1 - alpha), se, curve: [{x, y}] (101 points of the null density from -4.5 to 4.5)}."""
+    test = a.get("test", "welch")
+    if test not in ("z", "welch", "pooled"):
+        raise _bad("test is z, welch or pooled.", "test")
+    alt = a.get("alternative", "two_sided")
+    if alt not in ("two_sided", "less", "greater"):
+        raise _bad("alternative is two_sided, less or greater.", "alternative")
+    alpha = _real(a.get("alpha", 0.05), "alpha", 0.0, 0.5)
+    if alpha <= 0:
+        raise _bad("alpha must be above 0.", "alpha")
+    if a.get("x") is not None or a.get("y") is not None:
+        def stats(v: Any, at: str) -> Tuple[float, float, int]:
+            xs = [_real(t, f"{at}.{i}", -1e9, 1e9) for i, t in enumerate(_cap_list(v, at, 2, 1000))]
+            m = math.fsum(xs) / len(xs)
+            return m, math.sqrt(math.fsum((t - m) ** 2 for t in xs) / (len(xs) - 1)), len(xs)
+        m1, s1, n1 = stats(a.get("x"), "x")
+        m2, s2, n2 = stats(a.get("y"), "y")
+    else:
+        m1, m2 = _real(a.get("mean1"), "mean1"), _real(a.get("mean2"), "mean2")
+        s1, s2 = _real(a.get("sd1"), "sd1", 0, 1e12), _real(a.get("sd2"), "sd2", 0, 1e12)
+        n1, n2 = _int(a.get("n1"), 2, 10 ** 9, "n1"), _int(a.get("n2"), 2, 10 ** 9, "n2")
+    v1, v2 = s1 * s1 / n1, s2 * s2 / n2
+    if test == "pooled":
+        df: Optional[float] = float(n1 + n2 - 2)
+        sp2 = ((n1 - 1) * s1 * s1 + (n2 - 1) * s2 * s2) / df
+        se = math.sqrt(sp2 * (1 / n1 + 1 / n2))
+    else:
+        se = math.sqrt(v1 + v2)
+        df = None
+        if test == "welch" and se > 0:
+            df = (v1 + v2) ** 2 / (v1 * v1 / (n1 - 1) + v2 * v2 / (n2 - 1))
+    if not se > 0 or not math.isfinite(se):
+        raise _bad("The standard error is 0: the data have no spread.", "sd1")
+    stat = (m1 - m2) / se
+    sf = (lambda t: _norm_sf(t)) if df is None else (lambda t: _t_sf(t, df))
+    if alt == "two_sided":
+        p = min(1.0, 2 * sf(abs(stat)))
+    elif alt == "less":
+        p = sf(-stat)
+    else:
+        p = sf(stat)
+    target = alpha / 2 if alt == "two_sided" else alpha
+
+    def crit(tail: float) -> float:
+        lo, hi = 0.0, 1.0
+        for _ in range(60):
+            if sf(hi) < tail:
+                break
+            hi *= 2
+        for _ in range(80):
+            mid = (lo + hi) / 2
+            if sf(mid) > tail:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
+    c = crit(target)
+    cc = c if alt != "less" else -c
+    c2 = c if alt == "two_sided" else crit(alpha / 2)
+    if df is None:
+        curve = [(-4.5 + 9 * k / 100, math.exp(-0.5 * (-4.5 + 9 * k / 100) ** 2) / math.sqrt(2 * math.pi)) for k in range(101)]
+    else:
+        lc = math.lgamma((df + 1) / 2) - math.lgamma(df / 2) - 0.5 * math.log(df * math.pi)
+        curve = [(x, math.exp(lc - (df + 1) / 2 * math.log1p(x * x / df))) for x in (-4.5 + 9 * k / 100 for k in range(101))]
+    diff = m1 - m2
+    return {"statistic": _r4(stat), "df": None if df is None else _r4(df), "p_value": _sig(p), "critical": _r4(cc),
+            "reject": p < alpha, "ci": [_r4(diff - c2 * se), _r4(diff + c2 * se)], "se": _r4(se),
+            "curve": [{"x": _r4(x), "y": _r4(y)} for x, y in curve]}
+
+
+def _stats_markov(a: Dict[str, Any]) -> Dict[str, Any]:
+    """markov {P: [[num]], start?: [num], steps = 20}: a finite Markov chain. P is n x n with n 2..10, entries in
+    [0, 1], every row summing to 1 within 1e-9 (bad_args at "P.<row>"); rows are then rescaled to sum to exactly 1 in
+    fractions. steps 0..100; start is a distribution (default state 0). The stationary distribution is solved exactly
+    (pi(P - I) = 0, sum 1) when the chain has exactly one closed (recurrent) class, else it is null. Communicating
+    classes are ordered by smallest state; period is the gcd of cycle lengths in a class (0 when the class has no
+    cycle); aperiodic means every recurrent class has period 1. Result: {stationary: [{exact, value}] | null, unique,
+    classes: [[state]], recurrent: [bool per class], absorbing: [state], period: [int per class], irreducible,
+    aperiodic, distribution: [[num]] (steps + 1 rows, row 0 = start)}."""
+    raw = _cap_list(a.get("P"), "P", 2, 10)
+    n = len(raw)
+    P: List[List[Fraction]] = []
+    for i, r in enumerate(raw):
+        r = _cap_list(r, f"P.{i}", 1, 10)
+        if len(r) != n:
+            raise _bad("P must be square.", f"P.{i}")
+        vals = [_real(v, f"P.{i}.{j}", 0.0, 1.0) for j, v in enumerate(r)]
+        if abs(math.fsum(vals) - 1) > 1e-9:
+            raise _bad("Each row of P must sum to 1.", f"P.{i}")
+        fr = [Fraction(str(v)) for v in r]
+        tot = sum(fr)
+        P.append([x / tot for x in fr])
+    steps = _int(a.get("steps", 20), 0, 100, "steps")
+    start = a.get("start")
+    if start is None:
+        dist = [1.0] + [0.0] * (n - 1)
+    else:
+        dist = [_real(v, f"start.{i}", 0.0, 1.0) for i, v in enumerate(_cap_list(start, "start", n, n))]
+        if abs(math.fsum(dist) - 1) > 1e-9:
+            raise _bad("start must sum to 1.", "start")
+    edge = [[P[i][j] > 0 for j in range(n)] for i in range(n)]
+    reach = [[edge[i][j] or i == j for j in range(n)] for i in range(n)]
+    for k in range(n):
+        for i in range(n):
+            if reach[i][k]:
+                for j in range(n):
+                    if reach[k][j]:
+                        reach[i][j] = True
+    classes: List[List[int]] = []
+    placed: set = set()
+    for i in range(n):
+        if i not in placed:
+            cl = [j for j in range(n) if reach[i][j] and reach[j][i]]
+            placed.update(cl)
+            classes.append(cl)
+    recurrent = [all(not edge[i][j] or j in cl for i in cl for j in range(n)) for cl in classes]
+    absorbing = [i for i in range(n) if P[i][i] == 1]
+    periods = []
+    for cl in classes:
+        level = {cl[0]: 0}
+        queue = [cl[0]]
+        for u in queue:
+            for v in cl:
+                if edge[u][v] and v not in level:
+                    level[v] = level[u] + 1
+                    queue.append(v)
+        g = 0
+        for u in cl:
+            for v in cl:
+                if edge[u][v]:
+                    g = math.gcd(g, abs(level[u] + 1 - level[v]))
+        periods.append(g)
+    unique = sum(recurrent) == 1
+    stationary = None
+    if unique:
+        M = [[P[j][i] - (1 if i == j else 0) for j in range(n)] + [Fraction(0)] for i in range(n)]
+        M[n - 1] = [Fraction(1)] * n + [Fraction(1)]
+        for col in range(n):
+            piv = next((r for r in range(col, n) if M[r][col] != 0), None)
+            if piv is None:
+                raise ToolError("bad_input", "The stationary system could not be solved.")
+            M[col], M[piv] = M[piv], M[col]
+            for r in range(n):
+                if r != col and M[r][col] != 0:
+                    f = M[r][col] / M[col][col]
+                    M[r] = [x - f * y for x, y in zip(M[r], M[col])]
+        pi = [M[i][n] / M[i][i] for i in range(n)]
+        stationary = [{"exact": _frac(x), "value": _r4(x)} for x in pi]
+    Pf = [[float(x) for x in r] for r in P]
+    rows_out, cur = [[_r4(v) for v in dist]], dist
+    for _ in range(steps):
+        cur = [sum(cur[i] * Pf[i][j] for i in range(n)) for j in range(n)]
+        rows_out.append([_r4(v) for v in cur])
+    return {"stationary": stationary, "unique": unique, "classes": classes, "recurrent": recurrent,
+            "absorbing": absorbing, "period": periods, "irreducible": len(classes) == 1,
+            "aperiodic": all(p == 1 for p, r in zip(periods, recurrent) if r), "distribution": rows_out}
+
+
+# ===================================================================== bio
+def _letters(v: Any, at: str, hi: int) -> str:
+    s = "".join(_text(v, at, 10 * hi + 1000, required=True).split()).upper()
+    if not s:
+        raise _bad(f"{at} is empty.", at)
+    if len(s) > hi:
+        raise ToolError("too_large", f"{at} is longer than {hi} letters.", at)
+    return s
+
+
+def _bio_align(a: Dict[str, Any]) -> Dict[str, Any]:
+    """align {seq1, seq2, mode: global | local, match = 2, mismatch = -1, gap = -2}: Needleman-Wunsch (global) or
+    Smith-Waterman (local) with a linear gap. Letters A-Z only (case and spaces ignored), 1..300 each (too_large
+    above); scores are whole numbers from -100 to 100 (mismatch and gap are given as negative numbers to penalise).
+    Traceback ties prefer diagonal, then up (a gap in seq2), then left (a gap in seq1); a local alignment starts at
+    the first best cell in row-major order. Result: {score, aligned1, aligned2, midline ("|" match, "." mismatch,
+    " " gap), identity (matches over alignment columns), gaps, start: [i, j] and end: [i, j] (1-based residue
+    positions of the first and last aligned columns; null for an empty local alignment), matrix (the (n+1) x (m+1)
+    score table, only when both sequences have at most 12 letters), path: [[i, j]] (the table cells walked, from
+    the start cell to the end cell)}."""
+    s1, s2 = _letters(a.get("seq1"), "seq1", 300), _letters(a.get("seq2"), "seq2", 300)
+    for at, s in (("seq1", s1), ("seq2", s2)):
+        if any(not ("A" <= c <= "Z") for c in s):
+            raise _bad("Use the letters A to Z only.", at)
+    mode = a.get("mode", "global")
+    if mode not in ("global", "local"):
+        raise _bad("mode is global or local.", "mode")
+    match, mis, gap = (_int(a.get(k, d), -100, 100, k) for k, d in (("match", 2), ("mismatch", -1), ("gap", -2)))
+    n, m = len(s1), len(s2)
+    local = mode == "local"
+    H = [[0] * (m + 1) for _ in range(n + 1)]
+    if not local:
+        for i in range(1, n + 1):
+            H[i][0] = i * gap
+        for j in range(1, m + 1):
+            H[0][j] = j * gap
+    best, bi, bj = 0, 0, 0
+    for i in range(1, n + 1):
+        row, prev, c1 = H[i], H[i - 1], s1[i - 1]
+        for j in range(1, m + 1):
+            v = max(prev[j - 1] + (match if c1 == s2[j - 1] else mis), prev[j] + gap, row[j - 1] + gap)
+            if local and v < 0:
+                v = 0
+            row[j] = v
+            if local and v > best:
+                best, bi, bj = v, i, j
+    if local:
+        i, j = bi, bj
+    else:
+        i, j = n, m
+    end_i, end_j = i, j
+    x1: List[str] = []
+    x2: List[str] = []
+    cells = [(i, j)]
+    while (H[i][j] > 0) if local else (i > 0 or j > 0):
+        sc = match if s1[i - 1] == s2[j - 1] else mis
+        if i > 0 and j > 0 and H[i][j] == H[i - 1][j - 1] + sc:
+            x1.append(s1[i - 1]); x2.append(s2[j - 1]); i -= 1; j -= 1
+        elif i > 0 and H[i][j] == H[i - 1][j] + gap:
+            x1.append(s1[i - 1]); x2.append("-"); i -= 1
+        else:
+            x1.append("-"); x2.append(s2[j - 1]); j -= 1
+        cells.append((i, j))
+    al1, al2 = "".join(reversed(x1)), "".join(reversed(x2))
+    mid = "".join(" " if p == "-" or q == "-" else ("|" if p == q else ".") for p, q in zip(al1, al2))
+    empty = not al1
+    return {"score": H[n][m] if not local else best, "aligned1": al1, "aligned2": al2, "midline": mid,
+            "identity": _r4(mid.count("|") / len(mid)) if mid else 0.0, "gaps": al1.count("-") + al2.count("-"),
+            "start": None if empty else [i + 1, j + 1], "end": None if empty else [end_i, end_j],
+            "matrix": H if n <= 12 and m <= 12 else None,
+            "path": [] if empty else [list(c) for c in reversed(cells)]}
+
+
+_COMP = {"A": "T", "C": "G", "G": "C", "T": "A"}
+
+
+def _bio_orf(a: Dict[str, Any]) -> Dict[str, Any]:
+    """orf {dna, min_codons = 10, strands: both | forward}: open reading frames. DNA is A, C, G, T (U read as T;
+    case and spaces ignored), 3..20000 letters (too_large above); other letters are bad_args at "dna". min_codons
+    1..1000 is the least number of amino acids (ATG included, stop left out). An ORF is ATG ... stop in one frame;
+    per stop only the first ATG after the previous stop (the longest). Codons come from the standard table. Result:
+    {frames: [{frame: "+1".."-3", protein}] (only when dna has at most 3000 letters; * marks a stop; forward frames
+    first), orfs: [{frame, start, end, length_nt, protein}] (longest first, then smaller start; at most 100;
+    length_nt counts the stop codon; start and end are 1-based on the given strand's forward coordinates and run
+    from the A of ATG to the last base of the stop, so start > end on the minus strand), truncated}."""
+    raw = a.get("dna")
+    if not isinstance(raw, str):
+        raise _bad("dna must be text.", "dna")
+    if len(raw) > 200_000:
+        raise ToolError("too_large", "dna is longer than 20000 letters.", "dna")
+    dna = "".join(raw.split()).upper().replace("U", "T")
+    if len(dna) > 20000:
+        raise ToolError("too_large", "dna is longer than 20000 letters.", "dna")
+    if len(dna) < 3 or any(c not in "ACGT" for c in dna):
+        raise _bad("dna needs 3 to 20000 letters from A, C, G, T (or U).", "dna")
+    min_c = _int(a.get("min_codons", 10), 1, 1000, "min_codons")
+    strands = a.get("strands", "both")
+    if strands not in ("both", "forward"):
+        raise _bad("strands is both or forward.", "strands")
+    L = len(dna)
+    seqs = [("+", dna)]
+    if strands == "both":
+        seqs.append(("-", "".join(_COMP[c] for c in reversed(dna))))
+    frames, orfs = [], []
+    for sign, s in seqs:
+        for f in range(3):
+            prot = [practice_bio.CODON_TABLE[s[p:p + 3]] for p in range(f, L - 2, 3)]
+            name = f"{sign}{f + 1}"
+            if L <= 3000:
+                frames.append({"frame": name, "protein": "".join(prot)})
+            first = None
+            for k, aa in enumerate(prot):
+                if aa == "M" and first is None:
+                    first = k
+                elif aa == "*":
+                    if first is not None and k - first >= min_c:
+                        p0 = f + 3 * first
+                        nt = 3 * (k - first + 1)
+                        start, end = (p0 + 1, p0 + nt) if sign == "+" else (L - p0, L - p0 - nt + 1)
+                        orfs.append({"frame": name, "start": start, "end": end, "length_nt": nt,
+                                     "protein": "".join(prot[first:k])})
+                    first = None
+    orfs.sort(key=lambda o: (-o["length_nt"], min(o["start"], o["end"]), o["frame"]))
+    return {"frames": frames, "orfs": orfs[:100], "truncated": len(orfs) > 100}
+
+
 TOOLS: Dict[str, Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]]] = {
     "polity": {"allocate": _polity_allocate, "stv": _polity_stv, "irv": _polity_irv, "power": _polity_power},
     "music": {"lint": _music_lint, "tuning": _music_tuning},
     "classics": {"harris": _classics_harris, "leiden": _classics_leiden},
     "literature": {"scan": _lit_scan, "form": _lit_form},
     "rhetoric": {"toulmin": _rhet_toulmin, "appeals": _rhet_appeals},
+    "ee": {"dc_solve": _ee_dc_solve, "bode": _ee_bode},
+    "ai": {"metrics": _ai_metrics, "descent": _ai_descent},
+    "systems": {"cache": _sys_cache, "bankers": _sys_bankers},
+    "stats": {"two_sample": _stats_two_sample, "markov": _stats_markov},
+    "bio": {"align": _bio_align, "orf": _bio_orf},
 }
 
 

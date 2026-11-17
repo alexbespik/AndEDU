@@ -431,7 +431,7 @@ class RunContract(unittest.TestCase):
 
     def test_guide(self):
         g = kit_tools.guide()
-        self.assertEqual(set(g), {"polity", "music", "classics", "literature", "rhetoric"})
+        self.assertEqual(set(g), {"polity", "music", "classics", "literature", "rhetoric", "ee", "ai", "systems", "stats", "bio"})
         for kind, ops in g.items():
             for op, doc in ops.items():
                 self.assertTrue(doc.strip(), (kind, op))
@@ -505,8 +505,8 @@ class Route(unittest.TestCase):
         self.assertIn("harris", g.json()["classics"])
 
     def test_rate_limit_429(self):
-        self.assertEqual(server.RATE_LIMITS["kit_tool"], 1200)
-        with mock.patch.object(server, "RATE_SCALE", 1 / 600):  # 1200 / 600 = 2 per hour
+        self.assertEqual(server.RATE_LIMITS["kit_tool"], 3600)  # sliders re-run a desk every 600 ms pause
+        with mock.patch.object(server, "RATE_SCALE", 1 / 1800):  # 3600 / 1800 = 2 per hour
             codes = [self.c.post("/api/kits/music/tool", json={"op": "tuning"}).status_code for _ in range(3)]
         self.assertEqual(codes, [200, 200, 429])
 

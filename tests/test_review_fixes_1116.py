@@ -100,6 +100,39 @@ class GraderFuzzTest(unittest.TestCase):
                                     self.assertNotIn(k, out)
 
 
+class RegisterTraceLimitsTest(unittest.TestCase):
+    BASE = {"id": "p1", "type": "assembly_reg_trace", "prompt": "?"}
+
+    def norm(self, **raw):
+        return practice_systems.NORMALIZERS["assembly_reg_trace"](raw, dict(self.BASE))
+
+    def test_normal_trace_still_works(self):
+        item = self.norm(instructions=["addi x1 x0 5", "slli x2 x1 31"], initial_registers={"x0": 0})
+        self.assertEqual(item["final_registers"]["x2"], (5 << 31) & 0xFFFFFFFF)
+
+    def test_huge_or_negative_shift_is_dropped_not_a_crash(self):
+        for sh in ("10000000000", "32", "-1"):
+            with self.subTest(sh=sh):
+                try:
+                    out = self.norm(instructions=[f"slli x1 x1 {sh}"], initial_registers={"x1": 1})
+                except ValueError:
+                    out = None  # normalize_practice catches ValueError and drops the item
+                self.assertIsNone(out)
+
+    def test_too_many_instructions_or_registers_dropped(self):
+        self.assertIsNone(self.norm(instructions=["add x1 x1 x1"] * 65, initial_registers={"x1": 1}))
+        self.assertIsNone(self.norm(instructions=["add x1 x1 x1"], initial_registers={"x1": 2 ** 40}))
+
+
+class ConfusionMatrixZeroCountTest(unittest.TestCase):
+    def test_zero_false_positives_is_a_valid_matrix(self):
+        import practice_ai
+        item = practice_ai.NORMALIZERS["confusion_matrix_metrics"](
+            {"TP": 10, "FP": 0, "FN": 5, "TN": 20}, {"id": "p1", "type": "confusion_matrix_metrics", "prompt": "?"})
+        self.assertIsNotNone(item)
+        self.assertEqual(item["metrics"]["precision"], 1.0)
+
+
 class ExportRedactionTest(unittest.TestCase):
     def test_export_strips_kit_answer_keys(self):
         item = _norm(BANKER_SAFE)

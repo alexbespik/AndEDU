@@ -115,7 +115,7 @@ RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload":
                "philin": 20, "philin_factcheck": 30,  # PHILIN: transcribe/positions per request, fact-checks per claim
                "campus": 30, "campus_sync": 6,
                "practice_grade": 600, "dialogue": 120,
-               "kit_tool": 1200, "logic_grade": 1200}  # deterministic kit desks and the logic engine: no model  # server-graded kit items; philosophy figure dialogue (one model call each)  # campus events: interest keywords (one model call), manual feed sync
+               "kit_tool": 3600, "logic_grade": 1200}  # deterministic kit desks and the logic engine: no model  # server-graded kit items; philosophy figure dialogue (one model call each)  # campus events: interest keywords (one model call), manual feed sync
 RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
 _rate_hits: Dict[Tuple[str, str], List[float]] = {}
 _rate_lock = threading.Lock()

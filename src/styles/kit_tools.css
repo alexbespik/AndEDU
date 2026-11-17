@@ -110,3 +110,59 @@ textarea.kt-input { resize: vertical; line-height: 1.4; }
 .kt-g-diag { stroke: var(--rust); stroke-dasharray: 2 4; }
 .kt-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-4); font-size: 0.85rem; color: var(--ink); }
 .kt-legend li { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+/* STEM kit desks: charts, matrices, alignment, bit fields */
+.kt-plot { display: block; width: 100%; max-width: 640px; height: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.kt-chain { max-width: 360px; }
+.kt-pathplot { max-width: 320px; }
+.kt-gridline { stroke: var(--rule); stroke-width: 1; }
+.kt-axis { stroke: var(--rule-strong); stroke-width: 1.2; }
+.kt-axis-text { fill: var(--muted); font: 10px var(--font-body); }
+.kt-strong { fill: var(--ink); font-weight: 600; }
+.kt-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.kt-dash { stroke-dasharray: 5 4; }
+.kt-ref { stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 3; }
+.kt-ref.t1 { stroke: var(--info); }
+.kt-ref.t2 { stroke: var(--ok); }
+.kt-ref.t3 { stroke: var(--bad); }
+.kt-ref.t4 { stroke: var(--gold); }
+.kt-mark { stroke: var(--surface); stroke-width: 2; }
+.kt-area { stroke: none; opacity: 0.5; }
+.kt-line.t0, .kt-dot.t0, .kt-node.t0, .kt-orf.t0, .kt-sw.t0 { stroke: var(--accent); fill: var(--accent); }
+.kt-line.t1, .kt-dot.t1, .kt-node.t1, .kt-orf.t1, .kt-sw.t1 { stroke: var(--info); fill: var(--info); }
+.kt-line.t2, .kt-dot.t2, .kt-node.t2, .kt-sw.t2, .kt-area.t2 { stroke: var(--bad); fill: var(--bad); }
+.kt-line.t3, .kt-dot.t3, .kt-node.t3, .kt-sw.t3 { stroke: var(--gold); fill: var(--gold); }
+.kt-line.t4, .kt-dot.t4, .kt-node.t4, .kt-sw.t4 { stroke: var(--muted); fill: var(--muted); }
+.kt-line.t5, .kt-dot.t5, .kt-node.t5, .kt-sw.t5 { stroke: var(--plum); fill: var(--plum); }
+.kt-line.t6, .kt-dot.t6, .kt-node.t6, .kt-sw.t6 { stroke: var(--ok); fill: var(--ok); }
+.kt-line { fill: none; }
+.kt-area.t2 { stroke: none; }
+.kt-sw.t0 { background: var(--accent); } .kt-sw.t1 { background: var(--info); } .kt-sw.t2 { background: var(--bad); } .kt-sw.t3 { background: var(--gold); }
+.kt-sw.t4 { background: var(--muted); } .kt-sw.t5 { background: var(--plum); } .kt-sw.t6 { background: var(--ok); }
+.kt-sw { display: inline-block; width: 18px; height: 4px; border-radius: 2px; stroke: none; fill: none; }
+.kt-node { stroke: var(--surface); stroke-width: 2; }
+.kt-node-text { fill: var(--surface); font: 700 11px var(--font-body); }
+.kt-edge { stroke: var(--ink-soft); stroke-width: 1.5; fill: none; }
+.kt-arrow { fill: var(--ink-soft); }
+.kt-orf { stroke: none; opacity: 0.85; }
+
+.kt-matrix td, .kt-matrix th { text-align: center; }
+.kt-heat { font-family: var(--font-mono); }
+.kt-heat-ok { background: color-mix(in srgb, var(--ok) calc(var(--kt-heat, 0) * 60%), transparent); }
+.kt-heat-bad { background: color-mix(in srgb, var(--bad) calc(var(--kt-heat, 0) * 60%), transparent); }
+.kt-onpath { background: var(--accent-tint); color: var(--ink); font-weight: 700; outline: 1px solid var(--accent); }
+
+.kt-bitbar { display: flex; width: 100%; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--rule-strong); font: 600 0.8rem var(--font-mono); }
+.kt-bitseg { flex-basis: 0; min-width: 4.5rem; padding: 6px var(--space-2); text-align: center; color: var(--ink); white-space: nowrap; }
+.kt-bit-tag { background: var(--info-tint); }
+.kt-bit-index { background: var(--gold-tint); }
+.kt-bit-offset { background: var(--ok-tint); }
+
+.kt-aln { display: grid; gap: var(--space-3); font: 0.95rem/1.35 var(--font-mono); color: var(--ink); }
+.kt-aln-block { display: grid; gap: 0; width: max-content; max-width: 100%; }
+.kt-aln-row { white-space: pre; }
+.kt-aln-match { color: var(--ok-ink); }
+.kt-aln-mis { color: var(--bad-ink); background: var(--bad-tint); }
+.kt-aln-gap { color: var(--muted); }
+.kt-dp td, .kt-dp th { padding: 2px 6px; font-size: 0.85rem; }
+

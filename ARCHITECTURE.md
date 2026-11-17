@@ -575,8 +575,17 @@ desks compute with the student's own input only; nothing is stored and no model 
   diplomatic/edited readings); literature `scan` (feet, substitutions, line name), `form` (sonnet, villanelle,
   terza rima rhyme schemes and refrains); rhetoric `toulmin`, `appeals`. Art history has no server op: its
   composition overlay (thirds, golden section, diagonals) runs in the browser on a local image or an offline diagram.
+- STEM kits (same engine and route): ee `dc_solve` (nodal analysis with exact fractions, voltage sources), `bode`
+  (magnitude/phase from polynomial coefficients, phase seeded from the low-frequency asymptote, margins); ai
+  `metrics` (confusion matrix or scores: per-class, kappa, MCC, ROC/AUC), `descent` (linear or logistic gradient
+  descent with history); systems `cache` (address split, LRU/FIFO trace, compulsory/capacity/conflict misses),
+  `bankers` (safe sequence, resource request); stats `two_sample` (z, Welch or pooled t: p-value, CI, null curve),
+  `markov` (exact stationary distribution, classes, period); bio `align` (Needleman-Wunsch / Smith-Waterman with
+  traceback), `orf` (six frames). STEM kits are not workspaces, so their desks open from a lesson's Tools tab
+  (`TopicViewer.jsx`, when its practice types belong to a STEM kit: `stemKitOf`), the Lab's "STEM tools" view, and the
+  IDE's "Kit tools" button; the IDE also offers "Open this lesson's exercises" for non-code practice items.
 - Routes: `GET /api/kits/tools` (the ops' docstrings), `POST /api/kits/{kind}/tool {op, args}` (unknown kind 404,
-  otherwise 200 with `{ok, ...}`), rate limit `kit_tool` (1200/h); `/api/logic/grade` is a plain def with its own
+  otherwise 200 with `{ok, ...}`), rate limit `kit_tool` (3600/h; desks debounce slider runs by 600 ms); `/api/logic/grade` is a plain def with its own
   `logic_grade` limit (1200/h). MCP: `kit_tool`. Sample lessons: `scripts/seed_kit_syllabi.py` (4 classes per kit,
   ids `kit-<kit>-class-<n>`, `--dry-run` writes nothing).
 

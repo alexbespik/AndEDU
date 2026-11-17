@@ -8,7 +8,7 @@ import CourseView from './components/CourseView';
 import ReviewSession from './components/ReviewSession';
 import DesktopKeySetup from './components/DesktopKeySetup';
 import RewardLayer, { StreakChip } from './components/Rewards';
-import { BookOpen, FlaskConical, Compass } from 'lucide-react';
+import { BookOpen, FlaskConical, Compass, Wrench } from 'lucide-react';
 import { TuxIcon } from './components/PenguinShadow';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
 import LoadingPanel from './components/LoadingPanel';
@@ -17,6 +17,7 @@ import CampusGlance from './components/campus/CampusGlance';
 import { campusPath, useCampusFetch } from './components/campus/format';
 import { LoadingPrefs, quotesEnabled } from './lib/quotes';
 import { SUBJECT_MODES } from './lib/workspaces';
+import { KIT_TOOLS, STEM_KITS, STEM_KIT_LABEL } from './components/kits';
 
 // The lesson viewer, the IDE and the workspaces load on demand
 const TopicViewer = lazy(() => import('./components/TopicViewer'));
@@ -96,7 +97,9 @@ export default function App() {
   const campusUnread = user && campusNotify ? (campusAlerts.data?.unread_count || 0) : 0;
   const [topics, setTopics] = useState([]);
   const [selectedTopicId, setSelectedTopicId] = useState(DEFAULT_TOPIC_ID);
-  const [labView, setLabView] = useState('lesson'); // lesson | chem (the Chemistry kit)
+  const [labView, setLabView] = useState('lesson'); // lesson | chem (the Chemistry kit) | tools (STEM kit tools)
+  const [toolsKind, setToolsKind] = useState('ee');
+  const [exerciseId, setExerciseId] = useState(null); // a code-class lesson opened in the normal lesson view from the IDE
   const [activeTab, setActiveTab] = useState('theory');
   const [liveSimConfig, setLiveSimConfig] = useState(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -226,6 +229,7 @@ export default function App() {
       }
     }
     setActiveTab(tab);
+    setExerciseId(null);
     const ws = workspaceOf(t);
     if (ws === 'math' || SUBJECT_MODES.includes(ws)) { setClassTopicId(t.id); setMode(ws); }  // library lessons too
     else if (ws === 'code') { setClassTopicId(t.id); setMode('class'); }
@@ -234,7 +238,7 @@ export default function App() {
 
   const labTopics = topics.filter((t) => workspaceOf(t) === 'lab');
   const mathTopics = topics.filter((t) => t.source?.courseId && workspaceOf(t) === 'math');
-  const activeTopic = labTopics.find((t) => t.id === selectedTopicId) || labTopics[0];
+  const activeTopic = (exerciseId && topics.find((t) => t.id === exerciseId)) || labTopics.find((t) => t.id === selectedTopicId) || labTopics[0];
   const classTopic = topics.find((t) => t.id === classTopicId) || null;
   const mathClass = classTopic && workspaceOf(classTopic) === 'math' ? classTopic : null;
   const subjectClass = classTopic && workspaceOf(classTopic) === mode ? classTopic : null;
@@ -493,9 +497,13 @@ export default function App() {
       clearInterval(timer);
     };
   }, [idleMin, lockNow, user?.name]);
+  // leaving the Lab drops the lesson opened from the IDE and returns the Lab to its lesson view
+  useEffect(() => { if (mode !== 'physics') { setExerciseId(null); setLabView('lesson'); } }, [mode]);
   const switchMode = (m) => { setMode(m); if (m === 'home') setCourseId(null); };
   const openCampus = (tab = 'now') => { setCampusTab(tab); setMode('campus'); };
   const openCourse = (id) => { setCourseId(id); setMode('course'); };
+  const openStemTools = (k) => { setToolsKind(k); setLabView('tools'); setMode('physics'); };
+  const openExercises = (id) => { setExerciseId(id); setActiveTab('practice'); setLabView('lesson'); setMode('physics'); };
 
   if (!user) return <LoginPage key={resume?.id || 'signin'} onSignedIn={signIn} resume={resume} notice={lockNotice} />;
 
@@ -599,8 +607,34 @@ export default function App() {
                   aria-pressed={labView === 'chem'} onClick={() => setLabView('chem')}>
                   <FlaskConical size={14} aria-hidden="true" /> Chemistry kit
                 </button>
+                <button type="button" className={`btn btn-sm ${labView === 'tools' ? 'btn-secondary' : 'btn-quiet'}`}
+                  aria-pressed={labView === 'tools'} onClick={() => setLabView('tools')}>
+                  <Wrench size={14} aria-hidden="true" /> STEM tools
+                </button>
               </div>
-              {labView === 'chem' ? (
+              {labView === 'tools' ? (
+                <section aria-labelledby="stem-tools-title">
+                  <header className="page-head">
+                    <div>
+                      <h1 id="stem-tools-title">STEM tools</h1>
+                      <p>Calculators and visualizers for the circuits, machine learning, systems, statistics and bioinformatics kits. Nothing here uses a model or costs anything.</p>
+                    </div>
+                  </header>
+                  <div className="kt-tabs" role="radiogroup" aria-label="Kit">
+                    {STEM_KITS.map((k) => (
+                      <button key={k} type="button" role="radio" aria-checked={toolsKind === k} className="kt-seg" onClick={() => setToolsKind(k)}>{STEM_KIT_LABEL[k]}</button>
+                    ))}
+                  </div>
+                  {(() => {
+                    const Desk = KIT_TOOLS[toolsKind];
+                    return (
+                      <ErrorBoundary key={toolsKind}>
+                        <Suspense fallback={<LoadingPanel compact label="Loading the tools…" />}><Desk kind={toolsKind} /></Suspense>
+                      </ErrorBoundary>
+                    );
+                  })()}
+                </section>
+              ) : labView === 'chem' ? (
                 <section aria-labelledby="chem-kit-title">
                   <header className="page-head">
                     <div>
@@ -620,7 +654,7 @@ export default function App() {
           )}
           {mode === 'class' && (codeClass ? (
             <Suspense fallback={<LoadingPanel page label="Loading the IDE…" />}>
-              <EduStudioIDE initialMode="code" classTopic={codeClass} {...classNav(codeClass)} userId={user.id} onOpenTopic={(id) => openTopic(id)} onSwitchToPhysics={() => setMode('physics')} />
+              <EduStudioIDE initialMode="code" classTopic={codeClass} {...classNav(codeClass)} userId={user.id} onOpenTopic={(id) => openTopic(id)} onOpenTools={openStemTools} onOpenExercises={openExercises} onSwitchToPhysics={() => setMode('physics')} />
             </Suspense>
           ) : <LoadingPanel page label="Loading the class…" />)}
           {ideMode && (

@@ -48,8 +48,8 @@ def tools(call, q, S, STR, OBJ, ARR):
         return call("POST", f"/api/kits/{q(str(a['kind']))}/tool", {"op": a["op"], "args": a.get("args") or {}})
 
     return [
-        ("kit_tool", "Run one deterministic liberal-arts desk operation (no model): polity allocate|stv|irv|power, music lint|tuning, classics harris|leiden, literature scan|form, rhetoric toulmin|appeals. Returns {ok, result} or {ok: false, error}. GET /api/kits/tools lists every op's fields.",
-         S(kind=STR("polity | music | classics | literature | rhetoric", enum=["polity", "music", "classics", "literature", "rhetoric"]), op=STR("operation name"), args=OBJ("the operation's arguments", optional=True)),
+        ("kit_tool", "Run one deterministic desk operation (no model): polity allocate|stv|irv|power, music lint|tuning, classics harris|leiden, literature scan|form, rhetoric toulmin|appeals, ee dc_solve|bode, ai metrics|descent, systems cache|bankers, stats two_sample|markov, bio align|orf. Returns {ok, result} or {ok: false, error}. GET /api/kits/tools lists every op's fields.",
+         S(kind=STR("polity | music | classics | literature | rhetoric | ee | ai | systems | stats | bio", enum=["polity", "music", "classics", "literature", "rhetoric", "ee", "ai", "systems", "stats", "bio"]), op=STR("operation name"), args=OBJ("the operation's arguments", optional=True)),
          kit_tool),
         ("kit_types", "The kit practice types (literature, music, art_history, classics, rhetoric, polity, ee, ai, systems, stats, bio) with their fields, from the backend guide. Secret fields (answer keys) are listed as 'Secret'; the server keeps them out of the browser.",
          S(kit=STR("one kit id; all kits when omitted", enum=list(KITS), optional=True)), kit_types),

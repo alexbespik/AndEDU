@@ -189,10 +189,10 @@ def _np_confusion_matrix_metrics(p: Dict[str, Any], base: Dict[str, Any]) -> Opt
     """confusion_matrix_metrics: compute classification metrics from a confusion matrix.
     Fields: TP, FP, FN, TN (counts). Secret: metrics {precision, recall, f1, specificity} (computed by the server).
     Submit {precision, recall, f1, specificity} (tolerance 0.02; 3 of 4 must match)."""
-    tp = _num(p.get("TP") or p.get("tp"))
-    fp = _num(p.get("FP") or p.get("fp"))
-    fn = _num(p.get("FN") or p.get("fn"))
-    tn = _num(p.get("TN") or p.get("tn"))
+    tp = _num(p["TP"] if p.get("TP") is not None else p.get("tp"))  # 0 is a real count
+    fp = _num(p["FP"] if p.get("FP") is not None else p.get("fp"))  # 0 is a real count
+    fn = _num(p["FN"] if p.get("FN") is not None else p.get("fn"))  # 0 is a real count
+    tn = _num(p["TN"] if p.get("TN") is not None else p.get("tn"))  # 0 is a real count
     if None in (tp, fp, fn, tn):
         return None
 

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange, Sparkles } from 'lucide-react';
+import { BookOpen, Compass, Award, Puzzle, Copy, Check, MessageCircleQuestion, ChevronLeft, ChevronRight, Layers, Zap, CalendarRange, Sparkles, Wrench } from 'lucide-react';
 import QuizEngine from './QuizEngine';
 import PracticeDeck from './PracticeDeck';
 import { FlashcardDeck, SpeedRound, TimelineView, ScoreStrip } from './Activities';
@@ -12,6 +12,8 @@ import MoreMenu from './MoreMenu';
 import TextSelectionAskAgy from './TextSelectionAskAgy';
 import ExplainPlayer from './ExplainPlayer';
 import LoadingPanel from './LoadingPanel';
+import ErrorBoundary from './ErrorBoundary';
+import { KIT_TOOLS, stemKitOf } from './kits';
 
 // simulations load when the Simulation tab opens, not with every lesson
 const RollingWithoutSlippingSim = lazy(() => import('../simulations/RollingWithoutSlippingSim'));
@@ -123,6 +125,8 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     return <div className="page"><p className="hint">Pick a topic from the list to start.</p></div>;
   }
 
+  const stemKind = stemKitOf(topic);  // an ee / ai / systems / stats / bio lesson gets that kit's Tools tab
+  const StemDesk = stemKind ? KIT_TOOLS[stemKind] : null;
   const hasSim = Boolean(topic.simulation || BUILTIN[topic.simulationType]);
   const tabs = [
     { id: 'theory', label: 'Lesson', icon: BookOpen },
@@ -132,6 +136,7 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
     ...(topic.flashcards?.length ? [{ id: 'cards', label: 'Flashcards', icon: Layers, count: topic.flashcards.length }] : []),
     ...((topic.quiz?.length || 0) >= 3 ? [{ id: 'speed', label: 'Speed round', icon: Zap }] : []),
     ...(topic.timeline?.length ? [{ id: 'timeline', label: 'Timeline', icon: CalendarRange, count: topic.timeline.length }] : []),
+    ...(StemDesk ? [{ id: 'tools', label: 'Tools', icon: Wrench }] : []),
     { id: 'tutor', label: 'Tutor', icon: MessageCircleQuestion },
   ];
   const tab = tabs.some((t) => t.id === activeTab) ? activeTab : 'theory';
@@ -186,6 +191,13 @@ export default function TopicViewer({ topic, activeTab, setActiveTab, liveSimCon
         {tab === 'quiz' && (
           <QuizEngine key={topic.id} quiz={topic.quiz} topicId={topic.id} userId={userId}
             onAskTutor={(focus) => { setTutorFocus(focus); setActiveTab('tutor'); }} />
+        )}
+        {tab === 'tools' && StemDesk && (
+          <ErrorBoundary>
+            <Suspense fallback={<LoadingPanel compact label="Loading the tools…" />}>
+              <StemDesk key={topic.id} kind={stemKind} />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {tab === 'tutor' && <LessonTutor key={topic.id} topic={topic} userId={userId} focus={tutorFocus} onFocusUsed={() => setTutorFocus(null)} />}
         {tab === 'cards' && <FlashcardDeck key={topic.id} cards={topic.flashcards} topicId={topic.id} />}

@@ -26,6 +26,7 @@ import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { runPython } from '../lib/pyodide';
 import { explainError } from '../lib/explainError';
 import PenguinShadow from './PenguinShadow';
+import { stemKitOf } from './kits';
 
 // ---------------------------------------------------------------------------
 // DEFAULT CURRICULA: CODE MODE & MATH MODE
@@ -1031,6 +1032,8 @@ const EduIDE = ({
   onOpenClass = null,
   onHome = null,
   userId = null,
+  onOpenTools = null,      // (kit) => open that STEM kit's tools in the Lab
+  onOpenExercises = null,  // (topicId) => open this lesson in the normal lesson view
 }) => {
   // App Mode: 'code' | 'math'
   const [appMode, setAppMode] = useState(initialMode || "code");
@@ -1154,6 +1157,7 @@ const EduIDE = ({
   const compact = typeof window !== 'undefined' && window.innerWidth < 1280;
   const [leftWidth, setLeftWidth] = useState(compact ? 236 : 280);
   const [rightWidth, setRightWidth] = useState(compact ? 290 : 340);
+  const ideStemKit = stemKitOf(classTopic);
   const [mentorOpen, setMentorOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1100);
   const [terminalHeight, setTerminalHeight] = useState(170);
   const [isDragging, setIsDragging] = useState(null); // 'left' | 'right' | 'terminal' | null
@@ -3458,6 +3462,12 @@ except Exception:
             <button type="button" className="btn btn-quiet btn-sm" onClick={() => setMentorOpen(o => !o)} aria-pressed={mentorOpen}>
               {mentorOpen ? 'Hide mentor' : 'Show mentor'}
             </button>
+            {classTopic && onOpenTools && ideStemKit && (
+              <button type="button" className="btn btn-quiet btn-sm" onClick={() => onOpenTools(ideStemKit)}>Kit tools</button>
+            )}
+            {classTopic && onOpenExercises && (classTopic.practice || []).some((p) => p?.type !== 'code') && (
+              <button type="button" className="btn btn-quiet btn-sm" onClick={() => onOpenExercises(classTopic.id)}>Open this lesson's exercises</button>
+            )}
           </div>
         </div>
 

@@ -161,11 +161,13 @@ def _grade_cache_tag_index_offset(item: Dict[str, Any], submission: Any) -> Dict
 # ---------------------------------------------------------------------------
 def _np_assembly_reg_trace(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """assembly_reg_trace: trace registers through a short instruction list.
-    Fields: instructions (list of text lines: add, addi, sub, slli, xor), initial_registers {name: integer}.
+    Fields: instructions (list of text lines: add, addi, sub, slli, xor; at most 64; slli shifts 0-31),
+    initial_registers {name: integer, |value| < 2^32, at most 32 registers}.
     Secret: final_registers {name: integer} (computed by the server). Submit {register: integer} for every register."""
     instructions = [_s(inst, 100) for inst in p.get("instructions", []) if _s(inst, 100)]
     initial_regs = {str(k).strip(): int(v) for k, v in (p.get("initial_registers") or {}).items()}
-    if not instructions:
+    if not instructions or len(instructions) > 64 or len(initial_regs) > 32 \
+            or any(abs(v) >= 2 ** 32 for v in initial_regs.values()):
         return None
 
     # Simple architectural simulator for trace verification
@@ -186,6 +188,8 @@ def _np_assembly_reg_trace(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[
             regs[rd] = regs.get(rs1, 0) - regs.get(rs2, 0)
         elif op == "slli" and len(parts) >= 4:
             rd, rs1, sh = parts[1], parts[2], int(parts[3])
+            if not 0 <= sh <= 31:  # RV32 shift amounts are 5 bits; a huge one would build a giant integer
+                return None
             regs[rd] = (regs.get(rs1, 0) << sh) & 0xFFFFFFFF
         elif op == "xor" and len(parts) >= 4:
             rd, rs1, rs2 = parts[1], parts[2], parts[3]
