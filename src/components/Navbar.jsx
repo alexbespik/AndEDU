@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale } from 'lucide-react';
+import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale, CalendarDays } from 'lucide-react';
 import AccountMenu from './AccountMenu';
 
 // Workspaces by mode id (ids and course.workspace values never change; only the navigation groups them)
@@ -21,6 +21,7 @@ const NAV = [
   { group: 'lab', label: 'Lab', icon: FlaskConical, members: ['physics'] },
   { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language', 'philosophy'] },
   { mode: 'advisor', label: 'Advisor', icon: Compass, title: 'Course advisor: your record, the catalog, readiness checks' },
+  { mode: 'campus', label: 'Campus', icon: CalendarDays, title: 'Campus events: what is on now, the directory, your week and interest alerts' },
 ];
 
 const lastKey = (group) => `andedu.navGroup.${group}`;
@@ -108,7 +109,7 @@ function GroupMenu({ item, studioMode, onSwitch }) {
 }
 
 /** W&M masthead: brand, mode switch, connection, AGY toggle and profile. Every row wraps; nothing overlaps. */
-export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut, online, panelOpen, onTogglePanel, onOpenTopics, assistantName = 'Assistant', streakChip }) {
+export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut, online, panelOpen, onTogglePanel, onOpenTopics, assistantName = 'Assistant', streakChip, badges = {} }) {
   return (
     <header className="masthead">
       <button type="button" className="brand" onClick={() => onSwitchStudioMode('home')} aria-label="&.edu, go to my courses">
@@ -129,9 +130,11 @@ export default function Navbar({ studioMode, onSwitchStudioMode, user, onSignOut
           const id = item.mode || item.members[0];
           const { label, icon: Icon } = item;
           const title = item.title || SUBJECTS[id]?.title;
+          const badge = badges[id] > 0 ? badges[id] : 0;  // e.g. new campus alerts
           return (
             <button key={id} type="button" className="mode" aria-pressed={studioMode === id} title={title} onClick={() => onSwitchStudioMode(id)}>
               <Icon size={16} aria-hidden="true" /> {label}
+              {badge > 0 && <span className="mode-count" aria-label={`${badge} new`}>{badge > 99 ? '99+' : badge}</span>}
             </button>
           );
         })}

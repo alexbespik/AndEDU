@@ -342,28 +342,32 @@ functions sin cos tan asin acos atan atan2 sinh cosh tanh sqrt abs exp log log10
 floor ceil round sign hypot clamp(v,lo,hi) if(cond,a,b), constants pi tau E, slider params by name,
 time t. Units are SI; the canvas auto-scales the world box. y points UP.
 
-kind "particles":
+kind "particles" (the example is valid JSON; notes follow it):
 {"kind":"particles","title":"...","description":"what to try with the sliders",
  "params":[{"name":"k","label":"Spring constant","min":1,"max":100,"value":20,"step":1,"unit":"N/m"}],
  "world":{"width":10,"height":6,"ground":true,"walls":false,"gravity":"g","restitution":"0.8","collisions":true},
-   // collisions (default true): bodies bounce off each other and off rods (a ball can strike a pendulum rod)
-   // with gravity on, set ground: true unless falling forever is the point; keep motion inside the world box
  "bodies":[{"id":"anchor","x":"5","y":"6","fixed":true,"radius":"0.08","color":"white"},
            {"id":"bob","x":"5+L*sin(theta0)","y":"6-L*cos(theta0)","mass":"m","radius":"0.2","trail":true}],
  "forces":[{"type":"spring","a":"anchor","b":"bob","k":"k","rest":"L","damping":"0"},
            {"type":"drag","body":"bob","coef":"c","power":"1"},
-           {"type":"gravitation","G":"G"},                       // mutual between all non-fixed bodies
-           {"type":"custom","body":"bob","fx":"-q*B*vy","fy":"q*B*vx"},   // x,y,vx,vy,m = that body's state
+           {"type":"gravitation","G":"G"},
+           {"type":"custom","body":"bob","fx":"-q*B*vy","fy":"q*B*vx"},
            {"type":"uniform","fx":"0","fy":"-q*Ef","bodies":["bob"]}],
- "links":[{"type":"rod","a":"anchor","b":"bob","length":"L"}],  // rigid distance constraint (pendulums)
+ "links":[{"type":"rod","a":"anchor","b":"bob","length":"L"}],
  "vectors":[{"body":"bob","x":"bob.vx","y":"bob.vy","label":"v","scale":0.3}],
  "readouts":[{"label":"Speed","expr":"bob.speed","unit":"m/s"}],
- "series":[{"label":"KE","expr":"0.5*bob.m*bob.speed^2"}],   // plotted live vs time
- "duration":20,   // optional: auto-reset after N seconds
+ "series":[{"label":"KE","expr":"0.5*bob.m*bob.speed^2"}],
+ "duration":20,
  "overlays":{"fbd":true,"energy":false,"momentum":false,"stress":false}}
-   // overlays start switched on (students can toggle all four): fbd = labeled force arrows on every body,
-   // energy = KE / PE / spring / total / lost bars, momentum = total p at the center of mass,
-   // stress = springs and rods colored by strain (red tension, blue compression)
+Notes:
+- world.collisions (default true): bodies bounce off each other and off rods (a ball can strike a pendulum rod).
+- With gravity on, set ground: true unless falling forever is the point; keep motion inside the world box.
+- gravitation is mutual between all non-fixed bodies. In custom forces x, y, vx, vy, m are that body's state.
+- A rod link is a rigid distance constraint (pendulums). series are plotted live against time.
+- duration is optional: the simulation resets after that many seconds.
+- Overlays start switched on (students can toggle all four): fbd = labeled force arrows on every body,
+  energy = KE / PE / spring / total / lost bars, momentum = total p at the center of mass,
+  stress = springs and rods colored by strain (red tension, blue compression).
 Body fields usable in readouts/series/vectors/custom forces: <id>.x .y .vx .vy .m .r .speed
 
 kind "graph": x is the HORIZONTAL axis variable. To plot something against time, make x the time axis and
@@ -668,8 +672,9 @@ SPEC_GUIDE += "\n" + GEOMETRY_GUIDE
 MATH_GUIDE = """
 kind "math": interactive math widgets (pick the one that makes the class's key idea visible).
 {"kind":"math","widget":"<widget>","title":"...","description":"what to drag and what to notice",
- "params":[{"name":"c","label":"...","min":0,"max":2,"value":1,"step":0.1}],   // optional extra sliders
+ "params":[{"name":"c","label":"...","min":0,"max":2,"value":1,"step":0.1}],
  "view":{"xmin":-1,"xmax":4,"ymin":-1,"ymax":6}, ...widget fields}
+("params" holds optional extra sliders; the widget's own sliders are added automatically.)
 Widgets (expressions use the same grammar as other specs; fact(n) is n!):
 - "epsilon_delta": f (in x), a, L, optional delta_rule (in eps, e.g. "eps/2" or "min(1, eps/5)"). Sliders eps,
    delta are added. Shows the eps-band around L and the delta-band around a, marks where f escapes, plots the

@@ -382,7 +382,7 @@ export function StudyHub({ userId, courses = [], preset, onOpened, onCodePractic
   );
 }
 
-export default function CoursesHome({ user, onOpenCourse, onCodePractice, initialPreset, progress, onProgress, onOpenTopic, onReview }) {
+export default function CoursesHome({ user, onOpenCourse, onCodePractice, initialPreset, progress, onProgress, onOpenTopic, onReview, campus = null }) {
   const [courses, setCourses] = useState(null);
   const [cleared, setCleared] = useState([]);  // finished sprints that can still be restored
   const [preset, setPreset] = useState(initialPreset || null);
@@ -494,6 +494,7 @@ export default function CoursesHome({ user, onOpenCourse, onCodePractice, initia
       </div>
 
       <TodayPanel userId={user.id} progress={progress} onChange={onProgress} onContinue={onOpenTopic} onReview={onReview} />
+      {!creating && campus}
 
       {(creating || (courses && courses.length === 0)) && (
         <StudyHub userId={user.id} courses={courses || []} preset={preset} onOpened={onOpenCourse} onCodePractice={onCodePractice}

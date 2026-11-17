@@ -161,3 +161,24 @@ Both architectural expansions are **100% Complete & Verified**:
 1. **Liberal Arts Architecture Blueprint** ([FUTURE_LIBERAL_ARTS_KITS_GEMINI_RESEARCH.md](file:///Users/svintus/SciEdu-Studio/docs/architecture/FUTURE_LIBERAL_ARTS_KITS_GEMINI_RESEARCH.md)): 100% complete (Philosophy Lab + 6 kits).
 2. **STEM & Core Runtime Engine V2** ([STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md](file:///Users/svintus/SciEdu-Studio/docs/architecture/STEM_AND_CORE_RUNTIME_V2_SPECIFICATION.md)): 100% complete (Deterministic FBD grader, XPBD velocity projection, Jet2 dual autodiff, polyprotic titration bisection, hardened sandbox audit hooks, degree audit AST rules, and 5 STEM kits).
 3. **CI Pipeline Stability**: All module import and audit hook isolation issues resolved; GitHub Actions CI passing cleanly.
+
+---
+
+## 7. Upcoming Frontend Roadmap: Blending Original Code IDE Design with Platform Design
+
+**Target Area**: `src/components/EduStudioIDE.jsx` & Platform Design System (`src/styles/lab.css`, `src/theme.js`).
+
+**Vision & Objective**:
+Seamlessly blend the focused, developer-centric aesthetics of the original standalone Code IDE with the unified, modern design language of the &.edu platform (as seen across `MathLab`, `PhilosophyLab`, and `CoursesHome`).
+
+### Key Design Harmonization Pillars:
+1. **Design Token & Palette Convergence**:
+   - Harmonize the IDE's editor panels, file tree, and execution console with platform-wide CSS variables (`--bg`, `--surface`, `--surface-raised`, `--border`, `--border-focus`, `--accent`, `--text-secondary`).
+   - Eliminate hardcoded color rules in favor of semantic tokens from `src/styles/lab.css` and `canvasPalette()` in `src/theme.js`.
+2. **Chrome, Navigation & Toolbar Unification**:
+   - Streamline the IDE header, status pills, and mode switches to share the same elevation, button shapes, and typography as the main navbar and workspace tabs.
+   - Blend the lesson sidebar, editor pane, and test runner / output console into cohesive split panels with unified border radiuses and subtle separators.
+3. **Typography & Code Editor Surface**:
+   - Unify editor fonts with platform monospace stacks (`JetBrains Mono`, `Fira Code`, system monospaces) with consistent line-heights and font metrics.
+   - Maintain the fast, responsive split-view feel of the original IDE while eliminating visual disjunction between the IDE and the rest of the application.
+

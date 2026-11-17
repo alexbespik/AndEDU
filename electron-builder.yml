@@ -7,7 +7,7 @@ copyright: "Copyright © 2026 Oleksii Besporochnyi. AGPL-3.0-only."
 directories:
   output: dist-electron
 extraMetadata:
-  version: 0.0.0
+  version: 0.1.0
   main: desktop/main.cjs
   desktopName: sciedu-studio.desktop   # Linux: Electron's app_id / WM_CLASS, so the window joins its launcher entry
 asar: true

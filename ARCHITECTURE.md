@@ -591,6 +591,15 @@ Standard library only, flat modules in root registered in `server.PRACTICE_NORMA
 - Validated via `simspec.validate_spec()` and executed via `decision_tree_engine.step_decision_tree()`.
 Authoring tools in `mcp_tools_philosophy.py` validate all items through `logic_engine.check()` before storage. Rendering is implemented in `src/practice/philosophy.jsx` and registered in `src/practice/registry.js`.
 
+### 3.13 Campus events (`campus_events.py`, `campus_events_import.py`; ported from AndEVENTS)
+The Campus tab (`src/components/campus/`, mode id `campus`; `App.jsx` renders `CampusEvents` and holds the one unread-alerts fetch that feeds the tab badge and the My courses card `CampusGlance`, which also reads `/now` and `/saved`): W&M public event calendars as a directory, a "now" view, a week planner with the student's classes, and interest alerts.
+- **Import** (`campus_events_import.py`): a fixed feed list (`FEEDS`) on two hosts only, `events.wm.edu` and `tribelink.wm.edu` (`is_allowed_feed_url`: https, no userinfo or port). Fetch through httpx: 8 s per feed, 5 MB streamed cap, at most one redirect and only to the same host. Its own iCalendar parser (folding, escapes, TZID with a campus fallback, RRULE/EXDATE expanded arithmetically inside the window, 100k lines and 5000 events per feed). All feeds are fetched first, then written in one transaction; a feed that fails keeps its stored events. Titles are HTML-unescaped, descriptions stripped of tags, `source_url` kept only when https.
+- **Sync**: manual `POST /api/campus/sync` (admin with `SCIEDU_AUTH=1`, any account locally; one at a time through `SYNC_LOCK`, a 10-minute global cooldown in `campus_meta`, rate bucket `campus_sync`), or automatic every `SCIEDU_CAMPUS_SYNC_HOURS` (0 = off, the default). No model is called during a sync.
+- **Tables**: shared `campus_events` (uid, ISO `start_at`/`end_at` plus `start_ts`/`end_ts`, `category` cs|arts|sports|bio|civics|life|acad from `classify`, `dedupe_key`), `campus_event_calendars`, `campus_meta`; per user (in `db.USER_DATA_TABLES`, so export and account deletion cover them) `campus_intent`, `campus_alerts`, `campus_saved`, `campus_user_classes`. Saved and alert rows are snapshots, since feeds drop past events. Caps: 20000 events, 200 saved events and 60 class meetings per user.
+- **Routes** (every `{user_id}` route calls `require_user` first; event uids travel in the query or body, never the path): `GET /api/campus/status`, `POST /api/campus/sync`, and under `/api/campus/{user_id}/`: `events` (search, window up to 90 days, category, calendar, paging; duplicates across calendars merged into `alt_uids`), `now`, `planner` (`week`, `scope` saved|all), `classes` (GET, POST, DELETE `/{id}`, POST `/import-cart` from the primary cart's chosen sections via `advisor_cart.primary_meeting_slots`), `saved` (GET, POST, DELETE), `intent` (GET, PUT), `alerts` (GET, POST `/{id}` add|dismiss), `export.ics` (`uid=` or `scope=` saved|classes|all). Times are sent as ISO strings and `HH:MM`; the browser formats them in `America/New_York`.
+- **Interest alerts**: `PUT .../intent` sends only the student's interest text (fenced as data) to the model once to get keywords (`keyword_source: gemini`), falling back to a local keyword list on any error (`keyword`); the keywords are stored on the row. Matching runs in Python against stored keywords, again after each sync, and never calls the model. Event text never goes to a model. A conflict is reported only for a single-day timed event that overlaps one of the student's class meetings.
+- **MCP** (`mcp_tools_campus.py`): `campus_events_search`, `campus_now`, `campus_week`, `campus_save_event`, `campus_set_interest`.
+
 ---
 
 ## 4. Workspaces & UI Presentation Architecture
@@ -693,7 +702,7 @@ The user interface is structured as eight primary modes rendered through `src/Ap
 - **Image contents**: only library lessons belong in the seed; `content/topics/course-*.json` are per-student lessons (git-ignored) and must stay out of the build context (`.dockerignore`).
 - **Security Boundaries**: In production, `SCIEDU_AUTH=1` is enforced whenever listening on non-loopback addresses (`0.0.0.0`), preventing unauthenticated access to the sandbox or model endpoints.
 
-### 5.4 Desktop app (Electron, macOS and Linux, arm64 + x64, v0.0.0)
+### 5.4 Desktop app (Electron, macOS and Linux, arm64 + x64, v0.1.0)
 One process tree per user: Electron main (`desktop/main.cjs`) -> bundled CPython (python-build-standalone 3.14, one per arch) running `desktop_main.py` -> `server.py` in-process. The window loads `http://127.0.0.1:<port>/`; the backend serves `dist/` exactly as in Docker (same single-process contract as 5.3).
 - **Bundle layout** (`Contents/Resources/` on macOS, `resources/` beside the `sciedu-studio` executable on Linux, outside `app.asar`): `python/` (per-arch interpreter, deps pip-installed into its own `lib/python3.14/site-packages`, `.pyc` precompiled), `backend/` (the git-tracked root `*.py` except `mcp_server.py` (`language_de.py` imports `mcp_tools_language`), `dist/`, `public/diagrams/`, `seed/topics/` from `git archive HEAD content/topics` (committed lessons only)). The layout mirrors the repo, so every `Path(__file__).parent` lookup (`DIST_DIR`, `DIAGRAMS_DIR`, `practice_general.DIAGRAMS_DIR`) works unchanged. The bundle is read-only at run time (`python -I -B`): writing `__pycache__` would break the code signature.
 - **Data**: `~/Library/Application Support/SciEdu Studio/` on macOS, `~/.config/SciEdu Studio/` on Linux (Electron `userData`; `andedu-lab` under `npm run desktop:dev`): `content/` (= `SCIEDU_CONTENT_DIR`, seeded from `seed/topics` on the first launch only, so a deleted lesson stays deleted), `logs/backend.log` (rotated at 5 MB), `config.json` (`{port, seeded}`), `secrets/device.key.enc` (the device key, safeStorage ciphertext, mode 0600; see 5.5), and `secrets/gemini.key.enc` only on a computer upgraded from a version before accounts, until an account answers its offer. The developer's `content/` is never copied.
@@ -757,6 +766,7 @@ Several people on one computer (one OS user), each with their own courses, progr
 | `SCIEDU_CONTENT_DIR` | `./content` | No | Override path for SQLite database, topic JSONs, and cache artifacts. |
 | `SCIEDU_ENV_FILE` (5.4) | unset | No | Unset: load `./.env` next to `server.py`, else `load_dotenv()` (walks up from `server.py`'s folder to `/`, so it can pick up e.g. `~/.env`). A path: load only that file. `none`: load no `.env` at all (the desktop app). |
 | `SCIEDU_INSTANCE_ID` (5.4) | unset | No | Echoed as `instance_id` by `GET /api/status`, so a launcher can tell its own backend from another server on the same port. Not a secret. |
+| `SCIEDU_CAMPUS_SYNC_HOURS` (3.13) | `0` | No | Hours between automatic downloads of the W&M event calendars (1-168); 0 = only on a manual Sync. |
 | `SCIEDU_SPRINT_RETAIN_DAYS`, `SCIEDU_TTS_DAILY_CHARS`, `SCIEDU_TTS_CACHE_MB`, `SCIEDU_EXPLAIN_TTS_CHARS`, `ELEVENLABS_GERMAN_VOICE_ID`, `SCIEDU_DOMAIN` | see `.env.example` | No | Documented in `.env.example` and AGENTS.md. |
 
 ---
@@ -789,6 +799,10 @@ Several people on one computer (one OS user), each with their own courses, progr
 - `add_drawing_to_notes`: Validates and appends an interactive ````geometry` declarative simulation block to a lesson's markdown content and standalone notes file (`content/notes/<id>.md`).
 - `preview_geometry_diagram`: Dispatches `GEOMETRY_PREVIEW` to project an interactive geometry or free-body diagram directly into Math Lab / Sim Kit on the student's screen in real time.
 - `simulation_guide`: Expanded documentation covering `kind: "geometry"` schemas, bodies (`box`, `wedge`, `sphere`, `rod`, `wall`, `pulley`), forces, elements, and reactive slider parameters.
+
+#### Campus events
+- `campus_events_search`, `campus_now`, `campus_week`: read the event directory, what is on now, and a student's week (classes, events, clashes).
+- `campus_save_event`, `campus_set_interest`: save an event to the planner; set the interest text that drives alerts (one model call for keywords).
 
 #### Navigation & Screen Control
 - `open_workspace`: Route the browser UI to any subject workspace (`history`, `language`, `philosophy`, `math`, `lab`, `code`, `advisor`) and specific sub-tab (`analyze`, `sides`, `crisis`, `sources`, `roleplay`, `practice`, `timeline`, `speech`).

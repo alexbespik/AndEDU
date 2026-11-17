@@ -171,9 +171,10 @@ class TestPhilinQuoteContextAndEpistemicFirewall(unittest.TestCase):
         self.assertEqual(res["negation_count"], 0)
 
     def test_epistemic_firewall_prompt_exists(self):
-        self.assertIn("Three-Rule Epistemic Firewall", philin.PHILIN_TRANSCRIBE_PROMPT)
-        self.assertIn("Decompose thick ethical concepts", philin.PHILIN_TRANSCRIBE_PROMPT)
-        self.assertIn("predicates: List[str]", philin.PHILIN_TRANSCRIBE_PROMPT)
+        rules = philin.PHILIN_TRANSCRIBE_PROMPT
+        self.assertIn("every\n    value framework alike", rules)   # value claims are normative whatever the viewpoint
+        self.assertIn("two blocks with the same quote", rules)    # separable fact and value are split
+        self.assertIn("predicates:", rules)
 
 
 class TestClientRedaction(unittest.TestCase):

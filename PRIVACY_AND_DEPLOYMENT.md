@@ -96,6 +96,18 @@ Logged 2026-11-03.
   Languages allowance. The steps themselves are cached per lesson in `content/explain_cache/` (no student data) and
   count against the `explain` hourly rate limit only when a new walkthrough is written.
 
+### 6a. Campus events (the Campus tab)
+- **Outbound hosts:** a sync downloads public iCalendar feeds from `events.wm.edu` and `tribelink.wm.edu` only (a fixed
+  list; https, no redirects to another host). Nothing about a student is sent to them. Off by default: a sync runs
+  when someone presses Sync (an admin, with accounts on) or on `SCIEDU_CAMPUS_SYNC_HOURS`.
+- **Sent to the model:** only the interest text a student types under Concierge, once per change, to pick keywords.
+  The page says so. Event text, saved events and class times never go to a model.
+- **Stored per student:** the interest text and keywords (`campus_intent`), alerts, saved events and class meeting
+  times (`campus_alerts`, `campus_saved`, `campus_user_classes`). All four are in the data export and are removed
+  with the account.
+- **Before a public deployment:** check W&M's terms for reusing the calendar feeds, and keep the automatic sync
+  interval modest.
+
 ### 7. Hosting basics
 - `SCIEDU_AUTH=1`, HTTPS, the real hostname in the allowed hosts and CORS lists, rate limits kept on
   (`SCIEDU_RATE_SCALE`), and a daily model budget (`SCIEDU_DAILY_MODEL_CALLS`) that matches the paid plan.

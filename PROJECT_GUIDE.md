@@ -145,7 +145,6 @@ SciEdu-Studio/
 ├── package.json                # Dependencies: React 19, Lucide, KaTeX, ReactMarkdown, Remark, Rehype
 ├── vite.config.js              # Vite bundler configuration (dev server on port 5173)
 ├── server.py                   # FastAPI backend server (port 8090) with AGY runner & event queue
-├── backend_puzzles.py          # Coding puzzle test runner and verification harness
 ├── PROJECT_GUIDE.md            # Complete project documentation and architectural specification
 ├── AGENTS.md                   # Autonomous coding agent directives and schema reference
 │

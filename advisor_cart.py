@@ -249,6 +249,29 @@ def primary_codes(user_id: str, term: str) -> set:
                                             "AND cart_type = 'primary'", (user_id, term))}
 
 
+_SLOT_DAYS = {d: i for i, d in enumerate("MTWRFSU")}
+
+
+def primary_meeting_slots(user_id: str, term: str) -> List[Dict[str, Any]]:
+    """Weekly meetings of the primary cart's chosen sections: [{code, title, day (0 = Monday), start "HH:MM",
+    end "HH:MM", location}]. Courses without a chosen section, or whose section lists no times, give nothing."""
+    out: List[Dict[str, Any]] = []
+    rows = db.conn().execute("SELECT course_code, section_crn FROM student_carts WHERE user_id = ? AND term = ? "
+                             "AND cart_type = 'primary' AND section_crn != '' ORDER BY course_code", (user_id, term))
+    for code, crn in rows.fetchall():
+        section = _section(code, term, crn)
+        if not section:
+            continue
+        for slot in wm_advising.extract_meeting_slots(section):
+            day = _SLOT_DAYS.get(slot["day"])
+            if day is None or not 0 <= slot["start"] < slot["end"] <= 24 * 60:
+                continue
+            out.append({"code": code, "title": str(section.get("title") or ""), "day": day,
+                        "start": "%02d:%02d" % divmod(slot["start"], 60), "end": "%02d:%02d" % divmod(min(slot["end"], 24 * 60 - 1), 60),
+                        "location": str(section.get("location") or section.get("room") or "")})
+    return out
+
+
 def get(user_id: str, term: str = "") -> Dict[str, Any]:
     """The cart for a term: items (with the term's listed sections to choose from), flags and the summary."""
     term = _term(term)

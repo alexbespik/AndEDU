@@ -12,6 +12,9 @@ import { BookOpen, FlaskConical, Compass } from 'lucide-react';
 import { TuxIcon } from './components/PenguinShadow';
 import { api, useAgyEvents, loadProfile, saveProfile, setToken } from './lib/api';
 import LoadingPanel from './components/LoadingPanel';
+import ErrorBoundary from './components/ErrorBoundary';
+import CampusGlance from './components/campus/CampusGlance';
+import { campusPath, useCampusFetch } from './components/campus/format';
 import { LoadingPrefs, quotesEnabled } from './lib/quotes';
 
 // The lesson viewer, the IDE and the workspaces load on demand
@@ -22,6 +25,7 @@ const MathLab = lazy(() => import('./components/MathLab'));
 const SubjectWorkspace = lazy(() => import('./components/SubjectWorkspace'));
 const AdvisorPage = lazy(() => import('./components/AdvisorPage'));
 const PhilosophyLab = lazy(() => import('./components/PhilosophyLab'));
+const CampusEvents = lazy(() => import('./components/campus/CampusEvents'));
 
 // Its own boundary at every use site, so a first chunk load never suspends (and unmounts) MathLab or a workspace
 const QUOTES_ON = { quotes: true };
@@ -74,6 +78,22 @@ export default function App() {
   const [account, setAccount] = useState(null);  // accounts on this computer: /api/auth/me (keyState, hasPassword, autoLockMin, ...)
   const [mode, setMode] = useState('home'); // home | course | physics | code | math
   const [courseId, setCourseId] = useState(null);
+  // campus: one copy of the unread interest alerts for the tab badge and the My courses card
+  const [campusKey, setCampusKey] = useState(0);
+  const [campusTab, setCampusTab] = useState('now');  // the Campus tool to open first (set by the My courses card)
+  const campusAlerts = useCampusFetch(user ? `${campusPath(user.id, '/alerts')}?unread_only=1` : null, campusKey);
+  const campusIntent = useCampusFetch(user ? campusPath(user.id, '/intent') : null, campusKey);
+  const campusChanged = useCallback(() => setCampusKey((n) => n + 1), []);
+  // back on My courses: alerts may have arrived since (a calendar refresh); away from Campus: forget the tool the card asked for
+  const campusSeenMode = useRef(mode);
+  useEffect(() => {
+    if (campusSeenMode.current === mode) return;
+    campusSeenMode.current = mode;
+    if (mode === 'home') setCampusKey((n) => n + 1);
+    if (mode !== 'campus') setCampusTab('now');
+  }, [mode]);
+  const campusNotify = campusIntent.data ? campusIntent.data.notify !== false : true;
+  const campusUnread = user && campusNotify ? (campusAlerts.data?.unread_count || 0) : 0;
   const [topics, setTopics] = useState([]);
   const [selectedTopicId, setSelectedTopicId] = useState(DEFAULT_TOPIC_ID);
   const [labView, setLabView] = useState('lesson'); // lesson | chem (the Chemistry kit)
@@ -474,6 +494,7 @@ export default function App() {
     };
   }, [idleMin, lockNow, user?.name]);
   const switchMode = (m) => { setMode(m); if (m === 'home') setCourseId(null); };
+  const openCampus = (tab = 'now') => { setCampusTab(tab); setMode('campus'); };
   const openCourse = (id) => { setCourseId(id); setMode('course'); };
 
   if (!user) return <LoginPage key={resume?.id || 'signin'} onSignedIn={signIn} resume={resume} notice={lockNotice} />;
@@ -505,6 +526,7 @@ export default function App() {
         onTogglePanel={() => setPanelOpen((o) => !o)}
         assistantName={agyCli ? 'AGY' : 'Assistant'}
         onOpenTopics={() => setSidebarOpen(true)}
+        badges={{ campus: campusUnread }}
         streakChip={(
           <StreakChip
             progress={progress}
@@ -529,10 +551,24 @@ export default function App() {
 
         <LoadingPrefs.Provider value={quotesEnabled(progress) ? QUOTES_ON : QUOTES_OFF}>
         <main className="main" id="main">
+          {/* one broken view must not blank the app; the key clears the error when the workspace changes */}
+          <ErrorBoundary key={`${mode}:${courseId || ''}`}>
           {mode === 'home' && (
             <CoursesHome user={user} onOpenCourse={openCourse} initialPreset={homePreset}
               progress={progress} onProgress={setProgress} onOpenTopic={(id) => openTopic(id)} onReview={() => setMode('review')}
-              onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }} />
+              onCodePractice={(req) => { setIdeRequest(req); setMode('code'); }}
+              campus={(
+                <ErrorBoundary quiet>
+                  <CampusGlance key={user.id} userId={user.id} alerts={campusAlerts.data} notify={campusNotify} onOpen={openCampus} />
+                </ErrorBoundary>
+              )} />
+          )}
+          {mode === 'campus' && (
+            <Suspense fallback={<LoadingPanel page />}>
+              <div className="page page-wide">
+                <CampusEvents key={user.id} user={user} initialTab={campusTab} onAlertsChanged={campusChanged} />
+              </div>
+            </Suspense>
           )}
           {(mode === 'history' || mode === 'language') && (
             <Suspense fallback={<LoadingPanel page />}>
@@ -607,6 +643,7 @@ export default function App() {
                 )} />
             </Suspense>
           )}
+          </ErrorBoundary>
         </main>
         </LoadingPrefs.Provider>
 
