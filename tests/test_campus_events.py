@@ -406,6 +406,7 @@ class Fetch(unittest.TestCase):
 class DbCase(unittest.TestCase):
     def setUp(self):
         clean_campus()
+        imp.STOP.clear()   # an app shutdown in an earlier test leaves it set, and sync() then skips every feed
         self.addCleanup(clean_campus)
 
 

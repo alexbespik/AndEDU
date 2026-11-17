@@ -1,7 +1,7 @@
 """MCP tools for campus events (W&M calendars): search, now, week, save an event, set the interest prompt.
 
 Ported from AndEVENTS (github.com/alexbespik/AndEVENTS) by the same author. Each tool calls the running backend
-(campus_events.py routes), so results are the same ones the Advisor's "Campus events" tab shows.
+(campus_events.py routes), so results are the same ones the Campus tab shows.
 """
 
 

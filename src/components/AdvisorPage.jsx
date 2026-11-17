@@ -1,16 +1,9 @@
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Upload, Loader2, Search, X, Compass, Sparkles, ClipboardCheck, BookMarked, ShoppingCart, CalendarDays } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Upload, Loader2, Search, X, Compass, Sparkles, ClipboardCheck, BookMarked, ShoppingCart } from 'lucide-react';
 import { api, uploadFiles } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import AdvisorChat from './AdvisorChat';
 import PlanningCart from './PlanningCart';
-import LoadingPanel from './LoadingPanel';
-
-const CampusEvents = lazy(() => import('./campus/CampusEvents'));
-const VIEWS = [
-  { id: 'plan', label: 'Courses', icon: BookMarked },
-  { id: 'campus', label: 'Campus events', icon: CalendarDays },
-];
 
 /** Evaluates prerequisite CNF groups (AND of OR-choice groups). */
 function prereqGroups(course) {
@@ -198,7 +191,6 @@ export default function AdvisorPage({ user, onOpenCourse }) {
   const [open, setOpen] = useState(null);
   const [sectionsMap, setSectionsMap] = useState({});
   const [notice, setNotice] = useState(null);
-  const [view, setView] = useState('plan');  // plan | campus
   const doneSet = new Set(done.filter((d) => !d.grade || !['F', 'W', 'U', 'I'].includes(d.grade.trim().toUpperCase())).map((d) => d.code));
 
   const loadDone = useCallback(() => api(`/api/advisor/${user.id}/completed`).then((d) => setDone(d.completed)).catch(() => {}), [user.id]);
@@ -333,13 +325,6 @@ export default function AdvisorPage({ user, onOpenCourse }) {
           <p>Add the courses you have done, explore the W&amp;M catalog, plan a term in your cart, and test whether you're ready for a course before you register.</p>
         </div>
       </div>
-      <div className="tabs" role="tablist" aria-label="Advisor tools">
-        {VIEWS.map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" role="tab" aria-selected={view === id} className="tab" onClick={() => setView(id)}><Icon size={16} aria-hidden="true" /> {label}</button>
-        ))}
-      </div>
-      {/* hidden, not unmounted: the advisor chat keeps its history while the student looks at campus events */}
-      <div className="campus-courses-view" role="tabpanel" aria-label="Courses" hidden={view !== 'plan'}>
       {stats && (stats.courses ? stats.outdated : true) && (
         <div className="notice notice-bad" role="note">
           <strong>Catalog may be out of date.</strong>{' '}
@@ -404,12 +389,6 @@ export default function AdvisorPage({ user, onOpenCourse }) {
           </div>
         </details>
       </section>
-      </div>
-      {view === 'campus' && (
-        <section role="tabpanel" aria-label="Campus events">
-          <Suspense fallback={<LoadingPanel compact label="Loading campus events…" />}><CampusEvents user={user} /></Suspense>
-        </section>
-      )}
     </div>
   );
 }

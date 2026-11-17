@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Bell, CalendarDays, Clock, List, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '../../lib/api';
 import NowView from './NowView';
@@ -21,11 +21,16 @@ function syncMessage(e) {
   return e.message || 'The calendars could not be refreshed.';
 }
 
-/** W&M campus events inside the advisor: what is on now, the full directory, a week planner and interest alerts. */
-export default function CampusEvents({ user }) {
+/**
+ * The Campus tab: what is on now, the full directory, a week planner and interest alerts.
+ * `initialTab`: the tool to open first (the home card links straight to Planner or Concierge);
+ * `onAlertsChanged`: called when saved events, alerts or the notify setting change, so the app's badge stays current.
+ */
+export default function CampusEvents({ user, initialTab = 'now', onAlertsChanged }) {
   const userId = user.id;
-  const [tab, setTab] = useState('now');
-  const [visited, setVisited] = useState(() => new Set(['now']));  // a visited tab stays mounted (filters, drafts)
+  const firstTab = TABS.some((t) => t.id === initialTab) ? initialTab : 'now';
+  const [tab, setTab] = useState(firstTab);
+  const [visited, setVisited] = useState(() => new Set([firstTab]));  // a visited tab stays mounted (filters, drafts)
   const [refresh, setRefresh] = useState(0);  // bump: saved events, classes, alerts or the calendars changed
   const [statusKey, setStatusKey] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -35,15 +40,15 @@ export default function CampusEvents({ user }) {
   const status = useCampusFetch('/api/campus/status', statusKey);
   const unread = useCampusFetch(`${campusPath(userId, '/alerts')}?unread_only=1`, refresh);
   const intent = useCampusFetch(campusPath(userId, '/intent'));
-  const changed = useCallback(() => setRefresh((n) => n + 1), []);
+  const changed = useCallback(() => { setRefresh((n) => n + 1); onAlertsChanged?.(); }, [onAlertsChanged]);
   // a sync started elsewhere (the automatic one, another admin): keep checking until it ends, then reload the views
   const remoteSync = Boolean(status.data?.sync_running) && !syncing;
   useEffect(() => {
     if (!remoteSync) return undefined;
     const timer = setInterval(() => setStatusKey((n) => n + 1), 5000);
-    return () => { clearInterval(timer); setRefresh((n) => n + 1); };
-  }, [remoteSync]);
-  const onIntent = useCallback((r) => setNotifyNow(r.notify !== false), []);
+    return () => { clearInterval(timer); setRefresh((n) => n + 1); onAlertsChanged?.(); };
+  }, [remoteSync, onAlertsChanged]);
+  const onIntent = useCallback((r) => setNotifyNow(r.notify !== false), []);  // Concierge also calls onChanged after a save
 
   const open = (id) => { setTab(id); setVisited((cur) => (cur.has(id) ? cur : new Set(cur).add(id))); };
   const sync = async () => {
@@ -66,16 +71,16 @@ export default function CampusEvents({ user }) {
   const running = syncing || Boolean(s?.sync_running);
   return (
     <div className="campus">
-      <div className="campus-head">
-        <div className="stack-xs">
-          <h2>Campus events</h2>
-          <span className="hint" role="status">
+      <div className="page-head">
+        <div>
+          <h1>Campus</h1>
+          <p className="hint" role="status">
             {status.loading && !s ? <><Loader2 size={13} className="spin" aria-hidden="true" /> Checking the calendars…</>
               : s ? `${s.total_events} event${s.total_events === 1 ? '' : 's'} · ${s.last_sync ? `last refreshed ${stampLabel(s.last_sync)}` : 'never refreshed'}`
                 + `${s.last_result?.feeds_failed ? ` · ${s.last_result.feeds_failed} calendar${s.last_result.feeds_failed === 1 ? '' : 's'} failed last time` : ''}`
                 + `${s.auto_sync_hours > 0 ? ` · refreshes automatically every ${s.auto_sync_hours} h` : ''} · times are campus time`
                 : ''}
-          </span>
+          </p>
         </div>
         {s?.can_sync && (
           <button type="button" className="btn btn-secondary btn-sm" disabled={running} onClick={sync}>

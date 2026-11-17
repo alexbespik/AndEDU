@@ -79,7 +79,7 @@ export default function ConciergeView({ userId, refresh, onChanged, onIntent }) 
               <input type="checkbox" checked={autoAdd} onChange={(e) => setAutoAdd(e.target.checked)} /> Add matching events to my saved events automatically
             </label>
             <label className="check-row">
-              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Show the number of new alerts on the Concierge tab
+              <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Show new alerts on the Campus tab and on My courses
             </label>
             <div className="btn-row">
               <button type="submit" className="btn btn-primary btn-sm" disabled={saving || !dirty}>

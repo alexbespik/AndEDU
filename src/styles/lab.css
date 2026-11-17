@@ -203,6 +203,7 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
   content: ""; position: absolute; left: var(--space-3); right: var(--space-3); bottom: 3px;
   height: 2px; background: var(--gold); border-radius: 1px;
 }
+.mode-count { min-width: 1.6em; padding: 2px var(--space-1); border-radius: 999px; background: var(--gold); color: var(--brand); font-size: 0.72rem; font-weight: 700; line-height: 1.2; text-align: center; font-variant-numeric: tabular-nums; }
 /* a tab for a group of subjects (Navbar.jsx): its menu reuses .menu */
 .mode-group { position: relative; display: inline-flex; }
 .mode-sub { font-weight: 400; opacity: 0.8; }
@@ -1514,8 +1515,7 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .philin-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 .philin-table th, .philin-table td { border-bottom: 1px solid var(--rule); padding: var(--space-2); text-align: left; vertical-align: top; }
 
-/* Campus events (Advisor > Campus events): W&M calendars, week planner, interest alerts. Tokens only. */
-.campus-courses-view { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+/* Campus events (the Campus tab): W&M calendars, week planner, interest alerts. Tokens only. */
 .campus { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 .campus [role="tabpanel"] { min-width: 0; }
 .campus-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-width: 0; }
@@ -1524,6 +1524,16 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .campus .status { white-space: normal; overflow-wrap: anywhere; }
 .campus .tab .count { min-width: 1.5em; padding: 2px var(--space-1); border-radius: 999px; background: var(--gold-tint); color: var(--notice-ink); text-align: center; }
 .campus-empty { align-items: center; text-align: center; }
+/* My courses: the short campus card (CampusGlance.jsx) */
+.campus-glance { display: flex; flex-direction: column; gap: var(--space-3); }
+.campus-glance h2 { font-size: 1.15rem; display: flex; align-items: center; gap: var(--space-2); }
+.campus-glance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--space-4); min-width: 0; }
+.campus-glance-col { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.campus-glance-col h3 { display: flex; align-items: center; gap: var(--space-2); font-size: 0.95rem; }
+.campus-glance-col .campus-list { align-self: stretch; }
+.campus-glance-row { --campus-cat: var(--rule-strong); display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--campus-cat); background: var(--code-bg); border-radius: var(--radius-sm); font-size: 0.92rem; overflow-wrap: anywhere; }
+.campus-glance .status { white-space: normal; overflow-wrap: anywhere; }
 .campus-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .campus-list-gap { margin-top: var(--space-2); }
 .campus-event { --campus-cat: var(--rule-strong); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-3);

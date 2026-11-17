@@ -51,7 +51,7 @@ function ClassManager({ userId, onChanged }) {
     const skipped = r.skipped?.length ? ` Not copied (no section with meeting times chosen): ${r.skipped.join(', ')}.` : '';
     setNotice(r.imported
       ? `Copied ${r.imported} class meeting${r.imported === 1 ? '' : 's'} from your ${r.term_name || r.term} cart.${skipped}`
-      : `Your ${r.term_name || r.term} cart has no sections with meeting times yet: pick sections in Courses first.${skipped}`);
+      : `Your ${r.term_name || r.term} cart has no sections with meeting times yet: pick sections in the Advisor cart first.${skipped}`);
   };
   const toggleDay = (d) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort()));
 

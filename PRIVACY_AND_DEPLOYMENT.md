@@ -96,7 +96,7 @@ Logged 2026-11-03.
   Languages allowance. The steps themselves are cached per lesson in `content/explain_cache/` (no student data) and
   count against the `explain` hourly rate limit only when a new walkthrough is written.
 
-### 6a. Campus events (Advisor > Campus events)
+### 6a. Campus events (the Campus tab)
 - **Outbound hosts:** a sync downloads public iCalendar feeds from `events.wm.edu` and `tribelink.wm.edu` only (a fixed
   list; https, no redirects to another host). Nothing about a student is sent to them. Off by default: a sync runs
   when someone presses Sync (an admin, with accounts on) or on `SCIEDU_CAMPUS_SYNC_HOURS`.

@@ -7443,13 +7443,13 @@ agy_adjust_class_tool = types.FunctionDeclaration(
 
 agy_switch_page_tool = types.FunctionDeclaration(
     name="switch_page",
-    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math, History, Languages, Philosophy, Advisor).",
+    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math, History, Languages, Philosophy, Advisor, Campus).",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "topic_id": types.Schema(type="STRING", description="Target topic ID to navigate to"),
             "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', 'practice' or 'agent'"),
-            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), 'math' (Math), 'history' (History), 'language' (Languages), 'philosophy' (Philosophy), or 'advisor' (Advisor)")
+            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), 'math' (Math), 'history' (History), 'language' (Languages), 'philosophy' (Philosophy), 'advisor' (Advisor), or 'campus' (Campus events)")
         }
     )
 )
