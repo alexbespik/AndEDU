@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, GraduationCap, Layers, Volume2, Route, Target, BookA, Heart, Crown, Headphones, Mic, RotateCcw, Sparkles, Trophy, MessageCircleQuestion, Loader2, X, Check, MessageSquare, Lock, Download } from 'lucide-react';
+import { BookOpen, GraduationCap, Layers, Volume2, Route, Target, BookA, Heart, Crown, Headphones, Mic, Ear, PenLine, RotateCcw, Sparkles, Trophy, MessageCircleQuestion, Loader2, X, Check, MessageSquare, Lock, Download } from 'lucide-react';
 import { CoursesTab } from './MathLab';
 import { FlashcardDeck, MatchPairs } from './Activities';
 import Md, { MdInline } from './Md';
@@ -13,15 +13,23 @@ import { EXTRA_LANGUAGE_TABS } from './language';
 import { languageName, prefetchAudio } from '../lib/speech';
 import { ArticleWord, GenderTint } from './language/Gender';
 import { reportXp, reportActivity } from '../lib/engage';
+import { strengthBars, migrateStrength, reviewEntry, isMinimalPair, isDictation } from './language/util';
 import { api } from '../lib/api';
 
-// Progress kept in this browser: word strength 0-4, crowns per unit (0-5), recently missed item ids.
+// Progress kept in this browser: word strength {n, firstReviewed, lastReviewed} (bars 0-4 decay with time, language/util.js), crowns per unit (0-5), recently missed item ids.
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 const K_STRENGTH = 'andedu_lang_strength', K_CROWNS = 'andedu_lang_crowns', K_MISSED = 'andedu_lang_missed', K_ACTIVE = 'andedu_lang_active';
 const HEARTS = 5;
+/** The strength map, with old numeric entries migrated (and saved) so their decay clock starts. */
+function readStrength() {
+  const { map, changed } = migrateStrength(store.get(K_STRENGTH, {}));
+  if (changed) store.set(K_STRENGTH, map);
+  return map;
+}
+const barsOf = (strength, key) => strengthBars(strength[key]);
 let handledRequest = null;  // `at` of the last MCP/assistant tab request this workspace acted on
 const SESSION_TYPES = new Set([...LANGUAGE_TYPES, 'conjugate', 'script_match', 'fill_blank', 'match_pairs', 'true_false']);  // story and dialogue are too long for a session
 const shuffle = (a) => { const o = [...a]; for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; } return o; };
@@ -75,6 +83,8 @@ function byStrength(variants, strength) {
   return [variants[level], ...(strength >= 2 && variants[level - 1] ? [variants[level - 1]] : [])].filter(Boolean);
 }
 
+// Lesson-authored drills only (add_minimal_pairs / add_dictation produce listen_choose and listen_type items)
+const LESSON_MODES = { pairs: isMinimalPair, dictation: isDictation };
 const MODE_TYPES = { listen: new Set(['listen_type', 'listen_choose']), speak: new Set(['speak']) };
 
 /**
@@ -82,24 +92,26 @@ const MODE_TYPES = { listen: new Set(['listen_type', 'listen_choose']), speak: n
  * Lesson practice items keep their own type; ids are "<topicId>:<itemId>" (XP refs, missed list).
  */
 export function buildSession(topics, { mode = 'mixed', unitId = null, count = 12 } = {}) {
-  const strength = store.get(K_STRENGTH, {});
+  const strength = readStrength();
   const missed = new Set(store.get(K_MISSED, []));
   const scope = unitId ? topics.filter((t) => t.id === unitId) : topics;
   const pool = wordsOf(topics);
   const lessonItems = scope.flatMap((t) => (t.practice || []).filter((p) => SESSION_TYPES.has(p.type)).map((p) => ({ ...p, id: `${t.id}:${p.id}`, topicId: t.id })));
-  const words = wordsOf(scope).map((w) => [w, (strength[w.key] || 0) + Math.random()]).sort((a, b) => a[1] - b[1]).map(([w]) => w);
+  const words = wordsOf(scope).map((w) => [w, barsOf(strength, w.key) + Math.random()]).sort((a, b) => a[1] - b[1]).map(([w]) => w);
   let items;
-  if (MODE_TYPES[mode]) {
+  if (LESSON_MODES[mode]) {
+    items = lessonItems.filter(LESSON_MODES[mode]);
+  } else if (MODE_TYPES[mode]) {
     items = [...lessonItems, ...words.flatMap((w) => variantsFor(w, pool))].filter((p) => MODE_TYPES[mode].has(p.type));
   } else if (mode === 'missed') {
     items = [...lessonItems, ...words.flatMap((w) => variantsFor(w, pool))].filter((p) => missed.has(p.id));
   } else if (mode === 'new') {
-    items = words.filter((w) => !strength[w.key]).flatMap((w) => byStrength(variantsFor(w, pool), 0));
+    items = words.filter((w) => !barsOf(strength, w.key)).flatMap((w) => byStrength(variantsFor(w, pool), 0));
   } else {
-    items = [...lessonItems, ...words.flatMap((w) => byStrength(variantsFor(w, pool), strength[w.key] || 0))];
+    items = [...lessonItems, ...words.flatMap((w) => byStrength(variantsFor(w, pool), barsOf(strength, w.key)))];
   }
   // weakest first, then a shuffle inside each half so sessions differ
-  const isWeak = (p) => missed.has(p.id) || (p.cardKey && !strength[p.cardKey]);
+  const isWeak = (p) => missed.has(p.id) || (p.cardKey && !barsOf(strength, p.cardKey));
   const weak = shuffle(items.filter(isWeak));
   const rest = shuffle(items.filter((p) => !isWeak(p)));
   return [...weak, ...rest].slice(0, count);
@@ -107,19 +119,21 @@ export function buildSession(topics, { mode = 'mixed', unitId = null, count = 12
 
 /** How many items each practice mode has, in one pass (the hub shows these; building every session would be slow). */
 function countModes(topics) {
-  const strength = store.get(K_STRENGTH, {});
+  const strength = readStrength();
   const missed = new Set(store.get(K_MISSED, []));
   const pool = wordsOf(topics);
-  const lessonItems = topics.flatMap((t) => (t.practice || []).filter((p) => SESSION_TYPES.has(p.type)).map((p) => ({ type: p.type, id: `${t.id}:${p.id}` })));
+  const lessonItems = topics.flatMap((t) => (t.practice || []).filter((p) => SESSION_TYPES.has(p.type)).map((p) => ({ ...p, id: `${t.id}:${p.id}` })));
   const perWord = pool.map((w) => [w, variantsFor(w, pool)]);
   const all = [...lessonItems, ...perWord.flatMap(([, v]) => v)];
   const typed = (types) => all.filter((p) => types.has(p.type)).length;
   return {
-    mixed: lessonItems.length + perWord.reduce((n, [w, v]) => n + byStrength(v, strength[w.key] || 0).length, 0),
+    mixed: lessonItems.length + perWord.reduce((n, [w, v]) => n + byStrength(v, barsOf(strength, w.key)).length, 0),
     missed: all.filter((p) => missed.has(p.id)).length,
     listen: typed(MODE_TYPES.listen),
     speak: typed(MODE_TYPES.speak),
-    new: perWord.reduce((n, [w, v]) => n + (strength[w.key] ? 0 : byStrength(v, 0).length), 0),
+    pairs: lessonItems.filter(isMinimalPair).length,
+    dictation: lessonItems.filter(isDictation).length,
+    new: perWord.reduce((n, [w, v]) => n + (barsOf(strength, w.key) ? 0 : byStrength(v, 0).length), 0),
   };
 }
 
@@ -193,8 +207,8 @@ function ExplainAnswer({ item, given }) {
 
 function bump(key, delta) {
   if (!key) return;
-  const s = store.get(K_STRENGTH, {});
-  s[key] = Math.max(0, Math.min(4, (s[key] || 0) + delta));
+  const s = readStrength();
+  s[key] = reviewEntry(s[key], delta);
   store.set(K_STRENGTH, s);
 }
 function markMissed(id, missed) {
@@ -369,6 +383,8 @@ const MODES = [
   { mode: 'missed', icon: RotateCcw, title: 'Mistakes', text: 'Only what you got wrong recently, until you get it right.' },
   { mode: 'listen', icon: Headphones, title: 'Listening', text: 'Hear it, then pick or type what was said.' },
   { mode: 'speak', icon: Mic, title: 'Speaking', text: 'Say words and phrases; the browser checks your pronunciation.' },
+  { mode: 'pairs', icon: Ear, title: 'Minimal pairs', text: 'Sounds that are easy to confuse (ship / sheep): hear one word, pick it.' },
+  { mode: 'dictation', icon: PenLine, title: 'Dictation', text: 'Hear a whole sentence and type it.' },
   { mode: 'new', icon: Sparkles, title: 'New words', text: 'Words you have not practiced yet.' },
 ];
 
@@ -389,7 +405,7 @@ function PracticeHub({ onStart, counts }) {
 
 function WordsTab({ topics }) {
   const [q, setQ] = useState('');
-  const strength = store.get(K_STRENGTH, {});
+  const strength = readStrength();
   const words = wordsOf(topics).filter((w) => !q || `${w.front} ${w.back}`.toLowerCase().includes(q.toLowerCase()));
   if (!topics.some((t) => (t.flashcards || []).length)) return <div className="panel" style={{ marginTop: 'var(--space-4)' }}><p>No words yet. Each language class brings its vocabulary here.</p></div>;
   return (
@@ -402,7 +418,7 @@ function WordsTab({ topics }) {
             <tr key={w.key}>
               <td><strong><ArticleWord text={w.front} lang={w.lang} gender={w.gender} back={w.back} /></strong></td>
               <td><MdInline>{w.back}</MdInline></td>
-              <td><span className="lang-strength" aria-label={`strength ${strength[w.key] || 0} of 4`}>{[1, 2, 3, 4].map((n) => <i key={n} data-on={(strength[w.key] || 0) >= n} />)}</span></td>
+              <td>{(() => { const b = barsOf(strength, w.key); return <span className="lang-strength" data-bars={b} aria-label={`strength ${b} of 4`}>{[1, 2, 3, 4].map((n) => <i key={n} data-on={b >= n} />)}</span>; })()}</td>
               <td className="hint">{w.unit.replace(/^Class \d+:\s*/, '')}</td>
             </tr>
           ))}

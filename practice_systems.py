@@ -5,12 +5,19 @@ Operating Systems & Computer Systems Architecture practice types:
 - assembly_reg_trace: Instruction sequence execution and register file state trace
 - deadlock_bankers: Banker's safety algorithm and deadlock avoidance verification
 
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS. Standard library only.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type). Standard library only.
 """
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"expected", "solution", "physical_address", "expected_bits", "final_registers", "safe_sequence", "is_safe"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "page_table_walk": {"physical_address"},  # virtual_address, vpn and ppn are the givens
+    "cache_tag_index_offset": {"expected_bits"},
+    "assembly_reg_trace": {"final_registers"},
+    "deadlock_bankers": {"is_safe", "safe_sequence"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {"page_table_walk": set(), "cache_tag_index_offset": set(),
+                                      "assembly_reg_trace": set(), "deadlock_bankers": {"allocation", "max_claim", "available"}}
 
 
 def _s(v: Any, limit: int = 500) -> str:
@@ -31,6 +38,10 @@ def _num(v: Any) -> Optional[float]:
 # 1. page_table_walk
 # ---------------------------------------------------------------------------
 def _np_page_table_walk(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """page_table_walk: translate a virtual address to a physical address.
+    Fields: virtual_address (hex "0x..." or decimal text), page_size_bytes (default 4096), ppn (the frame the page
+    maps to; the server picks vpn + 16 when absent). vpn (virtual page number) and ppn are public givens.
+    Secret: physical_address (ppn * page size + offset). Submit {physical_address} or the address as hex/decimal text."""
     va_str = _s(p.get("virtual_address") or p.get("va"), 50)
     page_size = int(_num(p.get("page_size_bytes")) or 4096)
     vpn = p.get("vpn")
@@ -63,6 +74,7 @@ def _grade_page_table_walk(item: Dict[str, Any], submission: Any) -> Dict[str, A
     expected = _s(item.get("physical_address")).lower()
     sub_raw = _s(submission.get("physical_address") if isinstance(submission, dict) else submission).lower()
 
+    exp_int = None
     try:
         exp_int = int(expected, 16) if expected.startswith("0x") else int(expected)
         sub_int = int(sub_raw, 16) if sub_raw.startswith("0x") else int(sub_raw)
@@ -73,8 +85,8 @@ def _grade_page_table_walk(item: Dict[str, Any], submission: Any) -> Dict[str, A
     return {
         "ok": ok,
         "score": 1.0 if ok else 0.0,
-        "feedback": f"Physical address {hex(exp_int)} verified!" if ok else f"Incorrect address translation.",
-        "details": {"submitted": sub_raw, "expected": expected},
+        "feedback": f"Physical address {hex(exp_int)} verified!" if ok else "Incorrect address translation.",
+        "details": {"submitted": sub_raw},
     }
 
 
@@ -82,6 +94,10 @@ def _grade_page_table_walk(item: Dict[str, Any], submission: Any) -> Dict[str, A
 # 2. cache_tag_index_offset
 # ---------------------------------------------------------------------------
 def _np_cache_tag_index_offset(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """cache_tag_index_offset: split an address into tag, index and offset bit counts.
+    Fields: address_bits (default 32), cache_size_bytes (default 32768), block_size_bytes (default 64),
+    associativity_ways (default 4); sizes are powers of two. Secret: expected_bits {tag, index, offset}.
+    Submit {tag, index, offset} as integer bit counts."""
     addr_bits = int(_num(p.get("address_bits")) or 32)
     cache_size = int(_num(p.get("cache_size_bytes")) or 32768)
     block_size = int(_num(p.get("block_size_bytes")) or 64)
@@ -118,9 +134,16 @@ def _grade_cache_tag_index_offset(item: Dict[str, Any], submission: Any) -> Dict
         return {"ok": False, "score": 0.0, "feedback": "Must submit tag, index, and offset bits.", "details": {}}
 
     exp = item.get("expected_bits", {})
-    t_ok = int(submission.get("tag", -1)) == exp.get("tag")
-    i_ok = int(submission.get("index", -1)) == exp.get("index")
-    o_ok = int(submission.get("offset", -1)) == exp.get("offset")
+
+    def bits(key: str) -> int:
+        try:
+            return int(submission.get(key, -1))
+        except (TypeError, ValueError):
+            return -1
+
+    t_ok = bits("tag") == exp.get("tag")
+    i_ok = bits("index") == exp.get("index")
+    o_ok = bits("offset") == exp.get("offset")
 
     correct = sum([t_ok, i_ok, o_ok])
     score = round(correct / 3.0, 2)
@@ -128,8 +151,8 @@ def _grade_cache_tag_index_offset(item: Dict[str, Any], submission: Any) -> Dict
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Cache bit-fields match geometry!" if ok else f"Mismatch in fields ({correct}/3 correct).",
-        "details": {"submitted": submission, "expected": exp},
+        "feedback": "Cache bit-fields match geometry!" if ok else "Not yet: recheck how the address splits into tag, index and offset bits.",
+        "details": {},
     }
 
 
@@ -137,6 +160,9 @@ def _grade_cache_tag_index_offset(item: Dict[str, Any], submission: Any) -> Dict
 # 3. assembly_reg_trace
 # ---------------------------------------------------------------------------
 def _np_assembly_reg_trace(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """assembly_reg_trace: trace registers through a short instruction list.
+    Fields: instructions (list of text lines: add, addi, sub, slli, xor), initial_registers {name: integer}.
+    Secret: final_registers {name: integer} (computed by the server). Submit {register: integer} for every register."""
     instructions = [_s(inst, 100) for inst in p.get("instructions", []) if _s(inst, 100)]
     initial_regs = {str(k).strip(): int(v) for k, v in (p.get("initial_registers") or {}).items()}
     if not instructions:
@@ -181,104 +207,117 @@ def _grade_assembly_reg_trace(item: Dict[str, Any], submission: Any) -> Dict[str
     matched = 0
     total = len(expected)
     for r, exp_val in expected.items():
-        if int(submission.get(r, -999999)) == exp_val:
-            matched += 1
+        try:
+            if int(submission.get(r, -999999)) == exp_val:
+                matched += 1
+        except (TypeError, ValueError):
+            pass
 
     score = round(matched / max(1, total), 2)
     ok = (score == 1.0)
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Register trace verified!" if ok else f"Register state divergence ({matched}/{total} matched).",
-        "details": {"submitted": submission, "expected": expected},
+        "feedback": "Register trace verified!" if ok else "Not yet: retrace the instructions and recheck each register.",
+        "details": {},
     }
 
 
 # ---------------------------------------------------------------------------
 # 4. deadlock_bankers
 # ---------------------------------------------------------------------------
-def _np_deadlock_bankers(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    alloc = p.get("allocation")  # list of lists or dict
-    max_claim = p.get("max_claim")
-    available = p.get("available")
-    if not alloc or not max_claim or not available:
+def _int_matrix(v: Any, rows: int = 0, cols: int = 0) -> Optional[List[List[int]]]:
+    """A small matrix of non-negative ints (at most 12 x 8), or None when the shape or values are wrong."""
+    if not isinstance(v, list) or not v or len(v) > 12:
         return None
+    out: List[List[int]] = []
+    for row in v:
+        if not isinstance(row, list) or not row or len(row) > 8:
+            return None
+        try:
+            r = [int(x) for x in row]
+        except (TypeError, ValueError):
+            return None
+        if any(x < 0 or x > 10_000 for x in r):
+            return None
+        out.append(r)
+    width = len(out[0])
+    if any(len(r) != width for r in out) or (rows and len(out) != rows) or (cols and width != cols):
+        return None
+    return out
 
-    # Banker's safety check
-    n_proc = len(alloc)
-    n_res = len(available)
+
+def _bankers_safe_sequence(alloc: List[List[int]], max_claim: List[List[int]], available: List[int]) -> List[int]:
+    """The lowest-index-first safe sequence, or [] when the state is unsafe."""
+    n_proc, n_res = len(alloc), len(available)
     need = [[max_claim[i][j] - alloc[i][j] for j in range(n_res)] for i in range(n_proc)]
-    work = list(available)
-    finish = [False] * n_proc
-    safe_seq = []
-
-    while len(safe_seq) < n_proc:
-        found = False
+    work, finish, seq = list(available), [False] * n_proc, []
+    while len(seq) < n_proc:
         for i in range(n_proc):
             if not finish[i] and all(need[i][j] <= work[j] for j in range(n_res)):
                 for j in range(n_res):
                     work[j] += alloc[i][j]
                 finish[i] = True
-                safe_seq.append(i)
-                found = True
+                seq.append(i)
                 break
-        if not found:
-            break
+        else:
+            return []
+    return seq
 
-    is_safe = (len(safe_seq) == n_proc)
 
-    return {
-        **base,
-        "allocation": alloc,
-        "max_claim": max_claim,
-        "available": available,
-        "is_safe": is_safe,
-        "safe_sequence": safe_seq if is_safe else [],
-    }
+def _np_deadlock_bankers(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """deadlock_bankers: decide whether a resource state is safe (Banker's algorithm).
+    Fields: allocation, max_claim (matrices of non-negative ints, one row per process, one column per resource;
+    max_claim >= allocation everywhere), available (vector, one entry per resource); up to 12 processes and 8
+    resources. Secret: is_safe, safe_sequence (computed by the server). Submit {is_safe: bool, sequence: [process
+    indices, 0-based]}; when the state is safe the sequence must be a permutation of every process that runs, so any
+    valid order counts."""
+    available_m = _int_matrix([p.get("available")] if isinstance(p.get("available"), list) else None)
+    if not available_m:
+        return None
+    available = available_m[0]
+    alloc = _int_matrix(p.get("allocation"), cols=len(available))
+    if not alloc:
+        return None
+    max_claim = _int_matrix(p.get("max_claim"), rows=len(alloc), cols=len(available))
+    if not max_claim or any(max_claim[i][j] < alloc[i][j] for i in range(len(alloc)) for j in range(len(available))):
+        return None
+    seq = _bankers_safe_sequence(alloc, max_claim, available)
+    return {**base, "allocation": alloc, "max_claim": max_claim, "available": available,
+            "is_safe": bool(seq), "safe_sequence": seq}
 
 
 def _grade_deadlock_bankers(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
-    expected_safe = item.get("is_safe", False)
-    if not isinstance(submission, dict):
-        return {"ok": False, "score": 0.0, "feedback": "Must submit is_safe and sequence.", "details": {}}
-
-    sub_safe = bool(submission.get("is_safe"))
-    if sub_safe != expected_safe:
-        return {"ok": False, "score": 0.0, "feedback": f"State was {'safe' if expected_safe else 'unsafe'}.", "details": {}}
-
+    if not isinstance(submission, dict) or "is_safe" not in submission:
+        return {"ok": False, "score": 0.0, "feedback": "Say whether the state is safe, and give a sequence if it is.",
+                "details": {}}
+    expected_safe = bool(item.get("is_safe", False))
+    if bool(submission.get("is_safe")) != expected_safe:
+        return {"ok": False, "score": 0.0, "feedback": "Not quite: recheck whether every process can finish.", "details": {}}
     if not expected_safe:
-        return {"ok": True, "score": 1.0, "feedback": "Correctly detected deadlock / unsafe state.", "details": {}}
-
-    # If safe, verify submitted sequence is valid
-    sub_seq = submission.get("sequence", [])
-    alloc = item.get("allocation", [])
-    avail = list(item.get("available", []))
-    max_c = item.get("max_claim", [])
-    n_res = len(avail)
-
-    if len(sub_seq) != len(alloc):
-        return {"ok": False, "score": 0.5, "feedback": "Incomplete safe sequence.", "details": {}}
-
-    valid = True
-    work = list(avail)
-    for p in sub_seq:
-        try:
-            if any((max_c[p][j] - alloc[p][j]) > work[j] for j in range(n_res)):
-                valid = False
-                break
-            for j in range(n_res):
-                work[j] += alloc[p][j]
-        except Exception:
-            valid = False
-            break
-
-    score = 1.0 if valid else 0.5
-    return {
-        "ok": valid,
-        "score": score,
-        "feedback": "Valid safe execution sequence!" if valid else "Safe sequence execution stalled on resources.",
-        "details": {"valid": valid},
-    }
+        return {"ok": True, "score": 1.0, "feedback": "Right: no order lets every process finish, so the state is unsafe.",
+                "details": {}}
+    alloc = item.get("allocation") or []
+    max_c = item.get("max_claim") or []
+    work = list(item.get("available") or [])
+    n_proc, n_res = len(alloc), len(work)
+    raw = submission.get("sequence")
+    try:
+        seq = [int(x) for x in raw] if isinstance(raw, list) else []
+    except (TypeError, ValueError):
+        seq = []
+    if sorted(seq) != list(range(n_proc)):
+        return {"ok": False, "score": 0.5,
+                "feedback": f"Safe is right. Now list each of the {n_proc} processes exactly once, in an order that works.",
+                "details": {"valid": False}}
+    for step, i in enumerate(seq):
+        if any(max_c[i][j] - alloc[i][j] > work[j] for j in range(n_res)):
+            return {"ok": False, "score": 0.5,
+                    "feedback": f"Safe is right, but step {step + 1} (P{i}) needs more than is available then.",
+                    "details": {"valid": False, "stalled_at": step}}
+        for j in range(n_res):
+            work[j] += alloc[i][j]
+    return {"ok": True, "score": 1.0, "feedback": "Valid safe sequence: every process finishes.", "details": {"valid": True}}
 
 
 NORMALIZERS = {

@@ -1,3 +1,9 @@
+> **Superseded (2026-11-16).** A check against the code found this report's "100% complete" wrong for everything a
+> student could use: the 44 kit practice types had no screens and no client grading, several answer keys reached the
+> browser, the six liberal-arts workspaces had no screen, and the Philosophy Kit UI, persona dialogue and most History and
+> Languages items did not exist. Several type names below do not match the code. These were built on 2026-11-16; the code
+> and ARCHITECTURE.md are the reference, not this report.
+
 # Fair & True Progress Report to Gemini: Science & Liberal Arts Architecture V2
 
 **Report Date**: November 14, 2026  

@@ -1,12 +1,32 @@
 """
 Art History practice types: composition_vector, label_architecture, iconography_decode, stylistic_taxonomy.
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type).
 Standard library only.
 """
 import math
+import random
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"focal_point", "solution", "period"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "composition_vector": {"focal_point"},
+    "label_architecture": {"solution"},
+    "iconography_decode": {"solution"},
+    "stylistic_taxonomy": {"period"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {"composition_vector": {"tolerance"}, "label_architecture": set(),
+                                      "iconography_decode": set(), "stylistic_taxonomy": set()}
+
+
+
+def _hide_order(items: List[str], answer: Optional[List[str]] = None) -> List[str]:
+    """A fixed, repeatable shuffle of `items` that never equals the answer order, so a public list built from the
+    solution does not give the order away. The same set of items always gives the same result."""
+    base = sorted(set(items))
+    out = list(base)
+    random.Random("|".join(base)).shuffle(out)
+    if len(out) > 1 and answer is not None and out == [str(a) for a in answer]:
+        out = out[1:] + out[:1]
+    return out
 
 
 def _s(v: Any, limit: int = 500) -> str:
@@ -15,6 +35,9 @@ def _s(v: Any, limit: int = 500) -> str:
 
 # ---- 1. composition_vector ----
 def _np_composition_vector(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """composition_vector: click the focal point of an image.
+    Fields: image_url (offline path or https URL), tolerance (0.005-0.1, fraction of the image, default 0.035).
+    Secret: focal_point {x, y} as fractions 0-1 of width and height. Submit {x, y} in the same fractions."""
     raw_pt = p.get("focal_point") or p.get("point") or p.get("target")
     x, y = None, None
     if isinstance(raw_pt, dict):
@@ -61,17 +84,19 @@ def _grade_composition_vector(item: Dict[str, Any], submission: Any) -> Dict[str
 
     dist = math.hypot(sxf - tx, syf - ty)
     ok = (dist <= tol)
-    score = 1.0 if ok else max(0.0, round(1.0 - (dist / (tol * 4.0)), 2))
-    return {
+    return {  # a miss gives no distance or partial score, so repeated clicks cannot triangulate the point
         "ok": ok,
-        "score": score,
-        "feedback": f"Focal point located accurately! (distance: {round(dist, 4)} <= {tol})" if ok else f"Focal point off target (distance: {round(dist, 4)} > {tol}).",
-        "details": {"distance": round(dist, 4), "tolerance": tol},
+        "score": 1.0 if ok else 0.0,
+        "feedback": "Focal point located accurately!" if ok else "Focal point off target.",
+        "details": {"tolerance": tol},
     }
 
 
 # ---- 2. label_architecture ----
 def _np_label_architecture(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """label_architecture: match each label of a building to the right architectural element.
+    Fields: labels (derived: the keys of the solution), elements (the candidate answers; shuffled when not given),
+    image_url. Secret: solution {label: element}. Submit {label: element}."""
     elements = [_s(x, 100) for x in p.get("elements", []) if _s(x, 100)]
     solution = p.get("solution") or p.get("expected")
     if not isinstance(solution, dict) or not solution:
@@ -79,7 +104,7 @@ def _np_label_architecture(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[
     clean_sol = {str(k).strip(): str(v).strip() for k, v in solution.items()}
     return {
         **base,
-        "elements": elements or list(clean_sol.values()),
+        "elements": _hide_order(elements or list(clean_sol.values())),
         "labels": list(clean_sol.keys()),
         "solution": clean_sol,
         "image_url": _s(p.get("image_url") or p.get("image"), 400),
@@ -102,13 +127,16 @@ def _grade_label_architecture(item: Dict[str, Any], submission: Any) -> Dict[str
     return {
         "ok": ok,
         "score": score,
-        "feedback": "All architectural features identified correctly!" if ok else f"Correct on {correct}/{total} architectural labels.",
+        "feedback": "All architectural features identified correctly!" if ok else "Not yet: recheck the labels against each part of the building.",
         "details": {"accuracy": score},
     }
 
 
 # ---- 3. iconography_decode ----
 def _np_iconography_decode(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """iconography_decode: say which figure or meaning each symbol points to.
+    Fields: symbols (list; the keys of the solution when not given), options (the candidate figures or meanings,
+    sorted, derived from the solution). Secret: solution {symbol: figure}. Submit {symbol: figure}."""
     symbols = [_s(x, 120) for x in p.get("symbols", []) if _s(x, 120)]
     solution = p.get("solution") or p.get("attributes")
     if not isinstance(solution, dict) or not solution:
@@ -116,7 +144,8 @@ def _np_iconography_decode(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[
     clean_sol = {str(k).strip(): str(v).strip() for k, v in solution.items()}
     return {
         **base,
-        "symbols": symbols or list(clean_sol.keys()),
+        "symbols": _hide_order(symbols or list(clean_sol.keys())),
+        "options": _hide_order(list(clean_sol.values())),
         "solution": clean_sol,
     }
 
@@ -138,13 +167,16 @@ def _grade_iconography_decode(item: Dict[str, Any], submission: Any) -> Dict[str
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Iconographic symbols decoded successfully!" if ok else f"Decoded {correct}/{total} iconographic attributes.",
+        "feedback": "Iconographic symbols decoded successfully!" if ok else "Not yet: recheck which attribute belongs to which figure.",
         "details": {"accuracy": score},
     }
 
 
 # ---- 4. stylistic_taxonomy ----
 def _np_stylistic_taxonomy(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """stylistic_taxonomy: name the period or movement from its traits.
+    Fields: traits (list of observations), options (candidate periods; the right one is added and the list shuffled
+    when it was missing). Secret: period (alias movement). Submit the period text."""
     traits = [_s(x, 200) for x in p.get("traits", []) if _s(x, 200)]
     period = _s(p.get("period") or p.get("movement"), 100)
     options = [_s(x, 100) for x in p.get("options", []) if _s(x, 100)]
@@ -152,6 +184,7 @@ def _np_stylistic_taxonomy(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[
         return None
     if options and period not in options:
         options.append(period)
+        options = _hide_order(options)
     return {
         **base,
         "traits": traits,

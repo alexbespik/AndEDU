@@ -14,6 +14,32 @@ export function pointToFraction(svg, clientX, clientY, w, h) {
   return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
 }
 
+/** lon/lat -> {x, y} 0-1 fractions of an equirectangular map with data-bounds [lonMin, latMin, lonMax, latMax]; null outside it. */
+export function lonLatToFraction(bounds, lon, lat) {
+  if (!bounds) return null;
+  const [lo0, la0, lo1, la1] = bounds;
+  const x = (lon - lo0) / (lo1 - lo0), y = (la1 - lat) / (la1 - la0);
+  return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null;
+}
+
+/** Historical cities shown dimmed on every map that contains them, so a map is informative before any class adds pins. */
+export const ANCHOR_CITIES = [
+  { name: 'Athens', lon: 23.73, lat: 37.98 }, { name: 'Rome', lon: 12.5, lat: 41.9 }, { name: 'Alexandria', lon: 29.92, lat: 31.2 },
+  { name: 'Jerusalem', lon: 35.22, lat: 31.77 }, { name: 'Constantinople', lon: 28.98, lat: 41.01 }, { name: 'London', lon: -0.13, lat: 51.51 },
+  { name: 'Paris', lon: 2.35, lat: 48.86 }, { name: "Chang'an", lon: 108.94, lat: 34.27 }, { name: 'Tenochtitlan', lon: -99.13, lat: 19.43 },
+  { name: 'Baghdad', lon: 44.4, lat: 33.31 }, { name: 'Cusco', lon: -71.97, lat: -13.52 }, { name: 'Delhi', lon: 77.21, lat: 28.61 },
+];
+
+/** Group items {x, y} (0-1 fractions) whose points lie within `radius` (in map units) of a group's first point. */
+export function clusterPoints(points, w, h, radius) {
+  const groups = [];
+  for (const p of points) {
+    const g = groups.find((c) => Math.hypot((c[0].x - p.x) * w, (c[0].y - p.y) * h) <= radius);
+    if (g) g.push(p); else groups.push([p]);
+  }
+  return groups;
+}
+
 /** Every practice item of these types across the topics, tagged with its topic. */
 export function collect(topics, ...types) {
   return topics.flatMap((t) => (t.practice || []).filter((p) => types.includes(p.type))

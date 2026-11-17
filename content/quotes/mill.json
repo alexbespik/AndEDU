@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "collection": "mill",
+  "note": "Public-domain texts only; year is the first publication of this text or translation. Every text is checked word for word against source_url by scripts/verify_quotes.py. Never add a quote from memory. translator is empty for works written in English.",
+  "quotes": [
+    {
+      "id": "mill-ol-1-harm",
+      "author": "John Stuart Mill",
+      "work": "On Liberty",
+      "ref": "ch. 1",
+      "translator": "",
+      "year": 1859,
+      "text": "His own good, either physical or moral, is not a sufficient warrant.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/john-stuart-mill/on-liberty/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "mill-ol-1-sovereign",
+      "author": "John Stuart Mill",
+      "work": "On Liberty",
+      "ref": "ch. 1",
+      "translator": "",
+      "year": 1859,
+      "text": "Over himself, over his own body and mind, the individual is sovereign.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/john-stuart-mill/on-liberty/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "mill-ol-2-minus-one",
+      "author": "John Stuart Mill",
+      "work": "On Liberty",
+      "ref": "ch. 2",
+      "translator": "",
+      "year": 1859,
+      "text": "If all mankind minus one, were of one opinion, and only one person were of the contrary opinion, mankind would be no more justified in silencing that one person",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/john-stuart-mill/on-liberty/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "mill-ol-2-own-side",
+      "author": "John Stuart Mill",
+      "work": "On Liberty",
+      "ref": "ch. 2",
+      "translator": "",
+      "year": 1859,
+      "text": "He who knows only his own side of the case, knows little of that.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/john-stuart-mill/on-liberty/text/single-page",
+      "pd": true
+    }
+  ]
+}

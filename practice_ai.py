@@ -5,12 +5,18 @@ Machine Learning & AI practice types:
 - confusion_matrix_metrics: Classification metrics (Precision, Recall, F1, Specificity)
 - loss_gradient_verify: Cross-entropy and MSE loss & analytical gradient calculation
 
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS. Standard library only.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type). Standard library only.
 """
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"expected", "solution", "grad_W", "grad_b", "attention_weights", "metrics", "loss_expected", "grad_expected"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "backprop_layer_step": {"grad_W", "grad_b"},
+    "attention_score_matrix": {"attention_weights"},
+    "confusion_matrix_metrics": {"metrics"},
+    "loss_gradient_verify": {"loss_expected", "grad_expected"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {t: set() for t in SECRET_FIELDS}
 
 
 def _s(v: Any, limit: int = 500) -> str:
@@ -31,6 +37,10 @@ def _num(v: Any) -> Optional[float]:
 # 1. backprop_layer_step
 # ---------------------------------------------------------------------------
 def _np_backprop_layer_step(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """backprop_layer_step: find the gradients of one linear layer.
+    Fields: X (input vector of numbers), delta (upstream gradient dL/dz, a vector of numbers), activation (text,
+    default "linear"). Secret: grad_W (outer product, rows follow delta), grad_b (computed by the server).
+    Submit {grad_W: [[...]], grad_b: [...]} (tolerance 0.02 per cell)."""
     x = p.get("X")  # input vector/matrix
     delta = p.get("delta")  # incoming upstream gradient dL/dz
     if not isinstance(x, list) or not isinstance(delta, list):
@@ -96,8 +106,8 @@ def _grade_backprop_layer_step(item: Dict[str, Any], submission: Any) -> Dict[st
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Backprop gradient step verified!" if ok else f"Gradient elements off ({correct_cells}/{total_cells} matched).",
-        "details": {"score": score},
+        "feedback": "Backprop gradient step verified!" if ok else "Not yet: recheck the chain rule and the shapes of grad_W and grad_b.",
+        "details": {},
     }
 
 
@@ -105,6 +115,9 @@ def _grade_backprop_layer_step(item: Dict[str, Any], submission: Any) -> Dict[st
 # 2. attention_score_matrix
 # ---------------------------------------------------------------------------
 def _np_attention_score_matrix(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """attention_score_matrix: compute scaled dot-product attention weights.
+    Fields: Q, K (matrices as lists of rows, same width d_k). d_k is derived. Secret: attention_weights (softmax
+    of QK^T / sqrt(d_k) per row, computed by the server). Submit {weights: [[...]]} or the matrix (tolerance 0.03)."""
     q = p.get("Q")  # shape (seq, d_k)
     k = p.get("K")  # shape (seq, d_k)
     if not isinstance(q, list) or not isinstance(k, list) or not q or not k:
@@ -164,8 +177,8 @@ def _grade_attention_score_matrix(item: Dict[str, Any], submission: Any) -> Dict
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Attention matrix calculated accurately!" if ok else f"Mismatch in attention weights ({correct}/{total} accurate).",
-        "details": {"score": score},
+        "feedback": "Attention matrix calculated accurately!" if ok else "Not yet: recheck the scaling and that each row is normalised by softmax.",
+        "details": {},
     }
 
 
@@ -173,6 +186,9 @@ def _grade_attention_score_matrix(item: Dict[str, Any], submission: Any) -> Dict
 # 3. confusion_matrix_metrics
 # ---------------------------------------------------------------------------
 def _np_confusion_matrix_metrics(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """confusion_matrix_metrics: compute classification metrics from a confusion matrix.
+    Fields: TP, FP, FN, TN (counts). Secret: metrics {precision, recall, f1, specificity} (computed by the server).
+    Submit {precision, recall, f1, specificity} (tolerance 0.02; 3 of 4 must match)."""
     tp = _num(p.get("TP") or p.get("tp"))
     fp = _num(p.get("FP") or p.get("fp"))
     fn = _num(p.get("FN") or p.get("fn"))
@@ -214,8 +230,8 @@ def _grade_confusion_matrix_metrics(item: Dict[str, Any], submission: Any) -> Di
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Classification metrics verified!" if ok else f"Some metrics mismatched ({matched}/{total} correct).",
-        "details": {"matched": matched, "total": total},
+        "feedback": "Classification metrics verified!" if ok else "Not yet: recheck the confusion-matrix counts behind each metric.",
+        "details": {},
     }
 
 
@@ -223,6 +239,10 @@ def _grade_confusion_matrix_metrics(item: Dict[str, Any], submission: Any) -> Di
 # 4. loss_gradient_verify
 # ---------------------------------------------------------------------------
 def _np_loss_gradient_verify(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """loss_gradient_verify: compute a loss value and its gradient for one prediction.
+    Fields: loss_type ("cross_entropy" binary, default, or "mse" = 0.5*(y_pred-y_true)^2), y_true, y_pred (numbers).
+    Secret: loss_expected, grad_expected (the gradient with respect to y_pred for mse, with respect to the logit
+    for cross_entropy, i.e. y_pred - y_true). Submit {loss, grad} (tolerance 0.05)."""
     loss_type = _s(p.get("loss_type") or "cross_entropy", 50).lower()
     y_true = _num(p.get("y_true"))
     y_pred = _num(p.get("y_pred"))
@@ -266,8 +286,8 @@ def _grade_loss_gradient_verify(item: Dict[str, Any], submission: Any) -> Dict[s
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Loss & analytical gradient match!" if ok else "Loss or gradient discrepancy detected.",
-        "details": {"loss_match": ok_l, "grad_match": ok_g},
+        "feedback": "Loss & analytical gradient match!" if ok else "Not yet: recheck the loss and the gradient derivation.",
+        "details": {},
     }
 
 

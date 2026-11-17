@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Loader2, RotateCcw, X } from 'lucide-react';
 import Md from './Md';
-import { api, uploadFiles } from '../lib/api';
+import { api, uploadFiles, loadProfile } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { disambiguateFile } from '../lib/files';
 
@@ -18,7 +18,8 @@ const STARTERS = [
  * Socratic tutor for one lesson (from &EDU's mentor): a short brief, then a conversation that leads with
  * questions instead of answers. `focus` = a quiz question the student just got wrong.
  */
-export default function LessonTutor({ topic, focus, onFocusUsed }) {
+export default function LessonTutor({ topic, focus, onFocusUsed, userId = null }) {
+  const uid = userId || loadProfile()?.id || undefined;
   const [brief, setBrief] = useState(() => briefCache.get(topic.id) ?? null);
   const [turns, setTurns] = useState([]);
   const [input, setInput] = useState('');
@@ -41,7 +42,7 @@ export default function LessonTutor({ topic, focus, onFocusUsed }) {
   useEffect(() => {
     if (briefCache.has(topic.id)) return undefined;
     let live = true;
-    api('/api/tutor/lesson', { method: 'POST', body: { topicId: topic.id, mode: 'brief' } })
+    api('/api/tutor/lesson', { method: 'POST', body: { topicId: topic.id, mode: 'brief', userId: uid } })
       .then((d) => {
         const text = (d.reply || '').replace(/\n(?!\n)/g, '\n\n');  // one line per part
         briefCache.set(topic.id, text);
@@ -49,7 +50,7 @@ export default function LessonTutor({ topic, focus, onFocusUsed }) {
       })
       .catch(() => live && setBrief(''));
     return () => { live = false; };
-  }, [topic.id]);
+  }, [topic.id, uid]);
 
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns, busy]);
 
@@ -114,7 +115,7 @@ export default function LessonTutor({ topic, focus, onFocusUsed }) {
     setError(null);
     try {
       const { reply } = await api('/api/tutor/lesson', {
-        method: 'POST', body: { topicId: topic.id, message, history, focus: withFocus ?? focus ?? undefined },
+        method: 'POST', body: { topicId: topic.id, userId: uid, message, history, focus: withFocus ?? focus ?? undefined },
       });
       setTurns((t) => [...t, { role: 'tutor', content: reply }]);
     } catch (e) {

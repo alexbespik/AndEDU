@@ -102,6 +102,24 @@ def solve_titration_ph(pKa: Any, Va: float, Ca: float, Cb: float, Vb: float, is_
     return -math.log10(h)
 
 
+def _clean_pka(value: Any, errors: List[str]) -> Any:
+    """A titration pKa given as a number or a list of 1-3 ascending numbers (polyprotic acid)."""
+    vals = list(value) if isinstance(value, (list, tuple)) else [value]
+    if not 1 <= len(vals) <= 3:
+        errors.append("pKa: give 1 to 3 values")
+        return 4.75
+    out: List[float] = []
+    for v in vals:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not -2.0 <= v <= 16.0:
+            errors.append("pKa: every value must be a number between -2 and 16")
+            return 4.75
+        out.append(float(v))
+    if any(b <= a for a, b in zip(out, out[1:])):
+        errors.append("pKa: values must be strictly ascending")
+        return 4.75
+    return out[0] if not isinstance(value, (list, tuple)) else out
+
+
 def validate_chem(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
     """
     Validates a chemistry simulation specification.
@@ -151,6 +169,9 @@ def validate_chem(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
 
     for field, variables in fields.items():
         value = spec.get(field, defaults.get(field))
+        if widget == "titration" and field == "pKa" and isinstance(value, (list, tuple, int, float)) and not isinstance(value, bool):
+            clean[field] = _clean_pka(value, errors)
+            continue
         if value is None:
             if field in defaults:
                 continue
@@ -173,6 +194,7 @@ Widgets:
 - "equilibrium": general equilibrium aA + bB <=> cC + dD with constant K. Sliders for initial amounts A0, B0, C0, D0.
   Solves equilibrium extent, showing reaction quotient Q vs K, Le Chatelier shifts, and dynamic bar charts.
 - "titration": acid-base titration curve (strong/weak acid with strong base). Sliders pKa, Va, Ca, Cb, Vb.
+  pKa may also be a number or a list of 1-3 ascending values for a polyprotic acid, e.g. "pKa": [2.15, 7.2, 12.35].
   Renders pH titration curve with equivalence point, buffer half-equivalence region, and beaker indicator color.
 - "gas_law": interactive piston cylinder with moving gas particles. Sliders n, T, V.
   Visualizes kinetic theory of gases, calculating theoretical pressure P = nRT/V vs wall collision frequency.

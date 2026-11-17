@@ -2,11 +2,11 @@
 // Exposed to LanguageLab through EXTRA_LANGUAGE_TABS in ./index.js; each tab gets the language topics.
 import React, { useMemo, useState } from 'react';
 import Md from '../Md';
-import { StoryPlayer, DialogueChat, ScriptMatch } from '../../practice/language_extra';
+import { StoryPlayer, DialogueChat, ScriptMatch, LANGUAGE_EXTRA_RENDER } from '../../practice/language_extra';
 import { speak, noVoiceHelp, languageName } from '../../lib/speech';
 import { reportXp } from '../../lib/engage';
 import { SCRIPT_IDS, scriptTable, scriptDrill } from './alphabets';
-import { grammarSections, itemsOfType } from './util';
+import { grammarSections, itemsOfType, conjugationStem } from './util';
 
 function Empty({ children }) {
   return <p className="notice notice-info" style={{ marginTop: 'var(--space-4)' }}>{children}</p>;
@@ -108,6 +108,39 @@ export function GrammarTipsTab({ topics }) {
           ))}
         </section>
       ))}
+    </div>
+  );
+}
+
+/** Conjugation desk: the lessons' `conjugate` items, filtered by tense, with the shared stem of each verb shown. */
+export function ConjugationTab({ topics }) {
+  const all = useMemo(() => itemsOfType(topics, 'conjugate'), [topics]);
+  const tenses = useMemo(() => [...new Set(all.map(({ item }) => item.tense))], [all]);
+  const [tense, setTense] = useState('all');
+  const [k, setK] = useState(0);
+  const Body = LANGUAGE_EXTRA_RENDER.conjugate;
+  if (!all.length) return <Empty>No conjugation tables yet. Language classes add them, or an agent can with the add_conjugation tool.</Empty>;
+  const shown = tense === 'all' ? all : all.filter(({ item }) => item.tense === tense);
+  const cur = shown[Math.min(k, shown.length - 1)];
+  const { stem, irregular } = conjugationStem(cur.item.forms);
+  return (
+    <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+      <div className="lx-picker" role="group" aria-label="Tense">
+        {['all', ...tenses].map((t) => (
+          <button key={t} type="button" className="btn btn-quiet btn-sm" aria-pressed={t === tense} onClick={() => { setTense(t); setK(0); }}>{t === 'all' ? 'All tenses' : t}</button>
+        ))}
+      </div>
+      <Picker entries={shown.map(({ topic, item }) => ({ topic, item: { ...item, title: `${item.verb} (${item.tense})` } }))} current={Math.min(k, shown.length - 1)} onPick={setK} label="Verbs" />
+      {stem && (
+        <p className="hint lx-conj-stem">
+          Shared stem: <strong lang={cur.item.lang}>{stem}-</strong>
+          {irregular.some(Boolean) && <> · irregular: {cur.item.forms.filter((_, i) => irregular[i]).map(([p, f]) => <span key={p} className="lx-irregular" lang={cur.item.lang}>{p} {f}</span>)}</>}
+        </p>
+      )}
+      <div className="panel">
+        <Body key={`${cur.topic.id}:${cur.item.id}`} item={cur.item}
+          onResult={(ok) => ok && reportXp('practice_correct', `lang:${cur.topic.id}:${cur.item.id}`)} />
+      </div>
     </div>
   );
 }

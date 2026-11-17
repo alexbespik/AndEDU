@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "collection": "nietzsche",
+  "note": "Public-domain texts only; year is the first publication of this text or translation. Every text is checked word for word against source_url by scripts/verify_quotes.py. Never add a quote from memory. translator is empty for works written in English.",
+  "quotes": [
+    {
+      "id": "nietzsche-bge-146-monsters",
+      "author": "Friedrich Nietzsche",
+      "work": "Beyond Good and Evil",
+      "ref": "§146",
+      "translator": "Helen Zimmern",
+      "year": 1907,
+      "text": "He who fights with monsters should be careful lest he thereby become a monster.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/friedrich-nietzsche/beyond-good-and-evil/helen-zimmern/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "nietzsche-bge-153-love",
+      "author": "Friedrich Nietzsche",
+      "work": "Beyond Good and Evil",
+      "ref": "§153",
+      "translator": "Helen Zimmern",
+      "year": 1907,
+      "text": "What is done out of love always takes place beyond good and evil.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/friedrich-nietzsche/beyond-good-and-evil/helen-zimmern/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "nietzsche-bge-4-falseness",
+      "author": "Friedrich Nietzsche",
+      "work": "Beyond Good and Evil",
+      "ref": "§4",
+      "translator": "Helen Zimmern",
+      "year": 1907,
+      "text": "The falseness of an opinion is not for us any objection to it",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/friedrich-nietzsche/beyond-good-and-evil/helen-zimmern/text/single-page",
+      "pd": true
+    },
+    {
+      "id": "nietzsche-bge-154-irony",
+      "author": "Friedrich Nietzsche",
+      "work": "Beyond Good and Evil",
+      "ref": "§154",
+      "translator": "Helen Zimmern",
+      "year": 1907,
+      "text": "Objection, evasion, joyous distrust, and love of irony are signs of health; everything absolute belongs to pathology.",
+      "partial": false,
+      "tags": [],
+      "source_url": "https://standardebooks.org/ebooks/friedrich-nietzsche/beyond-good-and-evil/helen-zimmern/text/single-page",
+      "pd": true
+    }
+  ]
+}

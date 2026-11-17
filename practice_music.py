@@ -1,33 +1,56 @@
 """
 Music theory practice types: lint_satb_progression, roman_numeral_analysis, ear_interval_id, figured_bass_realize.
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type).
 Standard library only.
 """
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"expected", "solution", "expected_errors", "semitones", "interval_name"}
+# Fields the server keeps from the browser (stripped on every read; graders read them from the stored topic).
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "lint_satb_progression": {"expected_errors", "valid"},
+    "roman_numeral_analysis": {"expected", "solution"},
+    "ear_interval_id": {"semitones", "interval_name"},
+    "figured_bass_realize": {"solution"},
+}
+# Fields a grader reads that the browser may see.
+PUBLIC_FIELDS: Dict[str, Set[str]] = {t: set() for t in SECRET_FIELDS}
 
 NOTE_TO_SEMITONE = {
     "C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3,
     "E": 4, "F": 5, "F#": 6, "GB": 6, "G": 7, "G#": 8,
     "AB": 8, "A": 9, "A#": 10, "BB": 10, "B": 11,
 }
+_PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-INTERVAL_NAMES = {
-    0: {"unison", "p1", "perfect unison"},
-    1: {"minor second", "m2"},
-    2: {"major second", "m2", "maj2"},
-    3: {"minor third", "m3"},
-    4: {"major third", "m3", "maj3"},
-    5: {"perfect fourth", "p4"},
-    6: {"tritone", "augmented fourth", "diminished fifth", "tt", "a4", "d5"},
-    7: {"perfect fifth", "p5"},
-    8: {"minor sixth", "m6"},
-    9: {"major sixth", "m6", "maj6"},
-    10: {"minor seventh", "m7"},
-    11: {"major seventh", "m7", "maj7"},
-    12: {"octave", "p8", "perfect octave"},
+# Interval names -> semitones. Full names are matched case-insensitively. "m" (minor) and "M" (major) differ only by
+# case, so those abbreviations are matched case-sensitively; "maj2"/"min2" style spellings work in any case.
+_FULL_NAMES = {
+    "unison": 0, "perfect unison": 0, "minor second": 1, "major second": 2, "minor third": 3, "major third": 4,
+    "perfect fourth": 5, "tritone": 6, "augmented fourth": 6, "diminished fifth": 6, "perfect fifth": 7,
+    "minor sixth": 8, "major sixth": 9, "minor seventh": 10, "major seventh": 11, "octave": 12, "perfect octave": 12,
 }
+_ABBREV_CASE_SENSITIVE = {"m2": 1, "M2": 2, "m3": 3, "M3": 4, "m6": 8, "M6": 9, "m7": 10, "M7": 11}
+_ABBREV_ANY_CASE = {
+    "p1": 0, "p4": 5, "p5": 7, "p8": 12, "tt": 6, "a4": 6, "d5": 6,
+    "min2": 1, "maj2": 2, "min3": 3, "maj3": 4, "min6": 8, "maj6": 9, "min7": 10, "maj7": 11,
+}
+
+
+def interval_semitones(name: Any) -> Optional[int]:
+    """Semitones (0-12) for an interval name or abbreviation, or None when it is not one."""
+    if not isinstance(name, str):
+        return None
+    raw = " ".join(name.split())
+    if raw in _ABBREV_CASE_SENSITIVE:
+        return _ABBREV_CASE_SENSITIVE[raw]
+    low = raw.lower()
+    if low in _FULL_NAMES:
+        return _FULL_NAMES[low]
+    return _ABBREV_ANY_CASE.get(low)
+
+
+def _pitch_name(midi: int) -> str:
+    return f"{_PITCH_NAMES[midi % 12]}{midi // 12 - 1}"
 
 
 def _parse_pitch(pitch: Any) -> Optional[int]:
@@ -81,6 +104,11 @@ def _lint_satb(chords: List[Dict[str, int]]) -> List[str]:
 
 # ---- 1. lint_satb_progression ----
 def _np_lint_satb_progression(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """lint_satb_progression: find the voice-leading errors in a four-part progression.
+    Fields: chords (2+ items, each {s,a,t,b} or [s,a,t,b]; pitches as names like "G4" or MIDI numbers).
+    Secret (computed by the server): expected_errors, valid. Submit a list of error codes such as
+    "voice_crossing:chord_2", "parallel_fifth:S_T:chord_1_to_2", "parallel_octave:A_B:chord_2_to_3" (voices S A T B),
+    or [] / "valid" when the progression has no defect."""
     raw_chords = p.get("chords")
     if not isinstance(raw_chords, list) or len(raw_chords) < 2:
         return None
@@ -142,13 +170,16 @@ def _grade_lint_satb_progression(item: Dict[str, Any], submission: Any) -> Dict[
     return {
         "ok": False,
         "score": score,
-        "feedback": f"Detected {tp}/{len(expected)} voice-leading errors.",
-        "details": {"submitted": sorted(list(sub_errors)), "true_errors": sorted(list(expected))},
+        "feedback": "Not yet: recheck each voice pair for parallels, crossings and leaps.",
+        "details": {"submitted": sorted(list(sub_errors))},
     }
 
 
 # ---- 2. roman_numeral_analysis ----
 def _np_roman_numeral_analysis(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """roman_numeral_analysis: label each chord with its Roman numeral in a key.
+    Fields: key (text, default "C major"), chords (list of chord names or notes). Secret: expected (alias solution),
+    one numeral per chord. Submit a list of numerals, one per chord."""
     key = str(p.get("key") or "C major")[:40]
     chords = p.get("chords") or []
     if not isinstance(chords, list) or not chords:
@@ -171,7 +202,7 @@ def _grade_roman_numeral_analysis(item: Dict[str, Any], submission: Any) -> Dict
         return {"ok": False, "score": 0.0, "feedback": "Submission must be a list of Roman numerals", "details": {}}
     sub = [str(x).strip() for x in submission]
     if len(sub) != len(expected):
-        return {"ok": False, "score": 0.0, "feedback": f"Expected {len(expected)} numerals, got {len(sub)}.", "details": {}}
+        return {"ok": False, "score": 0.0, "feedback": "Give exactly one Roman numeral for each chord.", "details": {}}
 
     matches = sum(1 for e, s in zip(expected, sub) if e.lower() == s.lower())
     score = round(matches / len(expected), 2)
@@ -179,69 +210,94 @@ def _grade_roman_numeral_analysis(item: Dict[str, Any], submission: Any) -> Dict
     return {
         "ok": ok,
         "score": score,
-        "feedback": "Flawless Roman numeral analysis!" if ok else f"Correct on {matches}/{len(expected)} chords.",
+        "feedback": "Flawless Roman numeral analysis!" if ok else "Not yet: recheck the root and quality of each chord.",
         "details": {"accuracy": score},
     }
 
 
 # ---- 3. ear_interval_id ----
 def _np_ear_interval_id(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """ear_interval_id: hear two pitches and name the interval.
+    Fields: notes (two pitches like ["C4", "E4"]; the browser plays them with WebAudio), mode ("melodic" default, or
+    "harmonic" to sound them together). The author gives notes, or semitones (0-24) / interval_name, or both; they
+    must agree. When only semitones/interval_name are given the server writes notes upward from C4.
+    Secret: semitones, interval_name (the notes themselves are public, they are what the ear hears).
+    Submit an interval name ("major third", "M3", "maj3"; "m3"/"min3" is the minor third, case matters for m/M)
+    or the number of semitones."""
     semitones = p.get("semitones")
-    name = str(p.get("interval_name") or p.get("name") or "").strip().lower()
-    if semitones is None and name:
-        for st, aliases in INTERVAL_NAMES.items():
-            if name in aliases:
-                semitones = st
-                break
-    if semitones is None:
-        notes = p.get("notes") or []
-        if len(notes) == 2:
-            p1 = _parse_pitch(notes[0])
-            p2 = _parse_pitch(notes[1])
-            if p1 is not None and p2 is not None:
-                semitones = abs(p2 - p1)
+    if isinstance(semitones, bool):
+        return None
+    if semitones is not None:
+        try:
+            semitones = int(semitones)
+        except (ValueError, TypeError):
+            return None
+    named = interval_semitones(str(p.get("interval_name") or p.get("name") or ""))
+    if p.get("interval_name") or p.get("name"):
+        if named is None:
+            return None
+        if semitones is None:
+            semitones = named
+        elif semitones % 12 != named % 12 or (semitones != named and semitones != named + 12):
+            return None  # the name and the count disagree
+    raw_notes = p.get("notes")
+    notes: List[str] = []
+    if isinstance(raw_notes, list) and len(raw_notes) == 2:
+        pitches = [_parse_pitch(n) for n in raw_notes]
+        if None in pitches:
+            return None
+        notes = [str(n).strip()[:8] if isinstance(n, str) else _pitch_name(int(n)) for n in raw_notes]
+        diff = abs(pitches[1] - pitches[0])
+        if semitones is not None and semitones != diff:
+            return None
+        semitones = diff
+    elif raw_notes:
+        return None
     if semitones is None or not (0 <= semitones <= 24):
         return None
-    if not name:
-        name = next(iter(INTERVAL_NAMES.get(semitones % 12, {"unknown"})))
-
+    if not notes:
+        notes = ["C4", _pitch_name(60 + semitones)]
+    name = next((n for n, st in _FULL_NAMES.items() if st == semitones % 12 or (semitones == 12 and st == 12)), "interval")
+    if semitones == 12:
+        name = "octave"
+    mode = "harmonic" if str(p.get("mode") or "").lower() == "harmonic" else "melodic"
     return {
         **base,
         "semitones": int(semitones),
         "interval_name": name,
-        "notes": p.get("notes") or [],
+        "notes": notes,
+        "mode": mode,
     }
 
 
 def _grade_ear_interval_id(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
     st_exp = item.get("semitones")
-    aliases = INTERVAL_NAMES.get(st_exp % 12, set()) | {str(st_exp)}
-
-    sub_str = str(submission or "").strip().lower()
-    try:
-        sub_st = int(submission)
-        if sub_st == st_exp:
-            return {"ok": True, "score": 1.0, "feedback": f"Correct! {st_exp} semitones.", "details": {}}
-    except (ValueError, TypeError):
-        pass
-
-    if sub_str in aliases:
-        return {
-            "ok": True,
-            "score": 1.0,
-            "feedback": f"Correct interval identification: {item.get('interval_name')}.",
-            "details": {},
-        }
+    exp_simple = st_exp if st_exp <= 12 else st_exp - 12
+    if isinstance(submission, bool):
+        return {"ok": False, "score": 0.0, "feedback": "Name the interval or give its size in semitones.", "details": {}}
+    named: Optional[int] = None
+    if isinstance(submission, (int, float)):
+        named = int(submission)
+    elif isinstance(submission, str):
+        text = submission.strip()
+        if text.lstrip("-").isdigit():
+            named = int(text)
+        else:
+            named = interval_semitones(text)
+    ok = named is not None and (named == st_exp or named == exp_simple)
     return {
-        "ok": False,
-        "score": 0.0,
-        "feedback": "Incorrect interval identification.",
-        "details": {"submitted": submission},
+        "ok": ok,
+        "score": 1.0 if ok else 0.0,
+        "feedback": f"Correct interval identification: {item.get('interval_name')}." if ok else "Incorrect interval identification.",
+        "details": {} if ok else {"submitted": submission if isinstance(submission, (str, int, float)) else None},
     }
 
 
 # ---- 4. figured_bass_realize ----
 def _np_figured_bass_realize(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """figured_bass_realize: write the upper voices that a figured bass calls for.
+    Fields: bass_note (pitch like "C3"), figures (text such as "6" or "6/4"). Secret: solution (alias realization),
+    the list of upper-voice pitches. Submit a list of pitches (order does not matter; enharmonic spellings such as C#4 and Db4 count as equal)."""
     bass = p.get("bass_note")
     figures = str(p.get("figures") or "").strip()
     solution = p.get("solution") or p.get("realization")
@@ -256,16 +312,20 @@ def _np_figured_bass_realize(p: Dict[str, Any], base: Dict[str, Any]) -> Optiona
 
 
 def _grade_figured_bass_realize(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
-    expected = [str(x).strip().upper() for x in item.get("solution", [])]
+    def key(x: Any) -> Any:  # enharmonic spellings (C#4, Db4) are the same pitch
+        m = _parse_pitch(str(x).strip())
+        return m if m is not None else str(x).strip().upper()
+
+    expected = [key(x) for x in item.get("solution", [])]
     if not isinstance(submission, list):
         return {"ok": False, "score": 0.0, "feedback": "Submission must be a list of realized voices", "details": {}}
-    sub = [str(x).strip().upper() for x in submission]
-    ok = (sorted(sub) == sorted(expected))
+    sub = [key(x) for x in submission]
+    ok = (sorted(map(str, sub)) == sorted(map(str, expected)))
     return {
         "ok": ok,
         "score": 1.0 if ok else 0.0,
         "feedback": "Figured bass correctly realized!" if ok else "Incorrect upper voice realization.",
-        "details": {"submitted": sub},
+        "details": {},
     }
 
 

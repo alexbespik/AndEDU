@@ -16,6 +16,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import CampusGlance from './components/campus/CampusGlance';
 import { campusPath, useCampusFetch } from './components/campus/format';
 import { LoadingPrefs, quotesEnabled } from './lib/quotes';
+import { SUBJECT_MODES } from './lib/workspaces';
 
 // The lesson viewer, the IDE and the workspaces load on demand
 const TopicViewer = lazy(() => import('./components/TopicViewer'));
@@ -24,7 +25,6 @@ const EduStudioIDE = lazy(() => import('./components/EduStudioIDE'));
 const MathLab = lazy(() => import('./components/MathLab'));
 const SubjectWorkspace = lazy(() => import('./components/SubjectWorkspace'));
 const AdvisorPage = lazy(() => import('./components/AdvisorPage'));
-const PhilosophyLab = lazy(() => import('./components/PhilosophyLab'));
 const CampusEvents = lazy(() => import('./components/campus/CampusEvents'));
 
 // Its own boundary at every use site, so a first chunk load never suspends (and unmounts) MathLab or a workspace
@@ -227,7 +227,7 @@ export default function App() {
     }
     setActiveTab(tab);
     const ws = workspaceOf(t);
-    if (ws === 'math' || ws === 'history' || ws === 'language') { setClassTopicId(t.id); setMode(ws); }  // library lessons too
+    if (ws === 'math' || SUBJECT_MODES.includes(ws)) { setClassTopicId(t.id); setMode(ws); }  // library lessons too
     else if (ws === 'code') { setClassTopicId(t.id); setMode('class'); }
     else { setSelectedTopicId(t.id); setLabView('lesson'); setMode('physics'); }
   }, [toast]);
@@ -240,7 +240,7 @@ export default function App() {
   const subjectClass = classTopic && workspaceOf(classTopic) === mode ? classTopic : null;
   const subjectTopics = topics.filter((t) => workspaceOf(t) === mode);  // course classes and library lessons of this subject
   const codeClass = classTopic && workspaceOf(classTopic) === 'code' ? classTopic : null;
-  const viewedTopic = mode === 'math' ? mathClass : mode === 'class' ? codeClass : mode === 'history' || mode === 'language' ? subjectClass : activeTopic;
+  const viewedTopic = mode === 'math' ? mathClass : mode === 'class' ? codeClass : SUBJECT_MODES.includes(mode) ? subjectClass : activeTopic;
 
   const [pendingNav, setPendingNav] = useState(null);
 
@@ -299,7 +299,7 @@ export default function App() {
             onConfirm: () => {
               setActiveTab(p.tab);
               setLabView('lesson');
-              setMode((m) => (['class', 'math', 'history', 'language'].includes(m) ? m : 'physics'));
+              setMode((m) => (['class', 'math', ...SUBJECT_MODES].includes(m) ? m : 'physics'));
             },
           });
         }
@@ -570,7 +570,7 @@ export default function App() {
               </div>
             </Suspense>
           )}
-          {(mode === 'history' || mode === 'language') && (
+          {SUBJECT_MODES.includes(mode) && (
             <Suspense fallback={<LoadingPanel page />}>
               <SubjectWorkspace key={mode} kind={mode} requestedTab={workspaceTab} classTopic={subjectClass} topics={subjectTopics} onOpenTopic={(id) => openTopic(id)}
                 renderClass={(t) => (
@@ -582,11 +582,6 @@ export default function App() {
           {mode === 'advisor' && (
             <Suspense fallback={<LoadingPanel page />}>
               <AdvisorPage user={user} onOpenCourse={openCourse} />
-            </Suspense>
-          )}
-          {mode === 'philosophy' && (
-            <Suspense fallback={<LoadingPanel page />}>
-              <PhilosophyLab requestedTab={workspaceTab} />
             </Suspense>
           )}
           {mode === 'review' && <ReviewSession userId={user.id} onDone={() => switchMode('home')} />}
@@ -649,7 +644,7 @@ export default function App() {
 
         <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={viewedTopic?.id} agyCli={agyCli}
           courseId={mode === 'course' ? courseId : viewedTopic?.source?.courseId}
-          pendingPrompt={pendingPrompt} onClearPendingPrompt={() => setPendingPrompt(null)} />
+          userId={user.id} pendingPrompt={pendingPrompt} onClearPendingPrompt={() => setPendingPrompt(null)} />
       </div>
 
       {!panelOpen && (

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X, Send, Loader2, Play } from 'lucide-react';
 import Md from './Md';
 import PenguinShadow from './PenguinShadow';
-import { api, uploadFiles, useAgyEvents } from '../lib/api';
+import { api, uploadFiles, useAgyEvents, loadProfile } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { disambiguateFile } from '../lib/files';
 
@@ -47,7 +47,7 @@ function CodeProposal({ proposal }) {
 }
 
 /** AGY companion: its own column on wide screens, a sheet over the page on narrow ones. */
-export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId, agyCli = false, pendingPrompt = null, onClearPendingPrompt = null }) {
+export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId, agyCli = false, pendingPrompt = null, onClearPendingPrompt = null, userId = null }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -141,6 +141,7 @@ export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId
           prompt: fullPrompt,
           topicId: activeTopicId,
           courseId,
+          userId: userId || loadProfile()?.id || undefined,
           level: activeLevel,
           history: historyPayload,
         },

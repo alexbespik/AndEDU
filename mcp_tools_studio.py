@@ -234,9 +234,14 @@ def tools(call, q, S, STR, OBJ, ARR):
         return {**post(a["topic_id"], "timeline", events), "events": events}
 
     def copy(a):
-        payloads = copy_payloads(topic(a["from_topic"]), a.get("kinds"))
+        kinds = [k for k in (a.get("kinds") or KINDS) if k in KINDS]
+        payloads = copy_payloads(topic(a["from_topic"]), [k for k in kinds if k != "practice"])
         topic(a["to_topic"])  # 404 before anything is written
-        return {"copied": {kind: post(a["to_topic"], kind, items) for kind, items in payloads.items()}}
+        copied = {kind: post(a["to_topic"], kind, items) for kind, items in payloads.items()}
+        if "practice" in kinds:  # copied on the server: the browser-facing read hides the answer keys of kit items
+            copied["practice"] = call("POST", f"/api/topics/{q(a['to_topic'])}/practice/copy",
+                                      {"fromTopic": a["from_topic"], "kinds": ["practice"]})
+        return {"copied": copied}
 
     def outline(a):
         course = call("GET", f"/api/courses/{q(a['course_id'])}")
@@ -295,11 +300,11 @@ def tools(call, q, S, STR, OBJ, ARR):
     def replace(a):
         return call("PUT", f"/api/topics/{q(a['topic_id'])}/practice/{q(a['item_id'])}", {"item": a["item"]})
 
-    def add_drawing(a):
+    def add_drawing(a, default_kind="geometry"):
         from simspec import validate_geometry
         diagram = dict(a.get("diagram") or {})
         if diagram.get("kind") not in ("geometry", "fbd"):
-            diagram["kind"] = "geometry"
+            diagram["kind"] = default_kind
         clean_diag, errors = validate_geometry(diagram)
         if errors:
             raise RuntimeError(f"Invalid geometry diagram: {'; '.join(errors)}")
@@ -311,6 +316,9 @@ def tools(call, q, S, STR, OBJ, ARR):
         top["markdownContent"] = (top.get("markdownContent") or "").rstrip() + block
         call("POST", "/api/topics", top)
         return {"status": "added", "topic_id": a["topic_id"], "caption": caption, "spec": clean_diag}
+
+    def add_fbd(a):
+        return add_drawing({**a, "diagram": {**dict(a.get("diagram") or {}), "kind": "fbd"}}, "fbd")
 
     def preview_drawing(a):
         spec = a.get("spec") or {}
@@ -357,6 +365,8 @@ def tools(call, q, S, STR, OBJ, ARR):
          lambda a: call("DELETE", f"/api/topics/{q(a['topic_id'])}/flashcards/{int(a['index'])}")),
         ("add_drawing_to_notes", "Append an interactive geometry or free-body diagram block directly to a lesson's markdown notes.",
          S(topic_id=STR("topic id"), diagram=OBJ("geometry or fbd specification"), caption=STR("optional section title/caption", optional=True)), add_drawing),
+        ("add_fbd_drawing", "Append an interactive free-body diagram (kind fbd: a body, forces as arrows, labels) to a lesson's notes; students can draw their own arrows against it.",
+         S(topic_id=STR("topic id"), diagram=OBJ("fbd specification (see simulation_guide / simspec.validate_geometry)"), caption=STR("optional section title/caption", optional=True)), add_fbd),
         ("preview_geometry_diagram", "Project an interactive geometry or free-body diagram in Math Lab on the student's screen in real time.",
          S(spec=OBJ("geometry or fbd specification")), preview_drawing),
     ]

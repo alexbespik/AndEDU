@@ -232,14 +232,17 @@ function ChemWidget({ spec }) {
       // 1. TITRATION: Full Benchtop Glassware Apparatus
       // -------------------------------------------------------------
       if (widget === 'titration') {
-        const pKa = params.pKa ?? 4.75;
+        // pKa: a slider, a number, or a list of 1-3 ascending values (polyprotic acid)
+        const pKa = Array.isArray(spec.pKa) ? spec.pKa : (typeof spec.pKa === 'number' ? spec.pKa : (params.pKa ?? 4.75));
+        const nProtic = Array.isArray(pKa) ? Math.max(1, pKa.length) : 1;
         const Va = params.Va ?? 25.0;
         const Ca = params.Ca ?? 0.1;
         const Cb = params.Cb ?? 0.1;
         let VbCur = titrantAnimRef.current;
         const isStrong = Boolean(spec.strong);
 
-        const Veq = (Ca * Va) / Cb;
+        const Veq1 = (Ca * Va) / Cb;
+        const Veq = Veq1 * (isStrong ? 1 : nProtic);
         const VbMax = Math.max(60, Veq * 2.2);
 
         // Advance titrant volume automatically while running
@@ -317,12 +320,14 @@ function ChemWidget({ spec }) {
         ctx.fillText(`Equiv (${phEq.toFixed(1)})`, toX(Veq) - 8, toY(phEq) - 8);
 
         if (!isStrong) {
-          const Vhalf = Veq / 2;
-          const phHalf = solvePh(pKa, Va, Ca, Cb, Vhalf, isStrong);
-          ctx.fillStyle = '#e5b85c';
-          ctx.beginPath();
-          ctx.arc(toX(Vhalf), toY(phHalf), 3.5, 0, Math.PI * 2);
-          ctx.fill();
+          for (let k = 0; k < nProtic; k++) {
+            const Vhalf = Veq1 * (k + 0.5);
+            const phHalf = solvePh(pKa, Va, Ca, Cb, Vhalf, isStrong);
+            ctx.fillStyle = '#e5b85c';
+            ctx.beginPath();
+            ctx.arc(toX(Vhalf), toY(phHalf), 3.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
 
         // Current point indicator

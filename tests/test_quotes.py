@@ -24,7 +24,8 @@ class QuoteBank(unittest.TestCase):
                 self.assertRegex(q["id"], r"^[a-z0-9][a-z0-9-]*$")
                 self.assertNotIn(q["id"], ids, "ids must be unique across banks")
                 ids.add(q["id"])
-                self.assertTrue(q["text"].strip() and q["author"] and q["work"] and q["ref"] and q["translator"])
+                self.assertTrue(q["text"].strip() and q["author"] and q["work"] and q["ref"])
+                self.assertIsInstance(q["translator"], str)  # "" for works written in English
                 self.assertLessEqual(len(q["text"]), 200, q["id"])
                 self.assertTrue(q["source_url"].startswith("https://"), q["id"])
                 self.assertIs(q["pd"], True, q["id"])

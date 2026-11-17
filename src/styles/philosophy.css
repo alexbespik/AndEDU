@@ -1,0 +1,78 @@
+/* Philosophy workspace: logic workbench, fallacies, thought experiments, dialogue. Tokens only, from lab.css. */
+
+.phx-mono { font-family: var(--font-mono); }
+.phx-modes { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.phx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-3); align-items: start; }
+.phx-formula-row { display: flex; gap: var(--space-2); align-items: center; }
+.phx-formula-row .input { flex: 1; min-width: 0; }
+.phx-sym { min-width: 30px; font-family: var(--font-mono); }
+.phx-check { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 0.92rem; }
+
+/* truth tables */
+.phx-table-wrap { overflow-x: auto; }
+.phx-table { border-collapse: collapse; font-family: var(--font-mono); }
+.phx-table th, .phx-table td { border: 1px solid var(--rule); padding: var(--space-1) var(--space-3); text-align: center; background: var(--surface); }
+.phx-table thead th { background: var(--sunk); }
+.phx-table .phx-out { border-left: 2px solid var(--rule-strong); }
+.phx-table td.phx-t { color: var(--ok-ink); }
+.phx-table td.phx-f { color: var(--bad-ink); }
+.phx-cell { min-width: 36px; min-height: 28px; border: 1px dashed var(--rule-strong); border-radius: var(--radius-sm); background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+.phx-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.phx-table td.phx-right { background: var(--ok-tint); }
+.phx-table td.phx-wrong { background: var(--bad-tint); }
+
+/* Fitch proof */
+.phx-proof { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.phx-line { border: 1px solid var(--rule); border-left-width: 4px; border-radius: var(--radius-sm); background: var(--surface); padding: var(--space-2); }
+.phx-line.phx-ok { border-left-color: var(--ok); }
+.phx-line.phx-bad { border-left-color: var(--bad); background: var(--bad-tint); }
+.phx-line-main { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.phx-num { min-width: 1.6em; text-align: right; font-family: var(--font-mono); color: var(--muted); }
+.phx-bars { align-self: stretch; width: calc(var(--phx-depth) * 14px); background: repeating-linear-gradient(to right, var(--rule-strong) 0 2px, transparent 2px 14px); }
+.phx-formula { flex: 1 1 200px; min-width: 120px; }
+.phx-rule { width: 6.5rem; }
+.phx-cites { width: 7rem; }
+.phx-line-tools { display: inline-flex; gap: var(--space-1); }
+.phx-verdict { display: flex; gap: var(--space-1); align-items: baseline; flex-wrap: wrap; margin: var(--space-1) 0 0 2.2rem; font-size: 0.9rem; }
+
+/* syllogism Venn */
+.phx-terms { display: flex; flex-wrap: wrap; gap: var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--space-3); }
+.phx-terms label { display: flex; flex-direction: column; gap: var(--space-1); }
+.phx-venn-wrap { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+@media (max-width: 720px) { .phx-venn-wrap { grid-template-columns: minmax(0, 1fr); } }
+.phx-venn { width: 100%; height: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-sm); }
+.phx-open { fill: var(--surface); }
+.phx-shade { fill: var(--ink); fill-opacity: 0.42; }
+.phx-ring { fill: none; stroke: var(--ink-soft); stroke-width: 2; }
+.phx-term { fill: var(--ink); font: 600 15px var(--font-body); }
+.phx-mark { fill: var(--ink); font: 700 22px var(--font-mono); }
+.phx-line-mark { fill: var(--accent); }
+.phx-ex-ring { fill: var(--surface); stroke: var(--ink); stroke-width: 2; }
+.phx-ex-ring + .phx-mark { font-size: 16px; }
+.phx-syl { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-1); }
+
+/* fallacies */
+.phx-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-3); }
+.phx-card summary { cursor: pointer; }
+.phx-card summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.phx-card[open] { grid-column: 1 / -1; }
+.phx-example { font-style: italic; }
+.phx-kind-fallacy { background: var(--bad-tint); border-color: var(--bad-rule); color: var(--bad-ink); }
+.phx-kind-valid { background: var(--ok-tint); border-color: var(--accent-tint-2); color: var(--ok-ink); }
+
+/* thought experiments */
+.phx-trail { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.phx-echo { border-left: 3px solid var(--gold); padding-left: var(--space-3); color: var(--notice-ink); font-size: 0.92rem; }
+.phx-choices { display: flex; flex-direction: column; gap: var(--space-2); }
+.phx-choice { justify-content: flex-start; text-align: left; height: auto; padding-top: var(--space-2); padding-bottom: var(--space-2); white-space: normal; }
+.phx-reflect { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* dialogue */
+.phx-chat { display: flex; flex-direction: column; gap: var(--space-3); max-height: 520px; overflow-y: auto; padding: var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--surface); }
+.phx-msg { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--rule); max-width: 100%; }
+.phx-user { background: var(--sunk); align-self: flex-end; }
+.phx-assistant { background: var(--accent-tint); border-color: var(--accent-tint-2); }
+.phx-quote { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--gold); background: var(--surface); }
+.phx-quote blockquote { margin: 0; font-style: italic; }
+.phx-quote figcaption { font-size: 0.85rem; color: var(--muted); margin-top: var(--space-1); }
+.phx-compose { display: flex; flex-direction: column; gap: var(--space-2); }

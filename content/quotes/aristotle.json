@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "collection": "aristotle",
+  "note": "Public-domain translations only; year is the translation's first publication. Every text is checked word for word against source_url by scripts/verify_quotes.py. Never add a quote from memory.",
+  "quotes": [
+    {
+      "id": "arist-ne-1-7-swallow",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "1.7",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "For one swallow does not make a summer, nor does one day; and so too one day, or a short time, does not make a man blessed and happy.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    },
+    {
+      "id": "arist-ne-1-3-educated",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "1.3",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "it is the mark of an educated man to look for precision in each class of things just so far as the nature of the subject admits",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    },
+    {
+      "id": "arist-ne-2-1-doing",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "2.1",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "we become just by doing just acts, temperate by doing temperate acts, brave by doing brave acts.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    },
+    {
+      "id": "arist-ne-2-1-habits",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "2.1",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "It makes no small difference, then, whether we form habits of one kind or of another from our very youth; it makes a very great difference, or rather all the difference.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    },
+    {
+      "id": "arist-ne-1-7-beginning",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "1.7",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "the beginning is thought to be more than half of the whole, and many of the questions we ask are cleared up by it.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    },
+    {
+      "id": "arist-ne-10-5-learning",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "10.5",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "the pleasures arising from thinking and learning will make us think and learn all the more.",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    },
+    {
+      "id": "arist-ne-8-1-friendship",
+      "author": "Aristotle",
+      "work": "Nicomachean Ethics",
+      "ref": "8.1",
+      "translator": "W. D. Ross",
+      "year": 1908,
+      "text": "Friendship seems too to hold states together, and lawgivers to care more for it than for justice",
+      "partial": true,
+      "tags": [],
+      "source_url": "https://classics.mit.edu/Aristotle/nicomachaen.mb.txt",
+      "pd": true
+    }
+  ]
+}

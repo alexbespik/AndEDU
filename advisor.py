@@ -1088,8 +1088,9 @@ def degree_audit(user_id: str, school: str = "wm") -> Dict[str, Any]:
     try:
         from advisor_rules import audit_columbia_3_2
         columbia_audit = audit_columbia_3_2(passed)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("columbia 3-2 audit skipped (%s)", type(e).__name__)
 
     return {
         "user_id": user_id,
@@ -1106,7 +1107,9 @@ def degree_audit(user_id: str, school: str = "wm") -> Dict[str, Any]:
 ADVISOR_STOP_WORDS = {
     "what", "which", "should", "take", "next", "course", "courses", "class", "classes",
     "can", "the", "and", "for", "with", "that", "this", "have", "need", "want", "about",
-    "semester", "year", "will", "does", "are", "help", "from", "some", "tell", "like", "recommend"
+    "semester", "year", "will", "does", "are", "help", "from", "some", "tell", "like", "recommend",
+    "find", "show", "give", "looking", "interested", "anything", "something", "suggest", "please", "could",
+    "would",
 }
 
 

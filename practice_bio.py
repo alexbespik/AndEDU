@@ -5,12 +5,18 @@ Bioinformatics & Computational Biology practice types:
 - restriction_digest_mapper: Plasmid and linear DNA restriction enzyme fragment sizing
 - phylogenetic_upgma_step: UPGMA distance matrix hierarchical clustering step
 
-Exports NORMALIZERS, GRADERS, and SECRET_FIELDS. Standard library only.
+Exports NORMALIZERS, GRADERS, SECRET_FIELDS and PUBLIC_FIELDS (both per type). Standard library only.
 """
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-SECRET_FIELDS: Set[str] = {"expected", "solution", "max_score", "protein_sequence", "fragment_sizes", "merged_cluster", "updated_distances", "merged_pair"}
+SECRET_FIELDS: Dict[str, Set[str]] = {
+    "smith_waterman_align": {"max_score"},
+    "orf_finder_translate": {"protein_sequence", "start_index"},
+    "restriction_digest_mapper": {"fragment_sizes"},
+    "phylogenetic_upgma_step": {"merged_cluster", "merged_pair", "min_distance"},
+}
+PUBLIC_FIELDS: Dict[str, Set[str]] = {t: set() for t in SECRET_FIELDS}
 
 CODON_TABLE: Dict[str, str] = {
     "ATA": "I", "ATC": "I", "ATT": "I", "ATG": "M",
@@ -50,6 +56,9 @@ def _num(v: Any) -> Optional[float]:
 # 1. smith_waterman_align
 # ---------------------------------------------------------------------------
 def _np_smith_waterman_align(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """smith_waterman_align: find the best local alignment score of two short sequences.
+    Fields: seq1, seq2 (up to 20 letters each), match_score (default 2), mismatch_penalty (default 1, subtracted),
+    gap_penalty (default 2, linear, subtracted). Secret: max_score. Submit {max_score: integer} or the integer."""
     s1 = _s(p.get("seq1")).upper()
     s2 = _s(p.get("seq2")).upper()
     if not s1 or not s2 or len(s1) > 20 or len(s2) > 20:
@@ -95,8 +104,8 @@ def _grade_smith_waterman_align(item: Dict[str, Any], submission: Any) -> Dict[s
     return {
         "ok": ok,
         "score": 1.0 if ok else 0.0,
-        "feedback": f"Smith-Waterman optimal local score ({expected}) verified!" if ok else f"Mismatch in maximum score (expected {expected}).",
-        "details": {"submitted": user_score, "expected": expected},
+        "feedback": f"Smith-Waterman optimal local score ({expected}) verified!" if ok else "Mismatch in maximum score.",
+        "details": {"submitted": user_score} if ok else {},
     }
 
 
@@ -104,6 +113,9 @@ def _grade_smith_waterman_align(item: Dict[str, Any], submission: Any) -> Dict[s
 # 2. orf_finder_translate
 # ---------------------------------------------------------------------------
 def _np_orf_finder_translate(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """orf_finder_translate: translate the longest open reading frame of a DNA strand (forward, ATG to stop).
+    Fields: dna_sequence (at least 9 letters ACGT). Secret: protein_sequence (one-letter codes), start_index.
+    Submit {protein: text} or the text of amino-acid letters (no stop symbol)."""
     dna = _s(p.get("dna_sequence")).upper().replace(" ", "")
     if not dna or len(dna) < 9:
         return None
@@ -145,7 +157,7 @@ def _grade_orf_finder_translate(item: Dict[str, Any], submission: Any) -> Dict[s
         "ok": ok,
         "score": 1.0 if ok else 0.0,
         "feedback": f"Translation {expected} matches genetic code!" if ok else "Protein translation mismatch.",
-        "details": {"submitted": user_str, "expected": expected},
+        "details": {"submitted": user_str} if ok else {},
     }
 
 
@@ -153,6 +165,9 @@ def _grade_orf_finder_translate(item: Dict[str, Any], submission: Any) -> Dict[s
 # 3. restriction_digest_mapper
 # ---------------------------------------------------------------------------
 def _np_restriction_digest_mapper(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """restriction_digest_mapper: give the fragment sizes after a restriction digest.
+    Fields: total_length_bp (default 5000), circular (default true), cleavage_sites (cut positions in bp, inside
+    the length). Secret: fragment_sizes (descending). Submit {fragments: [integers]} or the list; order does not matter."""
     length = int(_num(p.get("total_length_bp")) or 5000)
     is_circular = bool(p.get("circular", True))
     sites = p.get("cleavage_sites")
@@ -203,7 +218,7 @@ def _grade_restriction_digest_mapper(item: Dict[str, Any], submission: Any) -> D
         "ok": ok,
         "score": 1.0 if ok else 0.0,
         "feedback": f"Digested fragment bands ({expected} bp) verified!" if ok else "Fragment lengths mismatch.",
-        "details": {"submitted": user_sorted, "expected": expected},
+        "details": {"submitted": user_sorted} if ok else {},
     }
 
 
@@ -211,6 +226,9 @@ def _grade_restriction_digest_mapper(item: Dict[str, Any], submission: Any) -> D
 # 4. phylogenetic_upgma_step
 # ---------------------------------------------------------------------------
 def _np_phylogenetic_upgma_step(p: Dict[str, Any], base: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """phylogenetic_upgma_step: pick the pair UPGMA merges first.
+    Fields: taxa (names), distance_matrix (square, symmetric numbers, same order as taxa). Secret: merged_pair,
+    merged_cluster, min_distance (the smallest distance). Submit {pair: [taxon, taxon]} or the two names as a list."""
     taxa = [_s(t, 20) for t in p.get("taxa", []) if _s(t, 20)]
     matrix = p.get("distance_matrix")  # 2D symmetric distance matrix
     if not taxa or not isinstance(matrix, list) or len(matrix) != len(taxa):
@@ -244,15 +262,16 @@ def _np_phylogenetic_upgma_step(p: Dict[str, Any], base: Dict[str, Any]) -> Opti
 
 
 def _grade_phylogenetic_upgma_step(item: Dict[str, Any], submission: Any) -> Dict[str, Any]:
-    expected_pair = set(item.get("merged_pair", []))
-    sub_pair = set(submission.get("pair") if isinstance(submission, dict) else (submission if isinstance(submission, list) else []))
+    expected_pair = {str(x).strip() for x in item.get("merged_pair") or []}
+    raw = submission.get("pair") if isinstance(submission, dict) else submission
+    sub_pair = {str(x).strip() for x in raw if isinstance(x, (str, int))} if isinstance(raw, list) else set()
 
     ok = (sub_pair == expected_pair)
     return {
         "ok": ok,
         "score": 1.0 if ok else 0.0,
         "feedback": f"UPGMA nearest taxa pair {item.get('merged_cluster')} identified!" if ok else "Incorrect taxa pair merged.",
-        "details": {"submitted": list(sub_pair), "expected": list(expected_pair)},
+        "details": {"submitted": sorted(sub_pair)} if ok else {},
     }
 
 

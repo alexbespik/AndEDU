@@ -1,6 +1,6 @@
 // History > Timeline: a zoomable chart with century (or wider) bands and named eras (timeline events that carry an
 // `era`, e.g. from the add_timeline_era tool), above the shared TimelineView list and ordering challenge.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { TimelineView } from '../Activities';
 import { fmtYear, eraSpans } from './historyUtil';
@@ -18,8 +18,62 @@ function bandLabel(start, size) {
   return fmtYear(start);
 }
 
+const MAX_ZOOM = 32;
+// Era bands for the scope toggle (calendar years; BCE negative)
+const ERA_BANDS = [
+  { id: 'antiquity', label: 'Antiquity', from: -Infinity, to: 476 },
+  { id: 'medieval', label: 'Medieval', from: 476, to: 1500 },
+  { id: 'early-modern', label: 'Early modern', from: 1500, to: 1800 },
+  { id: 'modern', label: '19th to 21st century', from: 1800, to: Infinity },
+];
+
 function EraChart({ events }) {
   const [zoom, setZoom] = useState(1);
+  const box = useRef(null);
+  const anchor = useRef(null);  // {frac, offset}: keep this fraction of the chart under the pointer after a zoom
+  const drag = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const zoomAt = (factor, clientX) => {
+    const el = box.current;
+    setZoom((z) => {
+      const nz = Math.min(MAX_ZOOM, Math.max(1, z * factor));
+      if (el && nz !== z) {
+        const r = el.getBoundingClientRect();
+        const offset = clientX === undefined ? r.width / 2 : clientX - r.left;
+        anchor.current = { frac: (el.scrollLeft + offset) / el.scrollWidth, offset };
+      }
+      return nz;
+    });
+  };
+  useLayoutEffect(() => {
+    const el = box.current, a = anchor.current;
+    if (!el || !a) return;
+    anchor.current = null;
+    el.scrollLeft = a.frac * el.scrollWidth - a.offset;
+  }, [zoom]);
+  // the wheel zooms the chart; a native listener, because React's wheel handler is passive and cannot stop the page scrolling
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;  // sideways gestures keep scrolling
+      e.preventDefault();
+      zoomAt(Math.exp(-e.deltaY * (reduced ? 0.0015 : 0.003)), e.clientX);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [reduced]);
+  const onDown = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const el = box.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    drag.current = { x: e.clientX, left: el.scrollLeft };
+    el.setPointerCapture?.(e.pointerId);
+    setDragging(true);
+  };
+  const onMove = (e) => { if (drag.current) box.current.scrollLeft = drag.current.left - (e.clientX - drag.current.x); };
+  const onUp = () => { drag.current = null; setDragging(false); };
   const eras = useMemo(() => eraSpans(events), [events]);
   const years = events.map((e) => e.year);
   const lo0 = Math.min(...years), hi0 = Math.max(...years);
@@ -36,13 +90,14 @@ function EraChart({ events }) {
   return (
     <div className="stack-sm hist-tl">
       <div className="hist-zoom">
-        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z / 2))}><ZoomOut size={14} /></button>
-        <input type="range" min={0} max={5} step={1} value={Math.log2(zoom)} onChange={(e) => setZoom(2 ** Number(e.target.value))} aria-label="Zoom" />
-        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Zoom in" disabled={zoom >= 32} onClick={() => setZoom((z) => Math.min(32, z * 2))}><ZoomIn size={14} /></button>
+        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomAt(0.5)}><ZoomOut size={14} /></button>
+        <input type="range" min={0} max={5} step={0.25} value={Math.log2(zoom)} onChange={(e) => zoomAt(2 ** Number(e.target.value) / zoom)} aria-label="Zoom" />
+        <button type="button" className="btn btn-quiet btn-sm btn-icon" aria-label="Zoom in" disabled={zoom >= MAX_ZOOM} onClick={() => zoomAt(2)}><ZoomIn size={14} /></button>
         <button type="button" className="btn btn-quiet btn-sm" onClick={() => setZoom(1)} disabled={zoom === 1}><Maximize2 size={14} aria-hidden="true" /> Fit</button>
-        <span className="hint">{fmtYear(lo0)} to {fmtYear(hi0)} · bands of {size === 100 ? 'centuries' : `${size} years`}{zoom > 1 ? ' · scroll sideways' : ''}</span>
+        <span className="hint">{fmtYear(lo0)} to {fmtYear(hi0)} · bands of {size === 100 ? 'centuries' : `${size} years`}{zoom > 1 ? ' · drag or scroll sideways' : ' · wheel to zoom'}</span>
       </div>
-      <div className="hist-tl-scroll" tabIndex={0} aria-label="Timeline chart; scroll sideways when zoomed">
+      <div ref={box} className={`hist-tl-scroll${zoom > 1 ? ' is-grab' : ''}${dragging ? ' is-dragging' : ''}`}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} tabIndex={0} aria-label="Timeline chart; scroll sideways when zoomed">
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Timeline from ${fmtYear(lo0)} to ${fmtYear(hi0)}`}>
           {bands.map((b, k) => {
             const x0 = Math.max(0, X(b)), x1 = Math.min(width, X(b + size));
@@ -83,11 +138,29 @@ function EraChart({ events }) {
 }
 
 /** The History workspace timeline: era bands and zoom on top, the shared list / ordering challenge below. */
-export default function HistoryTimeline({ events = [], topicId, initialMode = 'view' }) {
+export default function HistoryTimeline({ events = [], courseEvents = null, topicId, initialMode = 'view' }) {
+  // scope: everything, the open course only (when the caller passes its events), or one era band
+  const [scope, setScope] = useState('all');
+  const [band, setBand] = useState(ERA_BANDS[0].id);
+  const shown = useMemo(() => {
+    if (scope === 'course' && courseEvents) return courseEvents;
+    if (scope === 'era') { const b = ERA_BANDS.find((x) => x.id === band); return events.filter((e) => e.year >= b.from && e.year < b.to); }
+    return events;
+  }, [scope, band, events, courseEvents]);
+  const scopes = [['all', 'All'], ...(courseEvents ? [['course', 'Current course']] : []), ['era', 'Era band']];
   return (
     <div className="stack">
-      {events.length >= 2 && <EraChart events={events} />}
-      <TimelineView events={events} topicId={topicId} initialMode={initialMode} />
+      <div className="btn-row" role="group" aria-label="Timeline scope">
+        {scopes.map(([id, label]) => (
+          <button key={id} type="button" className={`btn btn-sm ${scope === id ? 'btn-primary' : 'btn-quiet'}`} aria-pressed={scope === id} onClick={() => setScope(id)}>{label}</button>
+        ))}
+        {scope === 'era' && ERA_BANDS.map((b) => (
+          <button key={b.id} type="button" className={`btn btn-sm ${band === b.id ? 'btn-secondary' : 'btn-quiet'}`} aria-pressed={band === b.id} onClick={() => setBand(b.id)}>{b.label}</button>
+        ))}
+      </div>
+      {shown.length >= 2 && <EraChart key={`${scope}:${band}`} events={shown} />}
+      {scope !== 'all' && shown.length === 0 && <p className="hint">No events in this scope yet.</p>}
+      <TimelineView key={`${scope}:${band}`} events={shown} topicId={topicId} initialMode={initialMode} />
     </div>
   );
 }

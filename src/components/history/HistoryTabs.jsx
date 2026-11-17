@@ -5,7 +5,7 @@ import { MapPin, Play, RotateCcw, Trophy, ArrowRight } from 'lucide-react';
 import { FlashcardDeck, TimelineView } from '../Activities';
 import { HISTORY_RENDER, HISTORY_LABEL } from '../../practice/history';
 import { OutlineMap } from './OutlineMap';
-import { MAP_NAMES, MAP_LABEL, collect, centuryOf } from './historyUtil';
+import { MAP_NAMES, MAP_LABEL, collect, centuryOf, lonLatToFraction, clusterPoints, ANCHOR_CITIES } from './historyUtil';
 import { reportXp, reportActivity } from '../../lib/engage';
 import { localDay } from '../../lib/api';
 import '../../styles/history.css';
@@ -25,11 +25,71 @@ function PracticePanel({ item, onResult, retry = true }) {
 
 // ---- Map -------------------------------------------------------------------------------------------------------
 
+const prefersReduced = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** Pins in viewBox units. Pins that overlap are drawn as one numbered marker; activating it fans them out on a ring. */
+function MapPins({ pins, w, h, bounds, fan, setFan, onOpenTopic, region }) {
+  const r = w * 0.009, near = w * 0.02;
+  const groups = clusterPoints(pins, w, h, near);
+  const anchors = ANCHOR_CITIES.map((c) => ({ ...c, ...lonLatToFraction(bounds, c.lon, c.lat) })).filter((c) => c.x !== undefined)
+    .filter((c) => !pins.some((p) => Math.hypot((p.x - c.x) * w, (p.y - c.y) * h) < near));
+  const open = (p) => onOpenTopic?.(p.topicId);
+  const press = (fn) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } };
+  const pin = (p, cx, cy, k) => (
+    <g key={`${p.topicId}-${p.label}-${k}`} className="hist-pin hist-pin-btn" role="button" tabIndex={0}
+      aria-label={`${p.label}, open ${p.topicTitle}`} onClick={() => open(p)} onKeyDown={press(() => open(p))}>
+      <title>{`${p.label} · ${p.topicTitle}`}</title>
+      <circle cx={cx} cy={cy} r={r} />
+      <text x={cx + w * 0.013} y={cy + w * 0.008} fontSize={w * 0.02} strokeWidth={w * 0.005}>{p.label}</text>
+    </g>
+  );
+  return (
+    <>
+      <g className="hist-anchors" aria-hidden="true" pointerEvents="none">
+        {anchors.map((c) => (
+          <g key={`${region}-${c.name}`} className="hist-anchor">
+            <circle cx={c.x * w} cy={c.y * h} r={r * 0.6} />
+            <text x={c.x * w + w * 0.012} y={c.y * h + w * 0.007} fontSize={w * 0.016} strokeWidth={w * 0.004}>{c.name}</text>
+          </g>
+        ))}
+      </g>
+      {groups.map((g, gi) => {
+        const cx = g[0].x * w, cy = g[0].y * h;
+        if (g.length === 1) return pin(g[0], cx, cy, gi);
+        const key = `${region}:${gi}`, isOpen = fan === key;
+        const ring = w * (0.03 + 0.004 * g.length);
+        return (
+          <g key={key} className="hist-spider">
+            {isOpen && g.map((p, k) => {
+              const a = (2 * Math.PI * k) / g.length - Math.PI / 2;
+              const px = cx + Math.cos(a) * ring, py = cy + Math.sin(a) * ring;
+              return (
+                <g key={`${p.topicId}-${p.label}-${k}`}>
+                  <line className="hist-leg" x1={cx} y1={cy} x2={px} y2={py} />
+                  {pin(p, px, py, k)}
+                </g>
+              );
+            })}
+            <g className="hist-pin hist-pin-btn hist-cluster" role="button" tabIndex={0} aria-expanded={isOpen}
+              aria-label={`${g.length} places close together${isOpen ? ', fanned out' : ''}: ${g.map((p) => p.label).join(', ')}`}
+              onClick={() => setFan(isOpen ? null : key)} onKeyDown={press(() => setFan(isOpen ? null : key))}>
+              <circle cx={cx} cy={cy} r={r * 1.5} style={prefersReduced() ? undefined : { transition: 'r 0.2s' }} />
+              <text className="hist-count" x={cx} y={cy + w * 0.007} fontSize={w * 0.018} textAnchor="middle" strokeWidth={0}>{g.length}</text>
+            </g>
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
 export function MapTab({ topics, onOpenTopic }) {
   const items = useMemo(() => collect(topics, 'map_pins'), [topics]);
   const regions = MAP_NAMES.filter((m) => m === 'world' || items.some((i) => i.map === m));
   const [region, setRegion] = useState(() => (items[0]?.map || 'world'));
   const [playing, setPlaying] = useState(null);
+  const [fan, setFan] = useState(null);  // the overlapping pins currently fanned out (a cluster key)
+  useEffect(() => { setFan(null); }, [region]);
   const here = items.filter((i) => i.map === region);
   const pins = here.flatMap((i) => i.pins.map((p) => ({ ...p, topicId: i.topicId, topicTitle: i.topicTitle })));
   return (
@@ -40,16 +100,9 @@ export function MapTab({ topics, onOpenTopic }) {
             onClick={() => { setRegion(m); setPlaying(null); }}>{MAP_LABEL[m]}</button>
         ))}
       </div>
-      <OutlineMap name={region} role="group" label={`${MAP_LABEL[region]} map with ${pins.length} places from your classes`}>
-        {(w, h) => pins.map((p, k) => (
-          <g key={`${p.topicId}-${p.label}-${k}`} className="hist-pin hist-pin-btn" role="button" tabIndex={0}
-            aria-label={`${p.label}, open ${p.topicTitle}`} onClick={() => onOpenTopic?.(p.topicId)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenTopic?.(p.topicId); } }}>
-            <title>{`${p.label} · ${p.topicTitle}`}</title>
-            <circle cx={p.x * w} cy={p.y * h} r={w * 0.009} />
-            <text x={p.x * w + w * 0.013} y={p.y * h + w * 0.008} fontSize={w * 0.02} strokeWidth={w * 0.005}>{p.label}</text>
-          </g>
-        ))}
+      <OutlineMap name={region} role="group" label={`${MAP_LABEL[region]} map with ${pins.length} places from your classes`}
+        onClick={(e) => { if (e.target === e.currentTarget || e.target.tagName === 'rect' || e.target.tagName === 'path') setFan(null); }}>
+        {(w, h, map) => <MapPins pins={pins} w={w} h={h} bounds={map.bounds} fan={fan} setFan={setFan} onOpenTopic={onOpenTopic} region={region} />}
       </OutlineMap>
       {!items.length && <p className="hint">No map games yet. History classes that place events on a map add them here; click a place to open its class.</p>}
       {here.length > 0 && (
@@ -110,17 +163,43 @@ export function SourcesTab({ topics }) {
 
 // ---- Figures ---------------------------------------------------------------------------------------------------
 
+// Foundational figures offered as one-click chats (persona mode needs a lesson to ground the answers)
+const ROSTER = [
+  { persona: 'Pericles', era: 'Athens, 5th century BCE' },
+  { persona: 'Julius Caesar', era: 'Rome, 1st century BCE' },
+  { persona: 'Elizabeth I', era: 'England, 16th century' },
+  { persona: 'Abraham Lincoln', era: 'United States, 19th century' },
+  { persona: 'Winston Churchill', era: 'Britain, 20th century' },
+];
+
 const looksLikeName = (s) => /^(\p{Lu}[\p{L}'’.-]*)(\s+(of|the|de|da|von|van|al|ibn|bin|le|la|\p{Lu}[\p{L}'’.-]*|[IVX]+)){0,4}$/u.test(String(s || '').trim());
 
 export function FiguresTab({ topics }) {
   const figures = useMemo(() => collect(topics, 'roleplay'), [topics]);
   const [open, setOpen] = useState(null);
+  const groundId = topics[0]?.id;  // the lesson that grounds a roster chat
+  const pickRoster = (f) => setOpen((cur) => (cur?.roster === f.persona ? null : {
+    roster: f.persona, id: `roster-${f.persona}`, type: 'roleplay', persona: f.persona, era: f.era, topicId: groundId,
+    goal: `Ask ${f.persona} about their life, choices and times.`, opening: '',
+  }));
   const names = figures.map((f) => f.persona.split(',')[0].trim().toLowerCase());
   const cards = useMemo(() => topics.flatMap((t) => (t.flashcards || []).map((c) => ({ ...c, _t: t.id })))
     .filter((c) => names.some((n) => n && String(c.front).toLowerCase().includes(n)) || looksLikeName(c.front)), [topics, names.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="stack">
       <p className="hint">Only historical figures who have died, or fictional characters: impersonating living people is not allowed.</p>
+      <div className="btn-row" role="group" aria-label="Historical figures roster">
+        {ROSTER.map((f) => (
+          <button key={f.persona} type="button" className="btn btn-quiet btn-sm" title={f.era} disabled={!groundId}
+            aria-pressed={open?.roster === f.persona} onClick={() => pickRoster(f)}>{f.persona}</button>
+        ))}
+      </div>
+      {!groundId && <p className="hint">Open a history class first: the figures answer from your lessons.</p>}
+      {open?.roster && (
+        <section className="panel stack-sm" aria-label={`Conversation with ${open.persona}`}>
+          <HISTORY_RENDER.roleplay key={open.id} item={open} topicId={open.topicId} />
+        </section>
+      )}
       {figures.length ? (
         <>
           <div className="hist-list">
@@ -130,7 +209,7 @@ export function FiguresTab({ topics }) {
               </button>
             ))}
           </div>
-          {open && (
+          {open && !open.roster && (
             <section className="panel stack-sm" aria-label={`Conversation with ${open.persona}`}>
               <HISTORY_RENDER.roleplay key={`${open.topicId}-${open.id}`} item={open} topicId={open.topicId} />
             </section>

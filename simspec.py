@@ -522,7 +522,10 @@ def validate_geometry(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
                 cb[field] = val
             if "angle" in b:
                 _check_expr(b["angle"], param_names, f"bodies[{i}].angle", errors)
-                cb["angle"] = b["angle"]
+                ang = b["angle"]
+                if isinstance(ang, (int, float)) and not isinstance(ang, bool):
+                    ang = max(-360.0, min(360.0, float(ang)))  # degrees; a wedge rotates about its x, y
+                cb["angle"] = ang
         elif b_type in ("sphere", "circle", "pulley"):
             for field, default in (("x", 0), ("y", 0), ("radius", 0.5)):
                 val = b.get(field, default)
@@ -535,6 +538,8 @@ def validate_geometry(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
                 cb[field] = val
             if "thickness" in b:
                 cb["thickness"] = _num(b["thickness"], 4.0)
+            if b_type in ("wall", "surface"):
+                cb["hatch"] = bool(b.get("hatch", True))
         elif b_type == "point":
             for field, default in (("x", 0), ("y", 0)):
                 val = b.get(field, default)
@@ -606,9 +611,11 @@ def validate_geometry(spec: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
                 val = el.get(field, default)
                 _check_expr(val, param_names, f"elements[{i}].{field}", errors)
                 cel[field] = val
-            if el_type == "line":
+            if el_type in ("line", "segment"):
                 cel["dashed"] = bool(el.get("dashed", False))
                 cel["arrow"] = bool(el.get("arrow", False))
+            if el_type == "dimension":
+                cel["offset"] = max(-20.0, min(20.0, _num(el.get("offset"), 0.0)))  # sideways shift, in world units
         elif el_type == "angle_arc":
             for field, default in (("x", 0), ("y", 0), ("radius", 1.0), ("startAngle", 0), ("endAngle", 90)):
                 val = el.get(field, default)
@@ -662,8 +669,8 @@ kind "geometry" / "fbd": interactive geometry & free-body diagram simulations (C
            {"id":"fn","body":"block","origin":"center","angle":"90+theta","magnitude":"m*0.98*cos(theta*pi/180)","label":"\\\\vec{F}_N","color":"cyan"}],
  "elements":[{"type":"angle_arc","x":-2,"y":0,"radius":1.5,"startAngle":0,"endAngle":"theta","label":"\\\\theta","color":"gold"},
              {"type":"right_angle","x":4,"y":0,"size":0.4,"angle":90,"color":"muted"}]}
-Body types: box (x,y,width,height,angle), wedge/ramp (x,y,width,height), sphere/circle (x,y,radius), rod (x1,y1,x2,y2,thickness), wall/surface (x1,y1,x2,y2), pulley (x,y,radius), point (x,y).
-Element types: line (x1,y1,x2,y2,dashed,arrow), angle_arc (x,y,radius,startAngle,endAngle), right_angle (x,y,size,angle), dimension (x1,y1,x2,y2,label), polygon (points).
+Body types: box (x,y,width,height,angle), wedge/ramp (x,y,width,height,angle in degrees about x,y), sphere/circle (x,y,radius), rod (x1,y1,x2,y2,thickness), wall/surface (x1,y1,x2,y2,hatch), pulley (x,y,radius), point (x,y).
+Element types: line/segment (x1,y1,x2,y2,dashed,arrow), angle_arc (x,y,radius,startAngle,endAngle), right_angle (x,y,size,angle), dimension (x1,y1,x2,y2,label,offset), polygon (points).
 """
 
 SPEC_GUIDE += "\n" + GEOMETRY_GUIDE

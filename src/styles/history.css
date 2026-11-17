@@ -99,3 +99,13 @@
   .hist-msg { max-width: 100%; }
   .hist-list { grid-template-columns: 1fr; }
 }
+
+/* Map: dimmed anchor cities, spiderfied pins */
+.hist-anchor circle { fill: var(--muted); opacity: 0.45; }
+.hist-anchor text { fill: var(--muted); opacity: 0.55; font-family: var(--font-body); paint-order: stroke; stroke: var(--surface); stroke-linejoin: round; }
+.hist-leg { stroke: var(--rule-strong); stroke-width: 1.2; }
+.hist-cluster circle { fill: var(--accent); }
+.hist-cluster .hist-count { fill: var(--surface); stroke: none; font-weight: 700; pointer-events: none; }
+.hist-cluster:focus-visible circle { stroke: var(--gold); }
+.hist-tl-scroll.is-grab { cursor: grab; }
+.hist-tl-scroll.is-dragging { cursor: grabbing; user-select: none; }
