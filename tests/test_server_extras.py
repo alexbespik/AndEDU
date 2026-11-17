@@ -167,6 +167,8 @@ class PersonaMode(unittest.TestCase):
             r = self.c.post("/api/tutor/lesson", json={"topicId": "persona-lesson", "message": "help"})
         self.assertEqual(r.json()["reply"], "What do you notice?")
         self.assertIn("Socratic tutor", seen["config"].system_instruction)
+        self.assertIn("<<<LESSON", seen["config"].system_instruction)  # the lesson is fenced as data
+        self.assertNotIn("!reveal", seen["config"].system_instruction)
         self.assertEqual(self.c.post("/api/tutor/lesson", json={"topicId": "nope-missing", "mode": "persona", "persona": "x"}).status_code, 404)
 
     def test_offline_model_gives_503(self):
@@ -207,7 +209,7 @@ class LanguageRoleplayExtension(unittest.TestCase):
         self.assertEqual(data["feedback"]["corrections"], ["Yo querer manzanas → Quiero manzanas (conjugate querer)"])
         self.assertTrue(data["feedback"]["has_corrections"])
         system = seen["config"].system_instruction
-        for needle in ("a fruit vendor", "a market in Seville", "buy apples", "(es)", "CEFR A1", "las manzanas"):
+        for needle in ("a fruit vendor", "a market in Seville", "buy apples", "<<<TARGET_LANGUAGE\nes", "<<<LEVEL\nA1", "las manzanas"):
             self.assertIn(needle, system)
         self.assertEqual(seen["contents"][-1].parts[0].text, "Yo querer manzanas")  # not duplicated from history
         self.assertEqual(len(seen["contents"]), 1)
@@ -406,7 +408,7 @@ class ReasoningAndNotesTests(unittest.TestCase):
             self.assertEqual(r.status_code, 200)
 
         sys_inst = seen_config.get("system_instruction", "")
-        self.assertIn("STUDENT'S WRITTEN NOTES & SCRATCHPAD:", sys_inst)
+        self.assertIn("<<<STUDENT_NOTES", sys_inst)  # the notes are fenced as data
         self.assertIn("Stoic dichotomy of control", sys_inst)
 
     def test_call_gemini_thinking_config_and_search_tool_decoration(self):

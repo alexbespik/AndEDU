@@ -107,6 +107,9 @@ class Semester(unittest.TestCase):
 
         cid, prompts = self.plan(syllabus)
         self.assertIn("SEMESTER course over 15 weeks", prompts[-1])
+        for prompt in prompts:  # the student's materials are fenced as data in both planning prompts
+            self.assertIn("<<<MATERIALS", prompt)
+            self.assertLess(prompt.index(server.DATA_NOTICE), prompt.index("<<<MATERIALS"))
         classes = db.list_classes(cid)
         self.assertEqual(len(classes), 32)  # semester outline cap
         self.assertEqual(statuses(cid), ["pending"] + ["planned"] * 31)

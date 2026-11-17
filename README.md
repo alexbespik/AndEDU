@@ -22,7 +22,7 @@ Started at &hacks (best Gemini API usage); continued from the original &EDU.
 - [What it does](#what-it-does)
 - [Workspaces](#workspaces)
 - [Quick start](#quick-start)
-- [Desktop app (macOS, v0.0.0)](#desktop-app-macos-v000)
+- [Desktop app (macOS, v0.1.0)](#desktop-app-macos-and-linux-v010)
 - [Host it for a class or a university](#host-it-for-a-class-or-a-university)
 - [For coding agents](#for-coding-agents)
 - [Tests](#tests)
@@ -104,13 +104,13 @@ Sign in with a name, choose **New course**, add files and a goal.
 
 </details>
 
-## Desktop app (macOS and Linux, v0.0.0)
+## Desktop app (macOS and Linux, v0.1.0)
 An early desktop build for your own computer: one app with its own Python inside, so nothing else needs installing.
 macOS 12 or later has one build for Apple Silicon (`arm64`) and one for Intel Macs (`x64`); Linux has `x64` and `arm64`
 builds (see [Linux](#linux) below). Windows is not supported.
 
 **First launch (macOS).** The app has no Apple Developer ID signature yet, so macOS blocks it the first time.
-1. Unzip `SciEdu-Studio-0.0.0-<arch>.zip` (or open the `.dmg`) and move **SciEdu Studio** to Applications.
+1. Unzip `SciEdu-Studio-0.1.0-<arch>.zip` (or open the `.dmg`) and move **SciEdu Studio** to Applications.
 2. Open it once. When macOS says it cannot verify the developer, go to System Settings > Privacy & Security
    and choose **Open Anyway**.
 3. Paste your own Gemini API key in the card that appears ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
@@ -128,10 +128,10 @@ Python runner (Pyodide) needs.
 
 ### Linux
 Needs glibc 2.28 or later (Ubuntu 20.04, Debian 10, Fedora 29, RHEL 8 or newer). Two downloads per architecture:
-an AppImage (`SciEdu-Studio-0.0.0-linux-x86_64.AppImage`, `...-linux-arm64.AppImage`) and a tar.gz
-(`SciEdu-Studio-0.0.0-linux-x64.tar.gz`, `...-linux-arm64.tar.gz`). The Linux builds are made on a Mac and have not yet been
+an AppImage (`SciEdu-Studio-0.1.0-linux-x86_64.AppImage`, `...-linux-arm64.AppImage`) and a tar.gz
+(`SciEdu-Studio-0.1.0-linux-x64.tar.gz`, `...-linux-arm64.tar.gz`). The Linux builds are made on a Mac and have not yet been
 tried on a real Linux desktop; reports are welcome.
-- **AppImage:** `chmod +x SciEdu-Studio-0.0.0-linux-x86_64.AppImage`, then run it. It uses the static AppImage runtime,
+- **AppImage:** `chmod +x SciEdu-Studio-0.1.0-linux-x86_64.AppImage`, then run it. It uses the static AppImage runtime,
   so `libfuse2` is not needed; where FUSE is missing entirely (some containers), run it with `--appimage-extract-and-run`.
 - **tar.gz:** unpack it and run `./sciedu-studio`.
 - **API key:** stored with the system keyring (GNOME Keyring or KWallet, through Electron `safeStorage`). Without one
@@ -158,8 +158,8 @@ tried on a real Linux desktop; reports are welcome.
 npm install
 npm run desktop:stage      # frontend build, bundled Python 3.14 (checksum-pinned) + locked wheels for every target
                            # (mac-arm64 mac-x64 linux-x64 linux-arm64; pass some of them to stage fewer)
-npm run desktop:dist       # dist-electron/SciEdu-Studio-0.0.0-{arm64,x64}.{dmg,zip}
-npm run desktop:dist:linux # dist-electron/SciEdu-Studio-0.0.0-linux-{x86_64,arm64}.AppImage, -linux-{x64,arm64}.tar.gz
+npm run desktop:dist       # dist-electron/SciEdu-Studio-0.1.0-{arm64,x64}.{dmg,zip}
+npm run desktop:dist:linux # dist-electron/SciEdu-Studio-0.1.0-linux-{x86_64,arm64}.AppImage, -linux-{x64,arm64}.tar.gz
 npm run desktop:dev        # or: run the shell against the repo's .venv (data in ~/Library/Application Support/andedu-lab, not seeded)
 ```
 Locks: `desktop/requirements-<target>.lock` (`uv pip compile ... --generate-hashes`; Linux wheels are manylinux_2_28 or

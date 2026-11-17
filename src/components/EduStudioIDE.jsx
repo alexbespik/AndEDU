@@ -673,10 +673,10 @@ export function buildCurriculumFromClassTopic(topic) {
       tests: item.tests || '',
       test_cases: item.tests
         ? item.tests.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('assert'))
-        : ['[TEST] All assertions pass'],
+        : [],
       solution: item.solution,
       concept_hint: item.hint || 'Check loop boundaries, data types, and base conditions.',
-      explanation: item.explanation || 'Solution verified via the WebAssembly Python kernel.',
+      explanation: item.explanation || '',
       _rawItem: item,
     });
   });
@@ -710,7 +710,7 @@ export function buildCurriculumFromClassTopic(topic) {
       options: q.options || [],
       correct_answer: corrAns,
       _correctIndex: n !== null ? n : undefined,
-      test_cases: ['[DIAGNOSTIC] Conceptual invariant verified.'],
+      test_cases: [],
       _isQuizItem: true,
       _rawQuiz: q,
       _quizIndex: idx,
@@ -1524,7 +1524,7 @@ const EduIDE = ({
         });
       }
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `HTTP ${res.status}`);
       const data = await res.json();
 
       setCurriculum(data);
@@ -1545,7 +1545,7 @@ const EduIDE = ({
       console.warn(err);
       setTerminalOutput(prev => [
         ...prev,
-        `[NOTICE] Generation network error: ${err.message}. Loaded built-in master track.`
+        `[NOTICE] The track was not generated: ${err.message} Your current track is unchanged.`
       ]);
     } finally {
       setLoading(false);
@@ -1579,7 +1579,7 @@ const EduIDE = ({
         });
       }
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `HTTP ${res.status}`);
       const data = await res.json();
 
       setCurrentLevel(nextLevel);
@@ -1591,7 +1591,7 @@ const EduIDE = ({
       setTerminalOutput(prev => [
         ...prev,
         `[TIER ESCALATED] Promoted to Level ${nextLevel}! +50 Bonus XP awarded.`,
-        `[HARD CHALLENGES] Included blank-space coding challenges and partial scaffold exercises.`
+        `[LEVEL ${nextLevel}] Loaded ${data.problems?.length || 0} harder exercises.`
       ]);
     } catch (err) {
       setTerminalOutput(prev => [
@@ -1820,7 +1820,7 @@ const EduIDE = ({
         });
       }
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `HTTP ${res.status}`);
       const newChapter = await res.json();
 
       // Append new chapter and re-index flat problems
@@ -1926,7 +1926,7 @@ const EduIDE = ({
         });
       }
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `HTTP ${res.status}`);
       const newProblem = await res.json();
       injectProblemIntoCurriculum(newProblem, targetChapter.id);
     } catch (err) {
@@ -2065,8 +2065,8 @@ const EduIDE = ({
       setTerminalOutput(prev => [
         ...prev,
         `----------------------------------------`,
-        `[SLOT VERIFIED] Inserted '${option}' into space.`,
-        ...(currentProblem.test_cases || ["[PASS] Identity satisfied."]),
+        `[CHOICE] Inserted '${option}' into space. It matches the answer key.`,
+        ...(currentProblem.answer_check?.verdict === "unverified" ? [`[NOTE] ${currentProblem.answer_check.note}`] : []),
         `[SUCCESS] Correct solution! (+25 XP)`
       ]);
 
@@ -2124,7 +2124,7 @@ const EduIDE = ({
         ...prev,
         `----------------------------------------`,
         `[DIAGNOSTIC QUESTION] Selected (${letter}): "${option}"`,
-        ...(currentProblem.test_cases || ["[PASS] Conceptual understanding verified."]),
+        ...(currentProblem.answer_check?.verdict === "unverified" ? [`[NOTE] ${currentProblem.answer_check.note}`] : []),
         `[SUCCESS] Correct answer! (+25 XP)`
       ]);
 
@@ -2228,7 +2228,7 @@ const EduIDE = ({
       setTerminalOutput(prev => [
         ...prev,
         `----------------------------------------`,
-        `[STEP-BY-STEP VERIFIED]:`,
+        `[SEQUENCE] Your order matches the answer key:`,
         ...nextAssembled,
         `[STATUS] Sequence / Proof assembled perfectly! (+50 XP)`
       ]);
@@ -2968,12 +2968,13 @@ except Exception:
           }}
         />
 
-        {currentProblem?.test_cases && currentProblem.test_cases.length > 0 && (
+        {/* only real assert lines from test_code: the built-in samples carry descriptive "[PASS]" strings that were never run */}
+        {Array.isArray(currentProblem?.test_cases) && currentProblem.test_cases.some(l => String(l).trim().startsWith('assert')) && (
           <div style={{ backgroundColor: theme.bgCard, borderTop: `1px solid ${theme.borderContrast}`, padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: theme.accentBlue }}>
             <CheckCircle2 size={12} color={theme.accentGreen} />
             <span style={{ fontWeight: 700, color: theme.textMain }}>Target Assertions:</span>
             <span style={{ color: theme.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentProblem.test_cases.slice(0, 3).join(" • ")}
+              {currentProblem.test_cases.filter(l => String(l).trim().startsWith('assert')).slice(0, 3).join(" • ")}
             </span>
           </div>
         )}

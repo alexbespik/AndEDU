@@ -490,8 +490,9 @@ class Reference(SprintBase):
                     {"type": "true_false", "prompt": "On a steeper ramp a block speeds up faster.", "answer": True}]
         saved = self.build(db.list_classes(course["id"])[0], course, lesson_reply(problem=None, practice=practice))
         self.assertEqual([p["prompt"] for p in saved["practice"]], ["On a steeper ramp a block speeds up faster."])
-        self.assertIn("ORIGINAL problems", self.prompts[0])
-        self.assertIn("REFERENCE-ONLY", server.mode_rules(course))
+        self.assertIn("original problems", self.prompts[0].lower())
+        self.assertIn("never copy", self.prompts[0].lower())
+        self.assertIn("reference-only", server.mode_rules(course).lower())
 
 
 class Rechecks(unittest.TestCase):

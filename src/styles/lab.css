@@ -1513,3 +1513,57 @@ code, kbd, pre, .num { font-family: var(--font-mono); }
 .philin-table-wrap { overflow-x: auto; }
 .philin-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 .philin-table th, .philin-table td { border-bottom: 1px solid var(--rule); padding: var(--space-2); text-align: left; vertical-align: top; }
+
+/* Campus events (Advisor > Campus events): W&M calendars, week planner, interest alerts. Tokens only. */
+.campus-courses-view { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+.campus { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.campus [role="tabpanel"] { min-width: 0; }
+.campus-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-width: 0; }
+.campus-head h2 { font-size: 1.35rem; }
+.campus .panel h2 { font-size: 1.15rem; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.campus .status { white-space: normal; overflow-wrap: anywhere; }
+.campus .tab .count { min-width: 1.5em; padding: 2px var(--space-1); border-radius: 999px; background: var(--gold-tint); color: var(--notice-ink); text-align: center; }
+.campus-empty { align-items: center; text-align: center; }
+.campus-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.campus-list-gap { margin-top: var(--space-2); }
+.campus-event { --campus-cat: var(--rule-strong); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-3);
+  border: 1px solid var(--rule); border-left: 4px solid var(--campus-cat); border-radius: var(--radius-sm); background: var(--surface); overflow-wrap: anywhere; }
+.campus-event[data-compact] { padding: var(--space-2); gap: var(--space-1); font-size: 0.92rem; }
+.campus-event > .status { align-self: flex-start; }
+.campus-event-title { font-weight: 600; line-height: 1.3; }
+.campus-event-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); font-size: 0.88rem; color: var(--ink-soft); min-width: 0; }
+.campus-event-meta > span { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.campus-when { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.campus-desc { font-size: 0.9rem; color: var(--ink-soft); }
+.campus-cat::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--campus-cat); }
+.campus-cat-cs { --campus-cat: var(--info); }
+.campus-cat-arts { --campus-cat: var(--plum); }
+.campus-cat-sports { --campus-cat: var(--rust); }
+.campus-cat-bio { --campus-cat: var(--ok); }
+.campus-cat-civics { --campus-cat: var(--gold); }
+.campus-cat-life { --campus-cat: var(--ink-soft); }
+.campus-cat-acad { --campus-cat: var(--rule-strong); }
+.campus-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: var(--space-3); align-items: end; min-width: 0; }
+.campus-filter-wide { grid-column: span 2; }
+.campus-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.campus-week { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: var(--space-3); min-width: 0; }
+.campus-day { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--code-bg); }
+.campus-day[data-today] { border-color: var(--gold); box-shadow: inset 0 3px 0 var(--gold); }
+.campus-day h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); font-size: 0.95rem; }
+.campus-class { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; padding: var(--space-2);
+  border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--sunk); font-size: 0.9rem; overflow-wrap: anywhere; }
+.campus-class[data-status="current"] { background: var(--ok-tint); border-color: var(--accent-tint-2); }
+.campus-class[data-status="completed"] { color: var(--muted); }
+.campus-push { margin-left: auto; }
+.campus-days { border: 0; margin: 0; padding: 0; min-width: 0; }
+.campus-days legend { padding: 0; margin-bottom: var(--space-1); }
+.campus-days-row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.campus-days-row .check-row { align-items: center; }
+.campus-days-row .check-row input { margin-top: 0; }
+.campus-intent { min-height: 84px; }
+.campus-keywords { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.campus-keywords .chip { padding: 2px var(--space-2); }
+@media (max-width: 420px) {
+  .campus .panel { padding: var(--space-4) var(--space-3); }
+  .campus-filter-wide { grid-column: auto; }
+}

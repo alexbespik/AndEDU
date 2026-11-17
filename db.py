@@ -822,7 +822,8 @@ def end_session(token: str):
 # engage.py and advisor.py in the same database; tables that don't exist yet are skipped.
 USER_DATA_TABLES = ("quiz_attempts", "xp_events", "quest_days", "engage_prefs", "freeze_days",
                     "activity_results", "review_items", "completed_courses", "student_notes", "semester_plans",
-                    "student_carts", "advisor_prefs")
+                    "student_carts", "advisor_prefs",
+                    "campus_intent", "campus_alerts", "campus_saved", "campus_user_classes")
 _SECRET_USER_COLUMNS = ("password", "token", "secret", "hash")
 
 
