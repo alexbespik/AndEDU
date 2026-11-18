@@ -59,3 +59,7 @@ docs/plans/
 *HANDOFF*.md
 docs/PROMPT_STANDARDS.md
 docs/architecture/PROJECT_DIRECTION_REVIEW.md
+
+# Commissar voice packs: local only (your own clips, the premade ElevenLabs pack); unfinished downloads
+content/voice_packs/
+*.crdownload

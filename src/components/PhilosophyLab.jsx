@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { Scale, Blocks, Users, Search, CheckCircle2, AlertTriangle, XCircle, Trash2, BookOpen, Sigma, Lightbulb, MessagesSquare, ShieldAlert } from 'lucide-react';
+import { Scale, Blocks, Users, Search, CheckCircle2, AlertTriangle, XCircle, Trash2, BookOpen, Sigma, Lightbulb, MessagesSquare, ShieldAlert, Compass } from 'lucide-react';
 import { api } from '../lib/api';
 import WorkspaceShell from './WorkspaceShell';
 import '../styles/philosophy.css';
@@ -9,6 +9,7 @@ const LogicWorkbench = lazy(() => import('./philosophy/LogicWorkbench'));
 const FallacyLab = lazy(() => import('./philosophy/FallacyLab'));
 const ThoughtExperimentsLab = lazy(() => import('./philosophy/ThoughtExperimentsLab'));
 const PhilosopherDialogue = lazy(() => import('./philosophy/PhilosopherDialogue'));
+const MoralPerspectivesLab = lazy(() => import('./philosophy/MoralPerspectivesLab'));
 
 // PHILIN (philin.py): text -> editable claim blocks -> the Python logic engine -> two-pass web fact-checks -> all
 // positions compared by a fixed rule. Everything the model writes is shown as plain text.
@@ -18,6 +19,7 @@ const TABS = [
   { id: 'workbench', label: 'Logic workbench', icon: Sigma },
   { id: 'fallacies', label: 'Fallacies', icon: ShieldAlert },
   { id: 'experiments', label: 'Thought experiments', icon: Lightbulb },
+  { id: 'moral', label: 'Moral perspectives', icon: Compass },
   { id: 'dialogue', label: 'Philosophers', icon: MessagesSquare },
 ];
 const MAX_TEXT = 8000;
@@ -408,7 +410,7 @@ export default function PhilosophyLab({ classTopic, renderClass, requestedTab })
   );
   return (
     <WorkspaceShell kind="Philosophy" title="Philosophy" tabs={tabs} current={tab} onTab={setTab}
-      intro="Test an argument with PHILIN (AI splits the text, Python checks the logic), work in the logic workbench, learn the fallacies, think through classic dilemmas and talk with historical philosophers (an AI portrayal). Value claims are never ranked.">
+      intro="Test an argument with PHILIN (AI splits the text, Python checks the logic), work in the logic workbench, learn the fallacies, think through classic dilemmas, place your own answer on a moral spectrum and talk with historical philosophers (an AI portrayal). Value claims are never ranked.">
       {tab === 'class' && hasClass && renderClass(classTopic)}
       {/* these stay mounted so switching tabs keeps the work */}
       <div hidden={tab !== 'analyze'}><Analyze onQuestion={(q) => setQuestion((cur) => cur || q)} /></div>
@@ -416,6 +418,7 @@ export default function PhilosophyLab({ classTopic, renderClass, requestedTab })
       {lazyTab('workbench', <LogicWorkbench />)}
       {lazyTab('fallacies', <FallacyLab />)}
       {lazyTab('experiments', <ThoughtExperimentsLab />)}
+      {lazyTab('moral', <MoralPerspectivesLab />)}
       {lazyTab('dialogue', <PhilosopherDialogue topicId={classTopic?.id} />)}
     </WorkspaceShell>
   );

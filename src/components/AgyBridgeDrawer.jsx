@@ -5,6 +5,7 @@ import PenguinShadow from './PenguinShadow';
 import { api, uploadFiles, useAgyEvents, loadProfile } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { disambiguateFile } from '../lib/files';
+import { getState } from '../lib/commissar';
 
 export const EXPLANATION_LEVELS = [
   { level: 0, title: 'ELI5' },
@@ -144,6 +145,7 @@ export default function AgyBridgeDrawer({ open, onClose, activeTopicId, courseId
           userId: userId || loadProfile()?.id || undefined,
           level: activeLevel,
           history: historyPayload,
+          ...(getState().enabled ? { style: 'commissar' } : {}),
         },
       });
     } catch (e) {

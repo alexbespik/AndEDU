@@ -539,7 +539,7 @@ class Sync(DbCase):
         self.assertFalse(imp.SYNC_LOCK.locked())
 
     def test_sync_hours_are_clamped(self):
-        for raw, want in (("", 0), ("0", 0), ("-3", 0), ("abc", 0), ("nan", 0), ("inf", 0), ("1", 1), ("6.9", 6), ("168", 168), ("5000", 168)):
+        for raw, want in (("", 24), ("  ", 24), ("0", 0), ("-3", 0), ("abc", 0), ("nan", 0), ("inf", 0), ("1", 1), ("6.9", 6), ("168", 168), ("5000", 168)):
             with mock.patch.dict(os.environ, {"SCIEDU_CAMPUS_SYNC_HOURS": raw}):
                 self.assertEqual(campus_events._sync_hours(), want, raw)
 

@@ -96,10 +96,16 @@ Logged 2026-11-03.
   Languages allowance. The steps themselves are cached per lesson in `content/explain_cache/` (no student data) and
   count against the `explain` hourly rate limit only when a new walkthrough is written.
 
+### Crash reports
+- When a view crashes, the browser sends the error message, stack, component stack and page path to
+  `POST /api/client-errors`, which appends them to `content/logs/client_errors.log` in the data folder (cut back past
+  256 KB). The browser also keeps the last 10 in localStorage (`andedu.recentErrors`). Error messages can quote lesson
+  or student text. Nothing leaves the machine and nothing is shown to other users.
+
 ### 6a. Campus events (the Campus tab)
 - **Outbound hosts:** a sync downloads public iCalendar feeds from `events.wm.edu` and `tribelink.wm.edu` only (a fixed
-  list; https, no redirects to another host). Nothing about a student is sent to them. Off by default: a sync runs
-  when someone presses Sync (an admin, with accounts on) or on `SCIEDU_CAMPUS_SYNC_HOURS`.
+  list; https, no redirects to another host). Nothing about a student is sent to them. A sync runs once a day by
+  default (`SCIEDU_CAMPUS_SYNC_HOURS`, 24; 0 = off) and when someone presses Sync (an admin, with accounts on).
 - **Sent to the model:** only the interest text a student types under Concierge, once per change, to pick keywords.
   The page says so. Event text, saved events and class times never go to a model.
 - **Stored per student:** the interest text and keywords (`campus_intent`), alerts, saved events and class meeting

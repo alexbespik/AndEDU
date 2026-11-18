@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { reportActivity, reportXp } from '../lib/engage';
 import { speak, noVoiceHelp } from '../lib/speech';
 import { answerIndex } from './QuizEngine';
+import { quizSession } from '../lib/quizSession';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -103,6 +104,8 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
   const [streak, setStreak] = useState(0);
   const [right, setRight] = useState(0);
   const started = useRef(0);
+  const unfinished = useRef(false);  // a round with answers given and no result: reported once if it goes away
+  useEffect(() => () => { if (unfinished.current) quizSession('leave'); }, []);
   const q = qs[i];
 
   useEffect(() => {
@@ -123,6 +126,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
     const pts = ok ? Math.round(1000 * (1 - Math.min(t, SECONDS) / SECONDS / 2)) + Math.min(streak, 5) * 100 : 0;
     setPick(choice); setGain(pts); setScore((s) => s + pts); setStreak((s) => (ok ? s + 1 : 0)); setRight((r) => r + (ok ? 1 : 0));
     setPhase('reveal');
+    unfinished.current = true;
     // games never change the class quiz score: XP here, and the round's result goes to the practice & games score
     if (ok) reportXp('practice_correct', `${topicId}:speed:${q.id ?? i}`);
   };
@@ -130,6 +134,8 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
     if (i + 1 < qs.length) begin(i + 1);
     else {
       setPhase('done');
+      unfinished.current = false;
+      quizSession('finish', Math.round((right / qs.length) * 100));
       if (score > store.get(bestKey, 0)) store.set(bestKey, score);
       reportActivity(topicId, 'speed', right, qs.length, score);
     }
@@ -144,7 +150,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
         <p className="hint">{qs.length} questions · {SECONDS} seconds each · faster answers score more · streaks add bonus points.</p>
         <p className="hint">Counts toward your practice &amp; games score, not your quiz score.</p>
         {store.get(bestKey, 0) > 0 && <p>Your best: <b className="num">{store.get(bestKey, 0)}</b></p>}
-        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); begin(0); }}>Start</button></div>
+        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); unfinished.current = false; quizSession('start'); begin(0); }}>Start</button></div>
       </div>
     );
   }
@@ -159,7 +165,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
           <div><span className="today-num num">{right}/{qs.length}</span><span className="hint">correct</span></div>
           <div><span className="today-num num">{best}</span><span className="hint">best</span></div>
         </div>
-        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); begin(0); }}>Play again</button></div>
+        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); unfinished.current = false; quizSession('start'); begin(0); }}>Play again</button></div>
       </div>
     );
   }

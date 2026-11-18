@@ -1068,6 +1068,7 @@ class FlagGuard(unittest.TestCase):
         # S rows: server accounts only
         "execute_code", "is_admin", "submit_quiz_answer", "activity_result",
         "require_upload_consent", "resume_course_generation",
+        "voice_packs_enabled",  # Commissar voice packs: local files, off with server accounts
         # C rows, changed in later phases (sign-in, per-key budget and key state, status)
         "spend_model_call", "_key_rejected", "register", "login", "me", "delete_account", "get_status",
         "list_profiles", "sign_in",

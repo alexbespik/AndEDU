@@ -16,7 +16,7 @@ import uuid
 import zipfile
 import contextlib
 import httpx
-from typing import List, Dict, Any, Optional, Tuple, Set
+from typing import List, Dict, Any, Literal, Optional, Tuple, Set
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -115,7 +115,8 @@ RATE_LIMITS = {"course": 10, "class": 40, "agy": 60, "simulation": 20, "upload":
                "philin": 20, "philin_factcheck": 30,  # PHILIN: transcribe/positions per request, fact-checks per claim
                "campus": 30, "campus_sync": 6,
                "practice_grade": 600, "dialogue": 120,
-               "kit_tool": 3600, "logic_grade": 1200}  # deterministic kit desks and the logic engine: no model  # server-graded kit items; philosophy figure dialogue (one model call each)  # campus events: interest keywords (one model call), manual feed sync
+               "kit_tool": 3600, "logic_grade": 1200,
+               "client_error": 120, "voice_clip": 3600}  # deterministic kit desks and the logic engine: no model  # server-graded kit items; philosophy figure dialogue (one model call each)  # campus events: interest keywords (one model call), manual feed sync
 RATE_SCALE = float(os.environ.get("SCIEDU_RATE_SCALE", "1"))
 _rate_hits: Dict[Tuple[str, str], List[float]] = {}
 _rate_lock = threading.Lock()
@@ -3112,6 +3113,16 @@ class AgyPromptModel(BaseModel):
     level: Optional[int] = None
     history: Optional[List[Dict[str, Any]]] = None
     userId: Optional[str] = None
+    style: Optional[Literal["commissar"]] = None  # commissar mode (the 'yarrik' easter egg): a fixed tone, see ASSISTANT_STYLES
+
+# Optional answer styles the browser can ask for by name. The text is fixed here, never sent by the client, and it only
+# changes the tone: facts, answers, safety rules and tool use stay exactly as the rest of the prompt says.
+ASSISTANT_STYLES = {
+    "commissar": ("\n\nTone (style only): the student switched on commissar mode. Answer as a stern, dry, strict study coach "
+                  "with short, direct sentences: hold them to their daily goal, call out skipped reviews, give brief praise for "
+                  "real effort and streaks. Never insult, threaten or demean, never mention any fictional universe, and never let "
+                  "the tone change facts, answers, hints, safety rules or which tools you use."),
+}
 
 # User ids (shown in the account menu), not names: anyone could sign up under an admin's name.
 ADMINS = {n.strip() for n in os.environ.get("SCIEDU_ADMINS", "").split(",") if n.strip()}
@@ -4210,6 +4221,8 @@ PRACTICE_NORMALIZERS = {
 import decision_tree_engine  # noqa: E402
 import logic_engine  # noqa: E402
 import philosophy_dialogue  # noqa: E402
+import psychology  # noqa: E402
+import voice_packs  # noqa: E402
 import practice_art_history  # noqa: E402
 import practice_classics  # noqa: E402
 import practice_general  # noqa: E402
@@ -5881,7 +5894,7 @@ Rules:
 - Test only what the materials cover. Take facts, names, dates and numbers from them; leave out anything you cannot ground in them. When the materials are empty, use only well-established knowledge of the subject named in the goal.
 - Put formulas and variables in LaTeX inside $...$ when the subject has them.
 - "explanation" says why the right option is right and why the most tempting wrong option is wrong.
-- "workspace" is the closest of: math (mathematics), code (programming), lab (physics, chemistry, biology, engineering and other sciences), history (history and historical studies), language (languages and linguistics), philosophy (logic, ethics, argument), literature (poetry, prose, drama), music (theory, harmony, ear training), art_history (painting, sculpture, architecture), classics (ancient Greece and Rome, archaeology), rhetoric (persuasion, oratory), polity (political science, elections, institutions).
+- "workspace" is the closest of: math (mathematics), code (programming), lab (physics, chemistry, biology, engineering and other sciences), history (history and historical studies), language (languages and linguistics), philosophy (logic, ethics, argument), literature (poetry, prose, drama), music (theory, harmony, ear training), art_history (painting, sculpture, architecture), classics (ancient Greece and Rome, archaeology), rhetoric (persuasion, oratory), polity (political science, elections, institutions), psychology (minds, behaviour, morale, motivation, social influence).
 
 The student's goal:
 {goal}
@@ -5892,7 +5905,7 @@ Study materials:
 Return only this JSON:
 {{"title": "short course title",
   "subject": "short subject name",
-  "workspace": "math | code | lab | history | language | philosophy | literature | music | art_history | classics | rhetoric | polity",
+  "workspace": "math | code | lab | history | language | philosophy | literature | music | art_history | classics | rhetoric | polity | psychology",
   "concepts": [{{"id": "kebab-case-id", "name": "Concept name", "summary": "one sentence"}}],
   "questions": [{{"id": "q1", "concept": "<concept id>", "difficulty": "Recall | Apply | Analyze",
                  "question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": 0,
@@ -6165,10 +6178,11 @@ def effective_mastery(course: Dict[str, Any], classes: List[Dict[str, Any]]) -> 
     return scores
 
 WORKSPACES = ("math", "code", "lab", "history", "language", "philosophy",
-              "literature", "music", "art_history", "classics", "rhetoric", "polity")
+              "literature", "music", "art_history", "classics", "rhetoric", "polity", "psychology")
 _CODE_RE = re.compile(r"python|programm|coding|\bcode\b|algorithm|data structure|javascript|typescript|\bjava\b|c\+\+|\brust\b|software|computer science|sql\b|"
                       r"assembly|risc-v|pipeline|cache|hardware|neural net|deep learning|gradient descent|attention", re.I)
-_PHIL_RE = re.compile(r"philosoph|epistemolog|ethics|ethical|moral|metaphysic|existential|utilitarian|\bstoic(?:ism|s)?\b|syllogism|fallac|argumentation|plato\b|aristotle|socrates|kant\b|nietzsche|descartes|hume\b|wittgenstein", re.I)
+_PHIL_RE = re.compile(r"philosoph|epistemolog|ethics|ethical|moral(?!e)|metaphysic|existential|utilitarian|\bstoic(?:ism|s)?\b|syllogism|fallac|argumentation|plato\b|aristotle|socrates|kant\b|nietzsche|descartes|hume\b|wittgenstein", re.I)
+_PSY_RE = re.compile(r"psycholog|\bmorale\b|conformity|milgram|cognitive bias|social influence|group cohesion|bystander effect", re.I)
 _LIT_RE = re.compile(r"literat|poet|poem|sonnet|scansion|meter|rhyme|stanza|novel|fiction|drama|shakespeare|narrative|prose", re.I)
 _MUSIC_RE = re.compile(r"music|chord|satb|harmony|voice leading|cadence|tempo|melody|rhythm|scale|interval|figured bass|symphon|sonata|bach|beethoven|mozart", re.I)
 _ART_RE = re.compile(r"art history|painting|sculpture|baroque|renaissance|architect|doric|ionic|corinthian|iconograph|visual arts|fresco|impressionis", re.I)
@@ -6186,10 +6200,10 @@ _HIST_RE = re.compile(r"histor|civilization|\bwar\b|revolution|ancient|medieval|
 
 def guess_workspace(*texts: str) -> str:
     """Fallback when the planner gave none: code beats math (a 'Python for statistics' course is code),
-    then philosophy, literature, music, art history, classics, rhetoric, polity, lab, math, languages, history;
+    then psychology, philosophy, literature, music, art history, classics, rhetoric, polity, lab, math, languages, history;
     everything else (physics, chemistry, biology...) is Lab."""
     blob = " ".join(t or "" for t in texts)
-    for ws, rx in (("code", _CODE_RE), ("philosophy", _PHIL_RE), ("literature", _LIT_RE),
+    for ws, rx in (("code", _CODE_RE), ("psychology", _PSY_RE), ("philosophy", _PHIL_RE), ("literature", _LIT_RE),
                    ("music", _MUSIC_RE), ("art_history", _ART_RE), ("classics", _CLASSICS_RE),
                    ("rhetoric", _RHET_RE), ("polity", _POLITY_RE), ("lab", _LAB_RE), ("math", _MATH_RE),
                    ("language", _LANG_RE), ("history", _HIST_RE)):
@@ -6638,7 +6652,7 @@ async def resume_course_generation():
         for course_id in db.courses_with_pending_classes():
             queue_course_generation(course_id)
     PURGE_TASK = asyncio.create_task(purge_cleared_loop())
-    if campus_events.SYNC_HOURS > 0:  # off by default: the feeds are fetched only when someone presses Sync
+    if campus_events.SYNC_HOURS > 0:  # once a day by default; SCIEDU_CAMPUS_SYNC_HOURS=0 leaves it to the Sync button
         CAMPUS_TASK = asyncio.create_task(campus_events.sync_loop())
 
 def resume_for_user(user_id: str):
@@ -7049,6 +7063,7 @@ class LessonTutorRequest(BaseModel):
     persona: Optional[str] = ""             # persona mode: the historical figure the model plays
     era: Optional[str] = ""
     userId: Optional[str] = None
+    style: Optional[Literal["commissar"]] = None  # chat mode only; see ASSISTANT_STYLES
 
 @app.post("/api/tutor/lesson")
 async def lesson_tutor(req: LessonTutorRequest):
@@ -7107,7 +7122,8 @@ async def lesson_tutor(req: LessonTutorRequest):
             notes_block = f"\n\nThe student's own notes:\n{fence('STUDENT_NOTES', safe_notes)}"
 
         base_inst = system or LESSON_TUTOR_PROMPT.format(lesson=fence("LESSON", lesson), focus=focus)
-        system_instruction = base_inst + notes_block
+        tone = ASSISTANT_STYLES.get(req.style or "", "") if (req.mode or "chat") == "chat" else ""
+        system_instruction = base_inst + tone + notes_block
 
         response = await acall_gemini(
             contents=contents, role="lesson",
@@ -7147,6 +7163,16 @@ class PhilosophyDialogueRequest(BaseModel):
     message: Optional[str] = ""
     history: Optional[List[TutorTurn]] = []
     topicId: Optional[str] = None
+
+@app.get("/api/philosophy/moral-dilemmas")
+def moral_dilemmas():
+    """Moral perspectives: dilemmas on a cautious-to-hard-line axis with four frameworks. Never scored (psychology.py)."""
+    return psychology.moral_dilemmas()
+
+@app.get("/api/psychology/units")
+def psychology_units():
+    """The Psychology tab's offline units: morale (with its simulation), perspective-taking, moral psychology."""
+    return psychology.psychology_units()
 
 @app.get("/api/philosophy/figures")
 def philosophy_figures():
@@ -7716,13 +7742,13 @@ agy_adjust_class_tool = types.FunctionDeclaration(
 
 agy_switch_page_tool = types.FunctionDeclaration(
     name="switch_page",
-    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math, History, Languages, Philosophy, Advisor, Campus).",
+    description="Changes the active view in &.edu: opens a lesson tab (simulation, theory, quiz, practice) or switches workspace (My courses, Lab, IDE, Math, History, Languages, Philosophy, Psychology, Advisor, Campus).",
     parameters=types.Schema(
         type="OBJECT",
         properties={
             "topic_id": types.Schema(type="STRING", description="Target topic ID to navigate to"),
             "tab": types.Schema(type="STRING", description="'simulation', 'theory', 'quiz', 'practice' or 'agent'"),
-            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), 'math' (Math), 'history' (History), 'language' (Languages), 'philosophy' (Philosophy), 'advisor' (Advisor), or 'campus' (Campus events)")
+            "mode": types.Schema(type="STRING", description="'home' (My courses), 'physics' (Lab), 'code' (IDE), 'math' (Math), 'history' (History), 'language' (Languages), 'philosophy' (Philosophy), 'psychology' (Psychology), 'advisor' (Advisor), or 'campus' (Campus events)")
         }
     )
 )
@@ -7902,7 +7928,7 @@ async def _run_agy_process(agent: str, prompt: str, write: bool = False, timeout
 MAX_PROPOSED_CODE = 20_000
 
 AGY_SYSTEM_PROMPT = (
-    "You are the assistant inside &.edu, a study app for math, code, sciences, history, languages, philosophy and course advising. "
+    "You are the assistant inside &.edu, a study app for math, code, sciences, history, languages, philosophy, psychology and course advising. "
     "You can change the workspace with your tools; use them instead of only describing changes:\n"
     "- `create_simulation` builds an interactive simulation for a topic (kind math, chem, physics or auto).\n"
     "- `create_or_update_lesson` writes a lesson with a cheat sheet and quiz (a matching simulation is built in the background). "
@@ -8022,7 +8048,7 @@ async def post_user_prompt(data: AgyPromptModel):
         base_system = AGY_SYSTEM_PROMPT.format(topics=topic_hint,
                                               active=data.topicId if TOPIC_ID_RE.fullmatch(data.topicId or "") else "none",
                                               course=(lambda c: f"\n{fence('COURSE', c.strip())}" if c else "")(course_context(data.courseId, data.topicId)))
-        system_instruction = base_system + notes_prompt
+        system_instruction = base_system + ASSISTANT_STYLES.get(data.style or "", "") + notes_prompt
 
         try:
             resp = await acall_gemini(
@@ -8188,6 +8214,41 @@ def post_agy_inbox(item: Dict[str, Any]):
             f.write(line + "\n")
     return {"status": "queued", "item": json.loads(line)}
 
+class ClientErrorBody(BaseModel):  # the browser cuts these shorter; the caps only refuse an oversized body
+    view: str = Field("", max_length=1000)
+    message: str = Field("", max_length=10000)
+    stack: str = Field("", max_length=20000)
+    componentStack: str = Field("", max_length=20000)
+    path: str = Field("", max_length=2000)
+
+CLIENT_ERROR_LOG_BYTES = 256 * 1024
+
+@app.post("/api/client-errors")
+def report_client_error(body: ClientErrorBody):
+    """A view crashed in the browser (ErrorBoundary). Kept so the cause can be found: printed as one [client-error]
+    line and appended to logs/client_errors.log under the data folder (cut back to the newest half at 256 KB).
+    Text is cut short and stripped of control characters; it is never shown to other users."""
+    rate_limit("client_error")
+    # stacks keep their line breaks (JSON-escaped in the file); one-line fields lose them too, so the printed
+    # [client-error] line can't be split into forged log lines
+    clean = lambda v, n: re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", str(v or ""))[:n]
+    line = lambda v, n: re.sub(r"[\x00-\x1f\x7f\x85  ]", " ", str(v or ""))[:n]
+    entry = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "view": line(body.view, 80),
+             "message": line(body.message, 500), "path": line(body.path, 200),
+             "stack": clean(body.stack, 4000), "componentStack": clean(body.componentStack, 4000)}
+    print(f"[client-error] {entry['view']}: {entry['message']}", flush=True)
+    try:
+        log = CONTENT_DIR / "logs" / "client_errors.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if log.stat().st_size > CLIENT_ERROR_LOG_BYTES:
+            data = log.read_bytes()[-CLIENT_ERROR_LOG_BYTES // 2:]
+            log.write_bytes(data[data.find(b"\n") + 1:])
+    except OSError as e:
+        print(f"[client-error] could not write the log: {e}", flush=True)
+    return {"ok": True}
+
 @app.get("/api/status")
 def get_status():
     return {
@@ -8224,6 +8285,12 @@ app.include_router(campus_events.build_router(
     rate_limit=rate_limit, require_user=require_user, can_sync=lambda: is_admin() or local_mode(),
     gemini_json=lambda *a, **k: gemini_json(*a, **k), is_fatal=lambda e: isinstance(e, (BudgetExhausted, KeyRejected))))
 import language_tts  # noqa: E402  (spoken words, cached ElevenLabs audio, built-in German course seed)
+def voice_packs_enabled() -> bool:
+    """Commissar voice packs (content/voice_packs/) are for this computer only: off with server accounts."""
+    return not AUTH_REQUIRED
+
+app.include_router(voice_packs.build_router(root=lambda: CONTENT_DIR / "voice_packs", enabled=voice_packs_enabled,
+                                          rate_limit=rate_limit))
 app.include_router(language_tts.build_router(rate_limit=rate_limit, require_user=require_user, current_user=CURRENT_USER.get,
                                              auth_required=scoped, is_admin=is_admin,
                                              save_topic=lambda t: save_topic(t, auto_select=False),

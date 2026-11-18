@@ -118,10 +118,16 @@ HM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
+DEFAULT_SYNC_HOURS = 24
+
+
 def _sync_hours() -> int:
-    """SCIEDU_CAMPUS_SYNC_HOURS: 0 (off, the default) or 1-168 hours between automatic syncs."""
+    """SCIEDU_CAMPUS_SYNC_HOURS: 1-168 hours between automatic syncs, 24 (once a day) when unset or empty; 0 turns it off."""
+    raw = os.environ.get("SCIEDU_CAMPUS_SYNC_HOURS", "").strip()
+    if not raw:
+        return DEFAULT_SYNC_HOURS
     try:
-        hours = int(float(os.environ.get("SCIEDU_CAMPUS_SYNC_HOURS", "0") or 0))
+        hours = int(float(raw))
     except (ValueError, OverflowError):   # "inf" overflows int()
         return 0
     return 0 if hours <= 0 else min(168, hours)
@@ -1001,7 +1007,7 @@ async def run_sync(fetch: Optional[Callable[[str], str]] = None, now: Optional[d
 
 
 async def sync_loop(fetch: Optional[Callable[[str], str]] = None) -> None:
-    """Optional automatic sync (SCIEDU_CAMPUS_SYNC_HOURS > 0): first check a minute after start, then hourly; a sync runs
+    """Automatic sync (SCIEDU_CAMPUS_SYNC_HOURS, once a day by default; 0 = off): first check a minute after start, then hourly; a sync runs
     when the last attempt is older than the interval. No request is involved, so no per-user rate limit; no model."""
     if SYNC_HOURS <= 0:
         return

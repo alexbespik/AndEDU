@@ -4,6 +4,7 @@ import Md from './Md';
 import { api, uploadFiles, loadProfile } from '../lib/api';
 import { confirmGeminiUpload, handleUploadConsentError } from '../lib/consent';
 import { disambiguateFile } from '../lib/files';
+import { getState as getCommissar } from '../lib/commissar';
 
 // The brief costs a model call: keep it per lesson for this session instead of refetching on every visit.
 const briefCache = new Map();
@@ -20,7 +21,8 @@ const STARTERS = [
  */
 export default function LessonTutor({ topic, focus, onFocusUsed, userId = null }) {
   const uid = userId || loadProfile()?.id || undefined;
-  const [brief, setBrief] = useState(() => briefCache.get(topic.id) ?? null);
+  // undefined: not asked for yet (opening the tab costs nothing); null: loading; '': failed; text: the brief
+  const [brief, setBrief] = useState(() => briefCache.get(topic.id));
   const [turns, setTurns] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -39,18 +41,21 @@ export default function LessonTutor({ topic, focus, onFocusUsed, userId = null }
     };
   }, []);
 
-  useEffect(() => {
-    if (briefCache.has(topic.id)) return undefined;
-    let live = true;
-    api('/api/tutor/lesson', { method: 'POST', body: { topicId: topic.id, mode: 'brief', userId: uid } })
+  // The brief is one model call, made only when the student asks for it, then kept for this lesson
+  const briefTopic = useRef(topic.id);
+  briefTopic.current = topic.id;
+  useEffect(() => { setBrief(briefCache.get(topic.id)); }, [topic.id]);
+  const loadBrief = () => {
+    const id = topic.id;
+    setBrief(null);
+    api('/api/tutor/lesson', { method: 'POST', body: { topicId: id, mode: 'brief', userId: uid } })
       .then((d) => {
         const text = (d.reply || '').replace(/\n(?!\n)/g, '\n\n');  // one line per part
-        briefCache.set(topic.id, text);
-        if (live) setBrief(text);
+        briefCache.set(id, text);
+        if (briefTopic.current === id) setBrief(text);
       })
-      .catch(() => live && setBrief(''));
-    return () => { live = false; };
-  }, [topic.id, uid]);
+      .catch(() => { if (briefTopic.current === id) setBrief(''); });
+  };
 
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [turns, busy]);
 
@@ -115,7 +120,8 @@ export default function LessonTutor({ topic, focus, onFocusUsed, userId = null }
     setError(null);
     try {
       const { reply } = await api('/api/tutor/lesson', {
-        method: 'POST', body: { topicId: topic.id, userId: uid, message, history, focus: withFocus ?? focus ?? undefined },
+        method: 'POST',
+        body: { topicId: topic.id, userId: uid, message, history, focus: withFocus ?? focus ?? undefined, ...(getCommissar().enabled ? { style: 'commissar' } : {}) },
       });
       setTurns((t) => [...t, { role: 'tutor', content: reply }]);
     } catch (e) {
@@ -137,9 +143,20 @@ export default function LessonTutor({ topic, focus, onFocusUsed, userId = null }
     <section className="stack" aria-labelledby="tutor-h">
       <div className="panel stack-sm">
         <h2 id="tutor-h" style={{ fontSize: '1.1rem' }}>Before you start</h2>
+        {brief === undefined && (
+          <div className="btn-row">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={loadBrief}>Get a brief</button>
+            <span className="hint">Goal, key idea and a self-check for this lesson, written by the AI tutor.</span>
+          </div>
+        )}
         {brief === null && <p className="hint"><Loader2 size={14} className="spin" aria-hidden="true" /> Preparing a brief…</p>}
         {brief && <Md className="prose">{brief}</Md>}
-        {brief === '' && <p className="hint">The brief isn't available right now; you can still ask the tutor below.</p>}
+        {brief === '' && (
+          <div className="btn-row">
+            <span className="hint">The brief isn't available right now; you can still ask the tutor below.</span>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={loadBrief}>Try again</button>
+          </div>
+        )}
       </div>
 
       <div className="panel tutor" onPaste={handlePaste}>

@@ -813,6 +813,8 @@ function SpecSimPlayer({ spec }) {
           const cx = wX(b.x);
           const cy = wY(b.y);
           const rad = wR(b.r);
+          // an unstable run (the warning below) can leave NaN/Infinity: the canvas would throw and stop the loop
+          if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(rad) || rad <= 0) continue;
           const col = resolveColor(b.color, palette);
 
           // Glow / fill

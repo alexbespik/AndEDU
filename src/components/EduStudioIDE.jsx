@@ -27,6 +27,7 @@ import { runPython } from '../lib/pyodide';
 import { explainError } from '../lib/explainError';
 import PenguinShadow from './PenguinShadow';
 import { stemKitOf } from './kits';
+import { quizSession } from '../lib/quizSession';
 
 // ---------------------------------------------------------------------------
 // DEFAULT CURRICULA: CODE MODE & MATH MODE
@@ -2020,6 +2021,7 @@ const EduIDE = ({
       if (!alreadySolved) {
         setCompletedProblems(prev => ({ ...prev, [activeProblemIndex]: true }));
         reportXp('ide_solved', `${curriculum.course_title || ''}:${currentProblem?.id}:${currentProblem?.title}`);
+        quizSession('finish', 100);  // the first time a problem's tests pass; failed runs stay quiet (you iterate)
         setTotalXp(prev => prev + 25);
       }
       setTerminalOutput(prev => [
@@ -2066,6 +2068,7 @@ const EduIDE = ({
         selected: optIdx,
         isCorrect: Boolean(isCorrect)
       };
+      window.dispatchEvent(new CustomEvent('andedu:quiz', { detail: { correct: Boolean(isCorrect) } }));
       api('/api/quiz/submit', { method: 'POST', body: record })
         .then(r => emitRewards(r?.rewards))
         .catch(() => {});

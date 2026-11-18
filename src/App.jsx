@@ -17,7 +17,17 @@ import CampusGlance from './components/campus/CampusGlance';
 import { campusPath, useCampusFetch } from './components/campus/format';
 import { LoadingPrefs, quotesEnabled } from './lib/quotes';
 import { SUBJECT_MODES } from './lib/workspaces';
+import CommissarConsole from './components/CommissarConsole';
+import CommissarChip from './components/CommissarChip';
+import { useCommissarEvents } from './lib/useCommissarEvents';
+
 import { KIT_TOOLS, STEM_KITS, STEM_KIT_LABEL } from './components/kits';
+
+// Workspaces an assistant event may open: each renders without extra state ('course' and 'class' need a course or a
+// class, so they are opened by id, never by a bare mode). Anything else is ignored instead of leaving a blank page.
+const MODE_ALIASES = { lab: 'physics', ide: 'code', it: 'code', courses: 'home' };
+const OPENABLE_MODES = new Set(['home', 'physics', 'code', 'math', 'advisor', 'campus', 'review', ...SUBJECT_MODES]);
+const openableMode = (m) => { const k = MODE_ALIASES[m] || m; return OPENABLE_MODES.has(k) ? k : null; };
 
 // The lesson viewer, the IDE and the workspaces load on demand
 const TopicViewer = lazy(() => import('./components/TopicViewer'));
@@ -110,6 +120,7 @@ export default function App() {
   const [ideRequest, setIdeRequest] = useState(null); // a practice set asked for in My courses
   const [homePreset, setHomePreset] = useState(null);
   const [progress, setProgress] = useState(null); // streak, daily goal, quests (engage.py)
+  useCommissarEvents({ mode, progress });
   const [workspaceTab, setWorkspaceTab] = useState(null);  // {tab, at} for History/Languages, sent by MCP tools
   const [mathPush, setMathPush] = useState(null);  // functions or a widget sent by the assistant / MCP tools
   const [pendingPrompt, setPendingPrompt] = useState(null);
@@ -284,12 +295,13 @@ export default function App() {
               onConfirm: () => openTopic(p.topicId, targetTab),
             });
           }
-        } else if (p.mode && mode !== p.mode) {
+        } else if (openableMode(p.mode) && mode !== openableMode(p.mode)) {
+          const target = openableMode(p.mode);
           setPendingNav({
-            id: `mode-${p.mode}-${evt.seq || Date.now()}`,
-            message: `AGY recommends switching to ${p.mode} mode.`,
+            id: `mode-${target}-${evt.seq || Date.now()}`,
+            message: `AGY recommends switching to ${target} mode.`,
             actionLabel: 'Switch mode',
-            onConfirm: () => setMode(p.mode),
+            onConfirm: () => setMode(target),
           });
         }
         break;
@@ -335,16 +347,18 @@ export default function App() {
         break;
       }
       case 'SWITCH_STUDIO_MODE': {
-        const needsModeChange = p.mode && mode !== p.mode;
+        if (p.mode && !openableMode(p.mode)) break;  // an unknown workspace would leave the page blank
+        const target = p.mode ? openableMode(p.mode) : null;
+        const needsModeChange = target && mode !== target;
         const needsTabChange = p.tab && workspaceTab?.tab !== p.tab;
         if (needsModeChange || needsTabChange) {
           setPendingNav({
-            id: `studio-${p.mode || ''}-${evt.seq || Date.now()}`,
-            message: `AGY recommends switching to ${p.mode || 'workspace'}${p.tab ? ` (${p.tab})` : ''}.`,
+            id: `studio-${target || ''}-${evt.seq || Date.now()}`,
+            message: `AGY recommends switching to ${target || 'workspace'}${p.tab ? ` (${p.tab})` : ''}.`,
             actionLabel: 'Switch now',
             onConfirm: () => {
-              if (p.mode) setMode(p.mode);
-              if (p.tab) setWorkspaceTab({ ...p, tab: p.tab, mode: p.sessionMode || p.mode, unitId: p.unitId, at: evt.seq });
+              if (target) setMode(target);
+              if (p.tab) setWorkspaceTab({ ...p, tab: p.tab, mode: p.sessionMode || target, unitId: p.unitId, at: evt.seq });
             },
           });
         }
@@ -536,6 +550,8 @@ export default function App() {
         onOpenTopics={() => setSidebarOpen(true)}
         badges={{ campus: campusUnread }}
         streakChip={(
+          <>
+          <CommissarChip />
           <StreakChip
             progress={progress}
             onOpen={() => {
@@ -548,6 +564,7 @@ export default function App() {
               });
             }}
           />
+          </>
         )}
       />
 
@@ -560,7 +577,7 @@ export default function App() {
         <LoadingPrefs.Provider value={quotesEnabled(progress) ? QUOTES_ON : QUOTES_OFF}>
         <main className="main" id="main">
           {/* one broken view must not blank the app; the key clears the error when the workspace changes */}
-          <ErrorBoundary key={`${mode}:${courseId || ''}`}>
+          <ErrorBoundary key={`${mode}:${courseId || ''}`} name={mode}>
           {mode === 'home' && (
             <CoursesHome user={user} onOpenCourse={openCourse} initialPreset={homePreset}
               progress={progress} onProgress={setProgress} onOpenTopic={(id) => openTopic(id)} onReview={() => setMode('review')}
@@ -676,9 +693,11 @@ export default function App() {
         </main>
         </LoadingPrefs.Provider>
 
+        <ErrorBoundary name="assistant">
         <AgyBridgeDrawer open={panelOpen} onClose={() => setPanelOpen(false)} activeTopicId={viewedTopic?.id} agyCli={agyCli}
           courseId={mode === 'course' ? courseId : viewedTopic?.source?.courseId}
           userId={user.id} pendingPrompt={pendingPrompt} onClearPendingPrompt={() => setPendingPrompt(null)} />
+        </ErrorBoundary>
       </div>
 
       {!panelOpen && (
@@ -715,7 +734,8 @@ export default function App() {
           </div>
         </aside>
       )}
-      <RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} />
+      <CommissarConsole />
+      <ErrorBoundary quiet name="rewards"><RewardLayer focusMode={progress?.focusMode} onReward={loadProgress} /></ErrorBoundary>
       {desktopKey && (
         <DesktopKeySetup key={desktopKey.reason} reason={desktopKey.reason} account={account}
           onClose={() => { keyCardDismissed.current = true; setDesktopKey(null); }}

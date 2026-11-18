@@ -1,0 +1,97 @@
+{
+  "on": [
+    "Commissar mode is on. Slouching is now a matter of record.",
+    "I am watching your study hours. Try to give me something worth watching.",
+    "Discipline reporting for duty. Open your materials.",
+    "Good. A plan, a desk, and no excuses. We begin.",
+    "Standards are now enforced. You will not enjoy them. You will pass because of them.",
+    "The roll is called. You are present. Act like it."
+  ],
+  "off": [
+    "Standing down. The standard stays with you.",
+    "Commissar mode off. Do not mistake quiet for permission.",
+    "Dismissed. Study without me, and prove I was right to trust you.",
+    "Off duty. The books are still open, I notice.",
+    "Stand down granted. Do not let it become a habit."
+  ],
+  "tab": [
+    "A new post. Make it count.",
+    "Change of ground. Same discipline.",
+    "Moving on. See that the last task was finished first.",
+    "Eyes forward. Work does not do itself.",
+    "Wandering is not studying. Pick a purpose and keep it.",
+    "New position. Hold it."
+  ],
+  "quizPass": [
+    "Correct. Do not look so surprised.",
+    "Acceptable. Continue.",
+    "That is the standard. Hold it.",
+    "Well answered. The next one will be harder.",
+    "Sound work. Do not gloat. Advance.",
+    "Right. Marked and noted."
+  ],
+  "quizFail": [
+    "Wrong. Good. A mistake found now costs nothing at the exam.",
+    "A miss. Study it, understand it, and it will not repeat.",
+    "Incorrect. Failure is only data. Read the explanation.",
+    "You erred. Stand up, dust off, try again.",
+    "Not this time. Find out why, and the next one is yours.",
+    "Error logged. It will come back for review. Be ready."
+  ],
+  "reward": [
+    "Points earned. Effort pays; remember that.",
+    "Credit where it is due. Carry on.",
+    "Progress recorded. Do not stop for applause.",
+    "That is what steady work looks like.",
+    "Earned, not given. Continue.",
+    "Noted with approval. Briefly."
+  ],
+  "streak": [
+    "Another day held. The line does not break on my watch.",
+    "Your streak grows. Consistency is the whole of the art.",
+    "One more day on the record. Keep the chain unbroken.",
+    "Day after day. That is how mastery is built.",
+    "The streak stands. Tomorrow, the same again.",
+    "Well held. Do not let tomorrow find you absent."
+  ],
+  "streakRisk": [
+    "The evening is here and your goal is not done. Move.",
+    "Your streak is at risk. A short session will save it. Begin now.",
+    "The hour is late. Ten minutes is better than none. Go.",
+    "Do not let the day close on an empty record. Open a class.",
+    "A streak is lost in one lazy evening. Do not be that evening.",
+    "Still time. Not much. Use it."
+  ],
+  "reviewDue": [
+    "Questions you missed are due for review. Face them.",
+    "The review queue is waiting. Old mistakes are the cheapest to fix.",
+    "Review is due. A mistake revisited is a mistake mastered.",
+    "Your missed questions have returned. Answer them properly this time.",
+    "Review first, new material after. That is the order.",
+    "Unfinished business in the review queue. Clear it."
+  ],
+  "quizStart": [
+    "Quiz on the table. Eyes front, pencil ready.",
+    "Begin. Every answer is a step forward; take it.",
+    "The questions are waiting. So am I.",
+    "Attention. This is where the reading pays off."
+  ],
+  "quizWin": [
+    "Quiz done, and done well. That is the standard.",
+    "A strong result. Hold that line next class.",
+    "Well fought. The material is yours now.",
+    "Victory. Earned, not given."
+  ],
+  "quizLose": [
+    "The quiz is over. The lesson is not. Read the explanations, then retake it.",
+    "A poor result is a map of what to study. Use it.",
+    "Not today. Regroup, review, return.",
+    "You fell short. Good soldiers come back sharper."
+  ],
+  "desert": [
+    "Leaving mid-quiz? The questions will still be here. So will I.",
+    "You walked away from an unfinished quiz. Noted.",
+    "Deserting the field? Come back and finish it.",
+    "An unfinished quiz is an open front. Close it."
+  ]
+}

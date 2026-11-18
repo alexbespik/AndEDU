@@ -6,7 +6,7 @@ import random
 import re
 
 KINDS = ("practice", "flashcards", "timeline")
-WORKSPACES = ("home", "physics", "lab", "class", "code", "math", "history", "language", "philosophy", "advisor", "campus", "review")
+WORKSPACES = ("home", "physics", "lab", "class", "code", "math", "history", "language", "philosophy", "psychology", "advisor", "campus", "review")
 _SEP = re.compile(r"\s+[-–—]\s+|\s*:\s+")
 _YEAR = re.compile(r"(?<![\d.])(\d{1,4})(?:\s*(BCE|BC|CE|AD|B\.C\.E?\.?|A\.D\.))?(?![\d])", re.I)
 

@@ -1,7 +1,7 @@
 // Subject workspaces that open a course class inside their own lab (not Lab, Math or the IDE).
 // Keep the two arrays below as plain literals: tests parse them and compare with server.WORKSPACES.
 export const KIT_MODES = ['literature', 'music', 'art_history', 'classics', 'rhetoric', 'polity'];
-export const SUBJECT_MODES = ['history', 'language', 'philosophy', 'literature', 'music', 'art_history', 'classics', 'rhetoric', 'polity'];
+export const SUBJECT_MODES = ['history', 'language', 'philosophy', 'psychology', 'literature', 'music', 'art_history', 'classics', 'rhetoric', 'polity'];
 
 // Name and one-line description of each kit (navbar menu, KitWorkspace header)
 export const KIT_META = {

@@ -1,7 +1,11 @@
 """Imported first by the test modules: no test may reach the internet (Gemini, ElevenLabs, PATH...), so a missed
 mock fails loudly instead of spending credits. Loopback and Unix sockets stay open for the code sandbox and
 local servers."""
+import os
 import socket
+
+# no automatic campus calendar download while tests run (the app default is once a day)
+os.environ.setdefault("SCIEDU_CAMPUS_SYNC_HOURS", "0")
 
 _real_connect = socket.socket.connect
 

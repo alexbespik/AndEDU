@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale, CalendarDays, Feather, Music, Palette, Columns3, Megaphone, Vote } from 'lucide-react';
+import { GraduationCap, FlaskConical, Code2, Sigma, Menu, Landmark, Languages, Compass, BookOpen, ChevronDown, Scale, CalendarDays, Feather, Music, Palette, Columns3, Megaphone, Vote, Brain } from 'lucide-react';
 import AccountMenu from './AccountMenu';
 import { KIT_MODES, KIT_META } from '../lib/workspaces';
 
@@ -10,7 +10,8 @@ const SUBJECTS = {
   math: { label: 'Math', icon: Sigma, title: 'Graphing, LaTeX notes and practice' },
   history: { label: 'History', icon: Landmark, title: 'Timelines, flashcards and history classes' },
   language: { label: 'Languages', icon: Languages, title: 'Languages and linguistics: flashcards read aloud, pronunciation, IPA' },
-  philosophy: { label: 'Philosophy', icon: Scale, title: 'Logic workbench, fallacies, thought experiments, philosopher dialogues and PHILIN argument checks' },
+  philosophy: { label: 'Philosophy', icon: Scale, title: 'Logic workbench, fallacies, thought experiments, moral perspectives, philosopher dialogues and PHILIN argument checks' },
+  psychology: { label: 'Psychology', icon: Brain, title: 'Morale under pressure, perspective-taking and moral psychology' },
 };
 // the six liberal-arts kits (src/lib/workspaces.js) join the Liberal arts menu
 const KIT_ICONS = { literature: Feather, music: Music, art_history: Palette, classics: Columns3, rhetoric: Megaphone, polity: Vote };
@@ -23,7 +24,7 @@ const NAV = [
   { group: 'math', label: 'Math', icon: Sigma, members: ['math'] },
   { group: 'it', label: 'IT', icon: Code2, members: ['code'] },
   { group: 'lab', label: 'Lab', icon: FlaskConical, members: ['physics'] },
-  { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language', 'philosophy', ...KIT_MODES] },
+  { group: 'liberal', label: 'Liberal arts', icon: BookOpen, members: ['history', 'language', 'philosophy', 'psychology', ...KIT_MODES] },
   { mode: 'advisor', label: 'Advisor', icon: Compass, title: 'Course advisor: your record, the catalog, readiness checks' },
   { mode: 'campus', label: 'Campus', icon: CalendarDays, title: 'Campus events: what is on now, the directory, your week and interest alerts' },
 ];

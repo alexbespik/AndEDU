@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, XCircle, Lightbulb, ArrowRight, RotateCcw, Flame } from 'lucide-react';
 import Md, { MdInline } from './Md';
 import { api } from '../lib/api';
 import { emitRewards } from '../lib/engage';
+import { quizSession, WIN_PCT } from '../lib/quizSession';
 
 /** Older agy topics stored the answer as `correct`; the documented key is `correctAnswer`. */
 export function answerIndex(q) {
@@ -57,8 +58,16 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
   const [results, setResults] = useState({});
   const [done, setDone] = useState(false);
   const [combo, setCombo] = useState(0);
+  const hasQuestions = questions.length > 0;
+  // a quiz left with answers given but no result is reported once, when the quiz goes away
+  const unfinished = useRef(false);
+  useEffect(() => {
+    if (!hasQuestions) return undefined;
+    quizSession('start');
+    return () => { if (unfinished.current) quizSession('leave'); unfinished.current = false; };
+  }, [hasQuestions]);
 
-  if (questions.length === 0) {
+  if (!hasQuestions) {
     return (
       <div className="panel">
         <p>This topic has no quiz questions yet.</p>
@@ -75,8 +84,10 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
     const isCorrect = selected === correct;
     setAnswered(true);
     setResults((r) => ({ ...r, [idx]: isCorrect }));
+    unfinished.current = true;
     setCombo((c) => (isCorrect ? c + 1 : 0));
     const record = { userId, topicId, questionId: q.id ?? idx, selected, isCorrect };
+    window.dispatchEvent(new CustomEvent('andedu:quiz', { detail: { correct: isCorrect } }));
     if (onAnswer) onAnswer(record);
     else api('/api/quiz/submit', { method: 'POST', body: record }).then((r) => emitRewards(r?.rewards)).catch(() => {});
   };
@@ -89,11 +100,16 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
       setShowHint(false);
     } else {
       setDone(true);
+      unfinished.current = false;
+      const right = Object.values(results).filter(Boolean).length;
+      quizSession('finish', Math.round((right / questions.length) * 100));
     }
   };
 
   const restart = () => {
     setIdx(0); setSelected(null); setAnswered(false); setShowHint(false); setResults({}); setDone(false);
+    unfinished.current = false;
+    quizSession('start');
   };
 
   if (done) {
@@ -103,7 +119,7 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
       <section className="panel stack" aria-live="polite">
         <h2>{title} complete</h2>
         <p className="score num">{pct}%</p>
-        <p>{right} of {questions.length} correct. {pct >= 80 ? 'Solid. Move on to the next class.' : 'Review the explanations, then try it again.'}</p>
+        <p>{right} of {questions.length} correct. {pct >= WIN_PCT ? 'Solid. Move on to the next class.' : 'Review the explanations, then try it again.'}</p>
         <div className="btn-row">
           <button type="button" className="btn btn-secondary" onClick={restart}><RotateCcw size={16} aria-hidden="true" /> Retake</button>
         </div>
@@ -174,7 +190,7 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
             </button>
             {onAskTutor && selected !== correct && (
               <button type="button" className="btn btn-quiet"
-                onClick={() => onAskTutor({ question: q.question, options: q.options, selected, correctAnswer: correct })}>
+                onClick={() => { unfinished.current = false; /* asking the tutor is not walking out */ onAskTutor({ question: q.question, options: q.options, selected, correctAnswer: correct }); }}>
                 Talk it through with the tutor
               </button>
             )}

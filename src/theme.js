@@ -93,7 +93,7 @@ let cache = { key: null, colors: null };
 /** Resolved token colors for canvas drawing; cheap to call every frame. */
 export function canvasPalette() {
   const root = document.documentElement;
-  const key = `${root.dataset.theme || ''}|${window.matchMedia?.('(prefers-color-scheme: dark)').matches}`;
+  const key = `${root.dataset.theme || ''}|${root.dataset.skin || ''}|${window.matchMedia?.('(prefers-color-scheme: dark)').matches}`;
   if (cache.key !== key) {
     const cs = getComputedStyle(root);
     const colors = {};

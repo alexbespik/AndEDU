@@ -1,0 +1,35 @@
+/* Moral perspectives (Philosophy) and the Psychology tab */
+.mpx-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-3); }
+.mpx-pick { display: flex; flex-direction: column; gap: var(--space-1); text-align: left; cursor: pointer; font: inherit; color: var(--ink); }
+.mpx-pick:hover { border-color: var(--rule-strong); }
+.mpx-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mpx-slider { width: 100%; accent-color: var(--accent); }
+.mpx-ends { display: flex; justify-content: space-between; gap: var(--space-3); font-size: 0.85rem; color: var(--muted); }
+
+.mpx-axis { display: flex; flex-direction: column; gap: var(--space-1); }
+.mpx-track { position: relative; height: 84px; border-bottom: 2px solid var(--rule-strong); background: linear-gradient(90deg, var(--info-tint), var(--sunk) 50%, var(--bad-tint)); border-radius: var(--radius-sm); }
+.mpx-band { position: absolute; height: 15px; border-radius: 7px; font-size: 0.72rem; line-height: 14px; white-space: nowrap; overflow: visible; }
+.mpx-band span { position: relative; left: 4px; color: var(--ink); font-family: var(--font-mono); }
+.mpx-band-0, .mpx-card-0 { --band: var(--info); }
+.mpx-band-1, .mpx-card-1 { --band: var(--plum); }
+.mpx-band-2, .mpx-card-2 { --band: var(--gold); }
+.mpx-band-3, .mpx-card-3 { --band: var(--ok); }
+.mpx-band { background: color-mix(in srgb, var(--band) 45%, transparent); border: 1px solid var(--band); }
+.mpx-mark { position: absolute; top: 0; bottom: -8px; width: 2px; background: var(--ink); transform: translateX(-1px); }
+.mpx-mark span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: 600; }
+.mpx-axis + .hint { margin-top: var(--space-3); }
+
+.mpx-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }
+.mpx-card { border: 1px solid var(--rule); border-left: 4px solid var(--band); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--surface); }
+.mpx-card h4 { margin: 0 0 var(--space-2); }
+.mpx-card p { margin: 0 0 var(--space-2); }
+
+/* Psychology */
+.psy-points { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.psy-points li { border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--surface); }
+.psy-views { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
+.psy-view { font: inherit; color: var(--ink); text-align: left; cursor: pointer; border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--sunk); }
+.psy-view[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-tint); }
+.psy-quiz-opts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.psy-right { border-color: var(--ok) !important; background: var(--ok-tint) !important; }
+.psy-wrong { border-color: var(--bad) !important; background: var(--bad-tint) !important; }
