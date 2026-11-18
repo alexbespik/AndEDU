@@ -18,9 +18,9 @@ const ROUGH = {
   3: { rate: 0.8, drive: 30, low: 9, bark: 6 },
 };
 const THROTTLE_MS = 8000;
-// never throttled: the mode switching, and a quiz's start, result and walk-out (a result must not be eaten by the
-// last answer's line). The same event twice within DEDUPE_MS is one line (React StrictMode mounts effects twice).
-const ALWAYS = new Set(['on', 'off', 'quizStart', 'quizWin', 'quizLose', 'desert']);
+// never throttled: the mode switching, every quiz answer (each gets its line; a new one cuts the last), and a quiz's
+// start, result and walk-out. The same event twice within DEDUPE_MS is one line (React StrictMode mounts effects twice).
+const ALWAYS = new Set(['on', 'off', 'quizPass', 'quizFail', 'quizStart', 'quizWin', 'quizLose', 'desert']);
 const DEDUPE_MS = 1500;
 let lastEvent = { name: '', at: 0 };
 

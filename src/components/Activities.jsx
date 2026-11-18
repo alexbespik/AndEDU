@@ -104,7 +104,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
   const [streak, setStreak] = useState(0);
   const [right, setRight] = useState(0);
   const started = useRef(0);
-  const unfinished = useRef(false);  // a round with answers given and no result: reported once if it goes away
+  const unfinished = useRef(false);  // a started round with no result: reported once if it goes away
   useEffect(() => () => { if (unfinished.current) quizSession('leave'); }, []);
   const q = qs[i];
 
@@ -150,7 +150,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
         <p className="hint">{qs.length} questions · {SECONDS} seconds each · faster answers score more · streaks add bonus points.</p>
         <p className="hint">Counts toward your practice &amp; games score, not your quiz score.</p>
         {store.get(bestKey, 0) > 0 && <p>Your best: <b className="num">{store.get(bestKey, 0)}</b></p>}
-        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); unfinished.current = false; quizSession('start'); begin(0); }}>Start</button></div>
+        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); unfinished.current = true; quizSession('start'); begin(0); }}>Start</button></div>
       </div>
     );
   }
@@ -165,7 +165,7 @@ export function SpeedRound({ quiz = [], topicId, userId }) {
           <div><span className="today-num num">{right}/{qs.length}</span><span className="hint">correct</span></div>
           <div><span className="today-num num">{best}</span><span className="hint">best</span></div>
         </div>
-        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); unfinished.current = false; quizSession('start'); begin(0); }}>Play again</button></div>
+        <div className="btn-row"><button type="button" className="btn btn-gold" onClick={() => { setScore(0); setStreak(0); setRight(0); unfinished.current = true; quizSession('start'); begin(0); }}>Play again</button></div>
       </div>
     );
   }

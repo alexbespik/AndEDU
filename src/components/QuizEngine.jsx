@@ -59,12 +59,15 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
   const [done, setDone] = useState(false);
   const [combo, setCombo] = useState(0);
   const hasQuestions = questions.length > 0;
-  // a quiz left with answers given but no result is reported once, when the quiz goes away
+  // an opened quiz left without a result is reported once, when the quiz goes away; the short-lived first mount
+  // of React StrictMode (unmounted at once) is not a walk-out
   const unfinished = useRef(false);
   useEffect(() => {
     if (!hasQuestions) return undefined;
     quizSession('start');
-    return () => { if (unfinished.current) quizSession('leave'); unfinished.current = false; };
+    const opened = Date.now();
+    unfinished.current = true;
+    return () => { if (unfinished.current && Date.now() - opened > 1500) quizSession('leave'); unfinished.current = false; };
   }, [hasQuestions]);
 
   if (!hasQuestions) {
@@ -108,7 +111,7 @@ export default function QuizEngine({ quiz = [], topicId, userId, onAnswer, onAsk
 
   const restart = () => {
     setIdx(0); setSelected(null); setAnswered(false); setShowHint(false); setResults({}); setDone(false);
-    unfinished.current = false;
+    unfinished.current = true;
     quizSession('start');
   };
 
